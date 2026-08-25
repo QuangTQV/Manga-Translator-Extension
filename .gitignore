@@ -42,5 +42,5 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Claude Code local session/runtime state
-.claude/
+# Claude Code local session/runtime state (settings.json itself is tracked)
+.claude/scheduled_tasks.lock
