@@ -187,6 +187,11 @@ def _build_system_prompt_translation(
   - **Character Voice:** Preserve each character's established voice, register, and pronoun choices.
   - **Referents:** Disambiguate callbacks, ongoing beats, or unclear references using prior dialogue."""  # noqa
 
+    vietnamese_pronoun_rule = ""
+    if "vietnamese" in (output_language or "").lower():
+        vietnamese_pronoun_rule = """
+- **Vietnamese Pronouns (xưng hô):** Never default to the generic formal "tôi"/"bạn". Infer each speaker pair's natural pronoun set from their apparent age, gender, and relationship (art, honorifics, and dialogue tone are your cues): "tớ"/"cậu" or "mình"/"cậu" for close friends/classmates, "tao"/"mày" for very close friends, rivals, or rough/casual speech, "anh"/"em" or "chị"/"em" for age-gap, romantic, or sibling relationships, family terms ("con"/"mẹ"/"bố"/"ba"/"anh"/"chị") for family members, and formal "tôi"/"bạn" or "anh/chị"/"em" only for genuine strangers or formal settings. Keep the same pronoun pair consistent for a given speaker-listener pair across every line."""  # noqa
+
     core_rules = f"""
 ## CORE RULES
 - **Reading Context:** The {input_type} are presented in a {direction} reading order. Do not reorder them.
@@ -201,7 +206,7 @@ def _build_system_prompt_translation(
   - **Narration:** Translate neutrally without special styling.
   - **Audible SFX:** Translate physical sounds (Giongo) as standard onomatopoeia.
   - **Mimetic FX:** Translate atmospheric text (Gitaigo) or silent actions as descriptive verbs or adjectives. Do not add a period at the end.
-{edge_cases}{previous_context_rule}
+{edge_cases}{vietnamese_pronoun_rule}{previous_context_rule}
 """  # noqa
 
     shared_components = f"""
