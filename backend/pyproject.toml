@@ -38,7 +38,7 @@ dependencies = [
 # Discover only the 'backend' package directory (src-layout)
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["config", "endpoints*", "models*", "pipeline*", "core*", "utils*", "main"]
+include = ["config", "endpoints*", "pipeline*", "core*", "utils*", "main", "schemas"]
 
 [tool.uvicorn]
 host = "0.0.0.0"

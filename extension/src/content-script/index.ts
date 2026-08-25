@@ -259,6 +259,14 @@ let autoTranslateConcurrent = 0;
 let scannerPausedAutoTranslate = false;
 let translatedOverlayCounter = 0;
 let preTranslateEnabled = false;
+// Rolling history of recently-translated pages' OCR transcripts (oldest-to-
+// newest), sent as narrative context so the model keeps character names,
+// pronouns, and tone consistent across pages instead of translating each
+// page in isolation. Best-effort ordering only — with AUTO_MAX_CONCURRENT
+// pages in flight at once, completion order can differ slightly from
+// reading order.
+let autoTranslatePreviousTexts: string[][] = [];
+const PREVIOUS_CONTEXT_MAX_PAGES = 3;
 const AUTO_MAX_CONCURRENT = 3;
 const AUTO_VIEWPORT_MARGIN_PX = 250;
 const AUTO_PREFETCH_PAGES = 3;
@@ -286,6 +294,7 @@ async function startAutoTranslate(): Promise<void> {
 
   const settings = await loadSettings();
   preTranslateEnabled = settings.config.preTranslate ?? false;
+  autoTranslatePreviousTexts = [];
 
   // Load already-translated URLs from cache
   await loadTranslatedCache();
@@ -490,6 +499,7 @@ function collectAutoTranslateImageEntries(root: ParentNode): Array<{ img: HTMLIm
 function stopAutoTranslate(preserveScannerResume = false): void {
   autoTranslateActive = false;
   preTranslateEnabled = false;
+  autoTranslatePreviousTexts = [];
   if (!preserveScannerResume) scannerPausedAutoTranslate = false;
   autoTranslateQueue = [];
   autoTranslateQueuedUrls = new Set();
@@ -616,7 +626,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     return;
   }
 
-  const body = buildTranslateRequest(imgData, settings);
+  const body = buildTranslateRequest(imgData, settings, autoTranslatePreviousTexts);
 
   console.log('[MT] routing translated body through background:', url);
   const result = await bgTranslateImageWithBody(url, pageUrl, body);
@@ -642,6 +652,13 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   translatedContentCache.set(contentKey, translatedB64);
   await saveTranslatedCacheEntry(url, translatedB64);
   await saveTranslatedContentCacheEntry(contentKey, translatedB64);
+
+  if (result.ocr_texts?.length) {
+    autoTranslatePreviousTexts.push(result.ocr_texts);
+    if (autoTranslatePreviousTexts.length > PREVIOUS_CONTEXT_MAX_PAGES) {
+      autoTranslatePreviousTexts.shift();
+    }
+  }
 
   // Apply to the image element on page
   applyTranslatedImage(img, dataUrl, url);
@@ -1040,7 +1057,7 @@ function updateAutoTranslateCounter(): void {
 // Background helpers (bypass CORS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; error?: string }> {
+function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 5 minutes' }), 300_000);
     chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE_WITH_BODY', imageUrl, pageUrl, body }, (resp: unknown) => {
@@ -1050,7 +1067,7 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
         resolve({ error: `extension error: ${lastError.message}` });
         return;
       }
-      resolve((resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; error?: string }) ?? { error: 'no response' });
+      resolve((resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; error?: string }) ?? { error: 'no response' });
     });
   });
 }
@@ -1430,7 +1447,11 @@ async function autoCollect(onProgress: (status: string) => void): Promise<void> 
   reRenderGrid();
 }
 
-function buildTranslateRequest(image: string, settings: AppSettings): TranslateRequest {
+function buildTranslateRequest(
+  image: string,
+  settings: AppSettings,
+  previousContextTexts?: string[][],
+): TranslateRequest {
   return {
     image,
     input_language: settings.config.inputLanguage,
@@ -1450,6 +1471,7 @@ function buildTranslateRequest(image: string, settings: AppSettings): TranslateR
     send_full_page_context: settings.config.sendFullPageContext,
     image_detail: settings.config.imageDetail,
     outside_text_enabled: settings.config.outsideTextEnabled ?? false,
+    previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
   };
 }
 

@@ -243,6 +243,7 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
       translated_image: data.translated_image,
       bubbles: data.bubbles,
       processing_time_seconds: data.processing_time_seconds,
+      ocr_texts: data.ocr_texts,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -255,6 +256,7 @@ interface TranslateResult {
   translated_image?: string;
   bubbles?: unknown[];
   processing_time_seconds?: number;
+  ocr_texts?: string[];
   error?: string;
 }
 

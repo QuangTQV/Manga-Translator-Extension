@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, HTTPException
 
-from models.schemas import (
+from schemas import (
     TranslateBatchItem,
     TranslateBatchItemResponse,
     TranslateBatchRequest,
@@ -28,7 +28,7 @@ _executor = ThreadPoolExecutor(max_workers=4)
 
 def _build_bubble_info(bubbles: list[dict]) -> list:
     """Convert bubble dicts to BubbleInfo schema items."""
-    from models.schemas import BubbleInfo
+    from schemas import BubbleInfo
 
     results = []
     for b in bubbles:
@@ -81,7 +81,9 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
 
     start = time.time()
     try:
-        result_image, bubbles, elapsed = await asyncio.to_thread(translate_image_base64, req.image, config)
+        result_image, bubbles, elapsed, ocr_texts = await asyncio.to_thread(
+            translate_image_base64, req.image, config, req.previous_context_texts
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
@@ -94,6 +96,7 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
         source_language=req.input_language,
         target_language=req.output_language,
         provider=req.provider,
+        ocr_texts=ocr_texts,
     )
 
 
@@ -134,13 +137,16 @@ def _translate_single_item(
             fonts_base_dir=fonts_dir,
         )
 
-        result_image, bubbles, _ = translate_image_base64(item.image, config)
+        result_image, bubbles, _, ocr_texts = translate_image_base64(
+            item.image, config, req.previous_context_texts
+        )
         translated_b64 = image_to_base64_raw(result_image)
         return TranslateBatchItemResponse(
             id=item.id,
             translated_image=translated_b64,
             bubbles=_build_bubble_info(bubbles),
             processing_time_seconds=t.time() - item_start,
+            ocr_texts=ocr_texts,
         )
     except Exception as e:
         return TranslateBatchItemResponse(

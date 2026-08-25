@@ -446,15 +446,21 @@ def image_to_base64_raw(image: Image.Image, fmt: str = "PNG") -> str:
 def translate_image_base64(
     image_b64: str,
     config: MangaTranslatorConfig,
-) -> tuple[Image.Image, list[dict[str, Any]], float]:
+    previous_context_texts: list[list[str]] | None = None,
+) -> tuple[Image.Image, list[dict[str, Any]], float, list[str]]:
     """Translate a base64-encoded image using MangaTranslator pipeline.
 
     Args:
         image_b64: Raw base64 image string (no data URL prefix)
         config: MangaTranslatorConfig with all settings
+        previous_context_texts: Previous pages' OCR transcripts (oldest-to-newest,
+            one inner list per page) the caller wants used as narrative context —
+            e.g. to keep character names/pronouns consistent across pages.
 
     Returns:
-        Tuple of (translated PIL Image, bubble info list, processing time in seconds)
+        Tuple of (translated PIL Image, bubble info list, processing time in
+        seconds, this page's OCR transcripts in reading order — pass this back
+        in as part of previous_context_texts on the next page's call)
     """
     start = time.time()
 
@@ -475,6 +481,12 @@ def translate_image_base64(
 
     bubbles_info: list[dict[str, Any]] = []
     translated_image: Image.Image = pil_image
+    ocr_texts_out: list[str] = []
+
+    if previous_context_texts:
+        config.translation.previous_context_text_count = min(
+            len(previous_context_texts), 5
+        )
 
     try:
         # Import pipeline late to avoid circular imports at module level
@@ -484,6 +496,8 @@ def translate_image_base64(
             image_path=tmp_in_path,
             config=config,
             output_path=tmp_output_path,
+            previous_context_texts=previous_context_texts,
+            ocr_texts_out=ocr_texts_out,
         )
 
         if isinstance(result, Image.Image):
@@ -491,10 +505,9 @@ def translate_image_base64(
         else:
             translated_image = pil_image  # fallback
 
-        # Note: bubble_info (OCR+translation text) is returned through
-        # the ocr_texts_out mechanism in translate_and_render, but since
-        # we don't need per-bubble text here we skip capturing it.
-        # If needed, pass ocr_texts_out=[] to capture.
+        # bubbles_info (per-bubble bbox/confidence/translation) isn't captured
+        # from translate_and_render — only the flat OCR transcript list is,
+        # via ocr_texts_out above.
 
     except Exception as e:
         log_message(f"Translation pipeline error: {e}", always_print=True)
@@ -511,4 +524,4 @@ def translate_image_base64(
             pass
 
     elapsed = time.time() - start
-    return translated_image, bubbles_info, elapsed
+    return translated_image, bubbles_info, elapsed, ocr_texts_out

@@ -73,9 +73,9 @@ Provider support is intentionally duplicated across several files rather than ab
 - `extension/src/shared/types.ts` — the `PROVIDERS` const array.
 - `extension/src/popup/index.html` — the `<option>` in the provider `<select>`.
 
-### Known gotcha: `backend/models/`
+### `backend/schemas.py`
 
-`.gitignore` blanket-excludes `backend/models/`, but that same directory serves two purposes: it's `settings.models_dir` (where ML weights get downloaded/cached, per `backend/config.py`) **and** it's the Python package `models` (`backend/models/schemas.py`) that defines the pydantic request/response schemas imported by `endpoints/translate.py` (`TranslateRequest`, `TranslateResponse`, `TranslateBatchRequest`, etc.). If `backend/models/schemas.py` is missing, `main.py` fails to import at all. Reconstruct it from the fields already referenced in `endpoints/translate.py` and `extension/src/shared/types.ts` (`TranslateRequest`/`TranslateBatchItemResponse` interfaces) if it's ever absent.
+Pydantic request/response models (`TranslateRequest`, `TranslateResponse`, `TranslateBatchRequest`, etc.) live in the flat top-level module `backend/schemas.py`, imported as `from schemas import ...` in `endpoints/translate.py`. This used to live at `backend/models/schemas.py`, but `.gitignore` blanket-excludes `backend/models/` (it's also `settings.models_dir`, where ML weights get downloaded/cached) — so that file could never actually be committed, silently dropped by every `git add`. Keep schema definitions here at the backend root, not under `backend/models/`, or they'll vanish from the repo again without any error at commit time.
 
 ### Extension structure
 

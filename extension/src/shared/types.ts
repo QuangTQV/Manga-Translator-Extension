@@ -41,6 +41,7 @@ export interface TranslateResponse {
   source_language: string;
   target_language: string;
   provider: string;
+  ocr_texts?: string[]; // this page's OCR transcripts, in reading order
 }
 
 export interface TranslateBatchItemResponse {
@@ -49,6 +50,7 @@ export interface TranslateBatchItemResponse {
   bubbles: BubbleInfo[];
   error?: string;
   processing_time_seconds?: number;
+  ocr_texts?: string[];
 }
 
 export interface TranslateBatchResponse {
@@ -90,6 +92,7 @@ export interface TranslateRequest {
   send_full_page_context: boolean;
   image_detail: string;
   outside_text_enabled: boolean;
+  previous_context_texts?: string[][]; // prior pages' OCR transcripts, oldest-to-newest, for cross-page consistency
 }
 
 export interface UrlPattern {
