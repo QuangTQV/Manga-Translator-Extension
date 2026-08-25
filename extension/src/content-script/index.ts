@@ -251,7 +251,7 @@ let autoTranslateIntersectionObserver: IntersectionObserver | null = null;
 let autoTranslateScanTimer: number | undefined;
 let autoTranslatePeriodicTimer: number | undefined;
 let autoTranslateRemoveUiTimer: number | undefined;
-let autoTranslateQueue: Array<{ img: HTMLImageElement; url: string }> = [];
+let autoTranslateQueue: Array<{ img: HTMLImageElement; url: string; priority: boolean }> = [];
 let autoTranslateQueuedUrls = new Set<string>();
 let autoTranslateInFlightUrls = new Set<string>();
 let autoTranslateProcessing = false;
@@ -449,9 +449,9 @@ function queueAutoTranslateImage(img: HTMLImageElement, url: string, priority = 
 
   autoTranslateQueuedUrls.add(url);
   if (priority) {
-    autoTranslateQueue.unshift({ img, url });
+    autoTranslateQueue.unshift({ img, url, priority });
   } else {
-    autoTranslateQueue.push({ img, url });
+    autoTranslateQueue.push({ img, url, priority });
   }
   autoTranslateIntersectionObserver?.unobserve(img);
   return true;
@@ -562,7 +562,17 @@ async function processAutoTranslateQueue(): Promise<void> {
   if (autoTranslateProcessing) return;
   autoTranslateProcessing = true;
 
-  while (autoTranslateQueue.length > 0 && autoTranslateConcurrent < AUTO_MAX_CONCURRENT) {
+  while (autoTranslateQueue.length > 0) {
+    // Reserve at least one concurrency slot for priority (near-viewport)
+    // work — pre-translate lookahead must never fill every slot, or the
+    // page the reader is actually looking at can get stuck queued behind
+    // several 45-85s speculative translations with no slot to run in.
+    const nextIsPriority = autoTranslateQueue[0].priority;
+    const effectiveLimit = nextIsPriority
+      ? AUTO_MAX_CONCURRENT
+      : Math.max(1, AUTO_MAX_CONCURRENT - 1);
+    if (autoTranslateConcurrent >= effectiveLimit) break;
+
     const item = autoTranslateQueue.shift();
     if (!item) break;
     autoTranslateQueuedUrls.delete(item.url);
