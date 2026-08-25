@@ -267,7 +267,7 @@ let preTranslateEnabled = false;
 // reading order.
 let autoTranslatePreviousTexts: string[][] = [];
 const PREVIOUS_CONTEXT_MAX_PAGES = 3;
-const AUTO_MAX_CONCURRENT = 3;
+const AUTO_MAX_CONCURRENT = 5;
 const AUTO_VIEWPORT_MARGIN_PX = 250;
 const AUTO_PREFETCH_PAGES = 3;
 // Pre-translate mode: how many pages can be queued/in-flight ahead of the
