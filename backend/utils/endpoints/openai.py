@@ -132,11 +132,16 @@ def call_openai_endpoint(
             verbosity = generation_config.get("verbosity", "low")
             payload["text"] = {"verbosity": verbosity}
 
-            # temp/top_p only allowed when effort is "none" (gpt-5.1+) or "minimal" (base gpt-5)
+            # temp/top_p only allowed when effort is "none" (gpt-5.1+) or "minimal"
+            # (base gpt-5) — mini/nano sub-variants reject them outright at any
+            # effort level ("Unsupported parameter: 'temperature' is not
+            # supported with this model."), so they never qualify.
+            is_mini_or_nano = "mini" in lower_model or "nano" in lower_model
             current_effort = payload.get("reasoning", {}).get("effort")
-            allow_sampling = (
-                gen is not None and gen != "5" and current_effort == "none"
-            ) or (gen == "5" and current_effort == "minimal")
+            allow_sampling = not is_mini_or_nano and (
+                (gen is not None and gen != "5" and current_effort == "none")
+                or (gen == "5" and current_effort == "minimal")
+            )
             if not allow_sampling:
                 payload.pop("temperature", None)
                 payload.pop("top_p", None)
