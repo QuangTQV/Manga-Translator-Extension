@@ -1152,14 +1152,18 @@ function bgFetchImage(url: string, pageUrl: string): Promise<string> {
   });
 }
 
+const THUMBNAIL_CONCURRENT = 8;
+
 async function loadThumbnailsInBackground(): Promise<void> {
   if (!currentShadow) return;
   const pageUrl = window.location.href;
-  for (const page of currentPages) {
-    if (!currentShadow) break;
-    if (imageCache.has(page.rawUrl)) continue;
+  const pages = currentPages;
+
+  async function loadOne(page: PageEntry): Promise<void> {
+    if (!currentShadow) return;
+    if (imageCache.has(page.rawUrl)) return;
     const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
-    if (!card) continue;
+    if (!card) return;
     const thumb = await bgFetchImage(page.rawUrl, pageUrl);
     imageCache.set(page.rawUrl, thumb);
     const img = card.querySelector<HTMLImageElement>('.mts-thumb');
@@ -1167,6 +1171,19 @@ async function loadThumbnailsInBackground(): Promise<void> {
       img.src = thumb;
     }
   }
+
+  // Lightweight image fetches (not LLM calls) — safe to run with higher
+  // concurrency than translation work.
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    while (nextIndex < pages.length) {
+      if (!currentShadow) return;
+      const page = pages[nextIndex++];
+      await loadOne(page);
+    }
+  }
+  const workerCount = Math.min(THUMBNAIL_CONCURRENT, pages.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1373,18 +1390,12 @@ function bindScanner(shadow: ShadowRoot): void {
 
     abortTranslate = false;
     let success = 0;
+    let completed = 0;
 
-    for (let i = 0; i < chosen.length; i++) {
-      if (abortTranslate) {
-        toast(tr('cancelledTranslated', { success, total: i }), false);
-        break;
-      }
-
-      const page = chosen[i];
+    async function runOne(page: PageEntry): Promise<void> {
       const card = shadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
       const statusEl = card?.querySelector<HTMLElement>('.mts-card-status') ?? null;
 
-      translateBtn.textContent = `${i + 1} / ${chosen.length}`;
       card?.classList.add('translating');
       if (statusEl) { statusEl.className = 'mts-card-status translating'; statusEl.textContent = '…'; }
 
@@ -1405,9 +1416,27 @@ function bindScanner(shadow: ShadowRoot): void {
       } else {
         card?.classList.add('failed');
       }
+      completed++;
+      translateBtn.textContent = `${completed} / ${chosen.length}`;
     }
 
-    if (!abortTranslate) {
+    // Bounded-concurrency worker pool — same cap as Auto-translate's queue,
+    // so a batch of selected pages translates in parallel instead of one
+    // at a time (previously: fully sequential, N pages × 45-85s each).
+    let nextIndex = 0;
+    async function worker(): Promise<void> {
+      while (nextIndex < chosen.length) {
+        if (abortTranslate) return;
+        const page = chosen[nextIndex++];
+        await runOne(page);
+      }
+    }
+    const workerCount = Math.min(AUTO_MAX_CONCURRENT, chosen.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    if (abortTranslate) {
+      toast(tr('cancelledTranslated', { success, total: completed }), false);
+    } else {
       toast(
         success === chosen.length
           ? tr('allImagesTranslated', { count: success })
