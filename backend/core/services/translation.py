@@ -17,6 +17,7 @@ from core.image.ocr_detection import (
 )
 from utils.endpoints import (
     call_anthropic_endpoint,
+    call_azure_openai_endpoint,
     call_deepseek_endpoint,
     call_gemini_endpoint,
     call_moonshot_endpoint,
@@ -337,6 +338,8 @@ def _build_generation_config(
             is_reasoning = _is_reasoning_model_google(model_name)
         elif provider == "OpenAI":
             is_reasoning = _is_reasoning_model_openai(model_name)
+        elif provider == "Azure OpenAI":
+            is_reasoning = _is_reasoning_model_openai(model_name)
         elif provider == "Anthropic":
             is_reasoning = _is_reasoning_model_anthropic(model_name)
         elif provider == "xAI":
@@ -437,6 +440,23 @@ def _build_generation_config(
                 effort = "high"
             none_capable = gen is not None and gen != "5"
             if not is_chat and (none_capable or effort != "none"):
+                generation_config["reasoning_effort"] = effort
+        if is_gpt5_series(model_name) and not is_gpt5_chat_variant(model_name):
+            generation_config["verbosity"] = config.verbosity or "low"
+        return generation_config
+
+    elif provider == "Azure OpenAI":
+        generation_config = {
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens_value,
+        }  # top_k not supported by Azure OpenAI Chat Completions
+        generation_config["image_detail"] = normalize_image_detail()
+        if config.reasoning_effort:
+            effort = config.reasoning_effort
+            if effort == "xhigh":
+                effort = "high"
+            if effort != "none":
                 generation_config["reasoning_effort"] = effort
         if is_gpt5_series(model_name) and not is_gpt5_chat_variant(model_name):
             generation_config["verbosity"] = config.verbosity or "low"
@@ -656,6 +676,42 @@ def _call_llm_endpoint(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+            )
+        elif provider == "Azure OpenAI":
+            endpoint = config.azure_openai_endpoint
+            api_key = config.azure_openai_api_key
+            if not endpoint:
+                raise TranslationError("Azure OpenAI endpoint is missing.")
+            if not api_key:
+                raise TranslationError("Azure OpenAI API key is missing.")
+            if config.azure_openai_is_v1:
+                # Azure AI Foundry "v1" surface is wire-compatible with
+                # OpenAI's own Responses API (Bearer auth, deployment name
+                # passed as "model"), so it reuses the OpenAI call path.
+                generation_config = _build_generation_config(
+                    "OpenAI", model_name, config, debug
+                )
+                return call_openai_endpoint(
+                    api_key=api_key,
+                    model_name=model_name,
+                    parts=api_parts,
+                    generation_config=generation_config,
+                    system_prompt=system_prompt,
+                    debug=debug,
+                    base_url=endpoint,
+                )
+            generation_config = _build_generation_config(
+                provider, model_name, config, debug
+            )
+            return call_azure_openai_endpoint(
+                endpoint=endpoint,
+                deployment=model_name,
+                api_key=api_key,
+                parts=api_parts,
+                generation_config=generation_config,
+                api_version=config.azure_openai_api_version or None,
+                system_prompt=system_prompt,
+                debug=debug,
             )
         elif provider == "Anthropic":
             api_key = config.anthropic_api_key

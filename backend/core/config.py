@@ -50,6 +50,12 @@ class TranslationConfig:
     openrouter_api_key: str = ""
     openai_compatible_url: str = "http://localhost:8080/v1"
     openai_compatible_api_key: Optional[str] = ""
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_api_version: str = ""
+    azure_openai_is_v1: bool = (
+        False  # True for the Azure AI Foundry "v1" surface (.../openai/v1/...)
+    )
     model_name: str = "gemini-3.1-flash-lite-preview"
     provider_models: dict[str, Optional[str]] = field(default_factory=dict)
     temperature: float = float(_DEFAULT_SAMPLING["temperature"])
@@ -221,6 +227,18 @@ class MangaTranslatorConfig:
         ):  # Check if it's None or empty string
             self.translation.openai_compatible_api_key = os.environ.get(
                 "OPENAI_COMPATIBLE_API_KEY", ""
+            )
+        if not self.translation.azure_openai_endpoint:
+            self.translation.azure_openai_endpoint = os.environ.get(
+                "AZURE_OPENAI_ENDPOINT", ""
+            )
+        if not self.translation.azure_openai_api_key:
+            self.translation.azure_openai_api_key = os.environ.get(
+                "AZURE_OPENAI_API_KEY", ""
+            )
+        if not self.translation.azure_openai_api_version:
+            self.translation.azure_openai_api_version = os.environ.get(
+                "AZURE_OPENAI_API_VERSION", ""
             )
         if not self.outside_text.huggingface_token:
             self.outside_text.huggingface_token = os.environ.get("HF_TOKEN", "")

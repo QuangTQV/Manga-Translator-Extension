@@ -204,6 +204,7 @@ async def list_providers():
         "providers": [
             "Google",
             "OpenAI",
+            "Azure OpenAI",
             "Anthropic",
             "xAI",
             "DeepSeek",

@@ -166,6 +166,7 @@ async function loadAndBind(): Promise<void> {
   baseUrlInput.value = settings.config.baseUrl ?? '';
   llmApiKeyInput.value = settings.config.apiKey ?? '';
   modelInput.value = settings.config.modelName ?? '';
+  updateProviderFieldHints();
   tempSlider.value = String(settings.config.temperature);
   topPSlider.value = String(settings.config.topP);
   topKSlider.value = String(settings.config.topK);
@@ -196,6 +197,7 @@ function bind(): void {
     settings = collectAllSettings();
     applyI18n();
     renderLanguageSelects();
+    updateProviderFieldHints();
     void autoSave();
   });
 
@@ -205,10 +207,13 @@ function bind(): void {
       showModelError(t(uiLanguage, 'errorEnterBaseUrl'));
       return;
     }
-    await fetchAndShowModels(baseUrl, llmApiKeyInput.value.trim());
+    await fetchAndShowModels(baseUrl, llmApiKeyInput.value.trim(), llmProviderSelect.value);
   });
 
-  llmProviderSelect.addEventListener('change', () => { void autoSave(); });
+  llmProviderSelect.addEventListener('change', () => {
+    updateProviderFieldHints();
+    void autoSave();
+  });
   for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
@@ -306,13 +311,21 @@ async function refreshAutoTranslateStatus(): Promise<void> {
   }
 }
 
-async function fetchAndShowModels(baseUrl: string, apiKey: string): Promise<void> {
+function updateProviderFieldHints(): void {
+  const isAzure = llmProviderSelect.value === 'Azure OpenAI';
+  baseUrlInput.placeholder = isAzure
+    ? 'https://your-resource.openai.azure.com (or full deployment/Foundry v1 URL)'
+    : 'https://api.openai.com/v1';
+  modelInput.placeholder = isAzure ? 'deployment name' : t(uiLanguage, 'placeholderModel');
+}
+
+async function fetchAndShowModels(baseUrl: string, apiKey: string, provider: string): Promise<void> {
   hideModelFeedback();
   modelLoading.style.display = 'flex';
   fetchModelsBtn.disabled = true;
 
   try {
-    const models = await listModels(baseUrl, apiKey);
+    const models = await listModels(baseUrl, apiKey, provider);
     if (!models || models.length === 0) {
       showModelHint(t(uiLanguage, 'modelNoModels'));
       return;
@@ -377,11 +390,11 @@ function hideModelFeedback(): void {
   modelHint.style.display = 'none';
 }
 
-async function listModels(baseUrl: string, apiKey: string): Promise<string[]> {
+async function listModels(baseUrl: string, apiKey: string, provider: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const tid = setTimeout(() => reject(new Error(t(uiLanguage, 'listModelsTimeout'))), 30000);
     chrome.runtime.sendMessage(
-      { type: 'LIST_MODELS', baseUrl, apiKey },
+      { type: 'LIST_MODELS', baseUrl, apiKey, provider },
       (resp: unknown) => {
         clearTimeout(tid);
         const lastError = chrome.runtime.lastError;

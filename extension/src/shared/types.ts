@@ -6,8 +6,8 @@ export interface TranslateConfig {
   inputLanguage: string;
   outputLanguage: string;
   provider: string;
-  baseUrl?: string;     // for OpenAI-Compatible provider
-  modelName?: string;
+  baseUrl?: string;     // for OpenAI-Compatible provider, or Azure endpoint for Azure OpenAI
+  modelName?: string;   // for Azure OpenAI, this is the deployment name
   apiKey?: string;
   temperature: number;
   topP: number;
@@ -71,8 +71,8 @@ export interface TranslateRequest {
   input_language: string;
   output_language: string;
   provider: string;
-  base_url?: string;   // for OpenAI-Compatible provider
-  model_name?: string;
+  base_url?: string;   // for OpenAI-Compatible provider, or Azure endpoint for Azure OpenAI
+  model_name?: string; // for Azure OpenAI, this is the deployment name
   api_key?: string;
   temperature: number;
   top_p: number;
@@ -154,6 +154,6 @@ export const SOURCE_LANGUAGES = ['Japanese', 'Korean', 'English', 'Vietnamese'] 
 export const TARGET_LANGUAGES = ['Japanese', 'Korean', 'English', 'Vietnamese'] as const;
 
 export const PROVIDERS = [
-  'Google', 'OpenAI', 'Anthropic', 'xAI', 'DeepSeek',
+  'Google', 'OpenAI', 'Azure OpenAI', 'Anthropic', 'xAI', 'DeepSeek',
   'Z.ai', 'Moonshot AI', 'OpenRouter', 'OpenAI-Compatible',
 ] as const;

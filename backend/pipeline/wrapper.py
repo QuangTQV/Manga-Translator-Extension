@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
 
 import torch
 from PIL import Image
@@ -53,6 +55,54 @@ def _normalize_openai_compatible_base_url(base_url: str | None) -> str | None:
         if normalized.lower().endswith(suffix):
             normalized = normalized[: -len(suffix)].rstrip("/")
     return normalized or None
+
+
+def _normalize_azure_openai_endpoint(
+    raw: str | None,
+) -> tuple[str | None, str | None, str | None, bool]:
+    """Normalize an Azure OpenAI endpoint/URL pasted by the user.
+
+    Two Azure request shapes are supported:
+
+    1. The classic per-deployment Chat Completions route, either as a bare
+       resource endpoint (https://my-resource.openai.azure.com) or a full
+       request URL copied from the Azure playground/portal
+       (https://my-resource.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=...).
+    2. The newer Azure AI Foundry "v1" surface, which is wire-compatible with
+       OpenAI's own Responses API (Bearer auth, no api-version, deployment
+       name passed as "model"), e.g.
+       https://<resource>.services.ai.azure.com/api/projects/<project>/openai/v1/responses
+
+    Returns (endpoint, deployment, api_version, is_v1). For the v1 surface,
+    `endpoint` is the API root up to and including "/openai/v1" (deployment
+    and api_version are always None — deployment must come from the model
+    field, and there is no api-version). For the classic surface, deployment
+    and api_version are None when not present in the URL.
+    """
+    if not raw:
+        return None, None, None, False
+    parsed = urlparse(raw.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return None, None, None, False
+
+    v1_match = re.search(r"^(.*/openai/v1)(?:/|$)", parsed.path, re.IGNORECASE)
+    if v1_match:
+        endpoint = f"{parsed.scheme}://{parsed.netloc}{v1_match.group(1)}"
+        return endpoint, None, None, True
+
+    endpoint = f"{parsed.scheme}://{parsed.netloc}"
+
+    deployment = None
+    match = re.search(r"/deployments/([^/]+)", parsed.path)
+    if match:
+        deployment = match.group(1)
+
+    api_version = None
+    qs = parse_qs(parsed.query)
+    if qs.get("api-version"):
+        api_version = qs["api-version"][0]
+
+    return endpoint, deployment, api_version, False
 
 
 def _resolve_font_dir(
@@ -168,13 +218,26 @@ def _build_config(
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
-    normalized_base_url = _normalize_openai_compatible_base_url(base_url)
+    azure_api_version: str | None = None
+    azure_is_v1 = False
     if provider == "OpenAI-Compatible":
+        normalized_base_url = _normalize_openai_compatible_base_url(base_url)
         if not normalized_base_url:
             raise ValueError("OpenAI-Compatible Base URL is required.")
         if not model_name:
             raise ValueError("OpenAI-Compatible model name is required.")
         base_url = normalized_base_url
+    elif provider == "Azure OpenAI":
+        azure_endpoint, azure_deployment, azure_api_version, azure_is_v1 = (
+            _normalize_azure_openai_endpoint(base_url)
+        )
+        if not azure_endpoint:
+            raise ValueError("Azure OpenAI endpoint is required.")
+        if not model_name:
+            model_name = azure_deployment
+        if not model_name:
+            raise ValueError("Azure OpenAI deployment name is required.")
+        base_url = azure_endpoint
 
     # Build API key map — the config expects all keys
     all_keys = {}
@@ -227,10 +290,19 @@ def _build_config(
 
     # Inject API keys into the config's internal env map
     # Override OpenAI-Compatible URL if provided (e.g. from extension settings)
-    if base_url:
-        translation.openai_compatible_url = base_url
-    if api_key:
-        translation.openai_compatible_api_key = api_key
+    if provider == "OpenAI-Compatible":
+        if base_url:
+            translation.openai_compatible_url = base_url
+        if api_key:
+            translation.openai_compatible_api_key = api_key
+    elif provider == "Azure OpenAI":
+        if base_url:
+            translation.azure_openai_endpoint = base_url
+        if azure_api_version:
+            translation.azure_openai_api_version = azure_api_version
+        translation.azure_openai_is_v1 = azure_is_v1
+        if api_key:
+            translation.azure_openai_api_key = api_key
 
     _inject_api_keys(translation, provider, api_key)
 
@@ -302,6 +374,7 @@ def _inject_api_keys(translation: TranslationConfig, provider: str, api_key: str
         "Moonshot AI": "moonshot_api_key",
         "OpenRouter": "openrouter_api_key",
         "OpenAI-Compatible": "openai_compatible_api_key",
+        "Azure OpenAI": "azure_openai_api_key",
     }
     attr = mapping.get(provider)
     if attr and hasattr(translation, attr):
@@ -319,6 +392,7 @@ def _get_default_model(provider: str) -> str:
         "Moonshot AI": "kimi-k2.6",
         "OpenRouter": "google/gemini-3.1-flash-lite-preview",
         "OpenAI-Compatible": "default",
+        "Azure OpenAI": "",
     }
     return defaults.get(provider, "gemini-3.1-flash-lite-preview")
 

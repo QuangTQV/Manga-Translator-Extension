@@ -41,3 +41,6 @@ release-assets/
 Thumbs.db
 .vscode/
 .idea/
+
+# Claude Code local session/runtime state
+.claude/

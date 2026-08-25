@@ -20,7 +20,7 @@ def get_max_tokens_cap(provider: str, model_name: Optional[str]) -> Optional[int
 
     model_lower = model_name.lower()
 
-    if provider == "OpenAI":
+    if provider in ("OpenAI", "Azure OpenAI"):
         if "gpt-4.1" in model_lower:
             return 32768
         if "gpt-4o" in model_lower:

@@ -20,13 +20,19 @@ def call_openai_endpoint(
     max_retries: int = 3,
     base_delay: float = 1.0,
     enable_web_search: bool = False,
+    base_url: str = "https://api.openai.com/v1",
 ) -> Optional[str]:
     """
-    Calls the OpenAI Responses API endpoint with the provided data and handles retries.
+    Calls an OpenAI-wire-compatible Responses API endpoint with the provided data and handles retries.
+
+    Defaults to the public OpenAI API, but `base_url` can point at any endpoint
+    that implements the same Responses API contract with Bearer auth — notably
+    Azure AI Foundry's "v1" surface (e.g. "https://<resource>.services.ai.azure.com/api/projects/<project>/openai/v1"),
+    where `model_name` is the Azure deployment name.
 
     Args:
-        api_key (str): OpenAI API key.
-        model_name (str): OpenAI model to use.
+        api_key (str): API key (OpenAI key, or Azure OpenAI key for the v1 surface).
+        model_name (str): OpenAI model to use (or Azure deployment name for the v1 surface).
         parts (List[Dict[str, Any]]): List of content parts (text, images).
                                       # Assumes the first part is the text prompt, subsequent are images.
         generation_config (Dict[str, Any]): Configuration for generation (temp, top_p, max_tokens).
@@ -35,6 +41,7 @@ def call_openai_endpoint(
         timeout (int): Request timeout in seconds.
         max_retries (int): Maximum number of retries for rate limiting errors.
         base_delay (float): Initial delay for retries in seconds.
+        base_url (str): API root, without a trailing "/responses". Defaults to OpenAI's public API.
 
     Returns:
         Optional[str]: The raw text content from the API response if successful,
@@ -54,7 +61,7 @@ def call_openai_endpoint(
             "Invalid 'parts' format for OpenAI: No text prompt found."
         )
 
-    url = "https://api.openai.com/v1/responses"
+    url = f"{base_url.rstrip('/')}/responses"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     input_content = []

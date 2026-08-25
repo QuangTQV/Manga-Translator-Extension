@@ -115,10 +115,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message.type === 'LIST_MODELS') {
-      const { baseUrl, apiKey } = message as { type: string; baseUrl: string; apiKey: string };
+      const { baseUrl, apiKey, provider } = message as { type: string; baseUrl: string; apiKey: string; provider?: string };
       console.log('[BG] LIST_MODELS:', baseUrl);
       try {
-        const models = await fetchModelList(baseUrl, apiKey);
+        const models = await fetchModelList(baseUrl, apiKey, provider);
         console.log('[BG] LIST_MODELS result:', models.length, 'models');
         sendResponse({ models });
       } catch (error) {
@@ -150,10 +150,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // Fetch model list from OpenAI-compatible endpoint (runs in background — no CORS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchModelList(baseUrl: string, apiKey: string): Promise<string[]> {
-  const endpoint = `${baseUrl.replace(/\/$/, '')}/models`;
+// Keep in sync with DEFAULT_AZURE_OPENAI_API_VERSION in backend/utils/endpoints/azure_openai.py
+const DEFAULT_AZURE_OPENAI_API_VERSION = '2025-04-01-preview';
+
+async function fetchModelList(baseUrl: string, apiKey: string, provider?: string): Promise<string[]> {
+  let endpoint: string;
   const headers: Record<string, string> = { 'Accept': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  if (provider === 'Azure OpenAI' && /\/openai\/v1\b/i.test(baseUrl)) {
+    // Azure AI Foundry "v1" surface — wire-compatible with OpenAI's own API
+    // (Bearer auth, GET {base}/models lists the project's deployments).
+    const v1Base = baseUrl.replace(/(\/openai\/v1)\/?.*$/i, '$1');
+    endpoint = `${v1Base}/models`;
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  } else if (provider === 'Azure OpenAI') {
+    let origin: string;
+    let apiVersion = DEFAULT_AZURE_OPENAI_API_VERSION;
+    try {
+      const parsed = new URL(baseUrl.trim());
+      origin = parsed.origin;
+      apiVersion = parsed.searchParams.get('api-version') || apiVersion;
+    } catch {
+      origin = baseUrl.replace(/\/$/, '');
+    }
+    endpoint = `${origin}/openai/deployments?api-version=${apiVersion}`;
+    if (apiKey) headers['api-key'] = apiKey;
+  } else {
+    endpoint = `${baseUrl.replace(/\/$/, '')}/models`;
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  }
 
   const res = await fetch(endpoint, { method: 'GET', headers });
   if (!res.ok) {

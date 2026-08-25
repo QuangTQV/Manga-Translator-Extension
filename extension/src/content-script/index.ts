@@ -258,7 +258,7 @@ let autoTranslateProcessing = false;
 let autoTranslateConcurrent = 0;
 let scannerPausedAutoTranslate = false;
 let translatedOverlayCounter = 0;
-const AUTO_MAX_CONCURRENT = 1;
+const AUTO_MAX_CONCURRENT = 3;
 const AUTO_VIEWPORT_MARGIN_PX = 250;
 const AUTO_PREFETCH_PAGES = 3;
 const AUTO_SCAN_LIMIT = 250;
@@ -363,7 +363,12 @@ function isNearViewport(el: Element): boolean {
 }
 
 function isUsableImageUrl(url: string | null | undefined): url is string {
-  return !!url && url !== window.location.href && !url.startsWith('blob:') && !url.startsWith('data:');
+  // blob: URLs are how sites like MangaDex serve reader pages (fetched via JS,
+  // no plain <img src="https://...">) — they're still usable since we capture
+  // the already-loaded <img> element straight to canvas (see captureImgElement),
+  // which doesn't care what scheme populated it. data: is excluded because it's
+  // either a placeholder/spacer or our own already-translated overlay output.
+  return !!url && url !== window.location.href && !url.startsWith('data:');
 }
 
 function firstSrcsetUrl(value: string): string | null {
@@ -500,7 +505,7 @@ function stopAutoTranslate(preserveScannerResume = false): void {
 
 function resolveMangaUrl(img: HTMLImageElement): string | null {
   const existingRaw = img.getAttribute('data-mt-raw');
-  if (existingRaw && !existingRaw.startsWith('data:') && !existingRaw.startsWith('blob:')) return existingRaw;
+  if (existingRaw && !existingRaw.startsWith('data:')) return existingRaw;
 
   // Skip icons, avatars, small images
   const w = img.naturalWidth || Number(img.getAttribute('width')) || 0;
