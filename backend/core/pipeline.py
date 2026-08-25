@@ -1040,9 +1040,8 @@ def translate_and_render(
                     verbose=verbose,
                 )
 
-                panels = None
-                debug_panels = None
                 if ENABLE_COMPONENT_ORDER_DEBUG:
+                    debug_panels = None
                     try:
                         log_message(
                             "Detecting panels for ordering debug...",
@@ -1071,8 +1070,15 @@ def translate_and_render(
                         )
                         debug_panels = None
 
-                    if config.detection.use_panel_sorting:
-                        panels = debug_panels
+                    panels = debug_panels if config.detection.use_panel_sorting else None
+                elif config.detection.use_panel_sorting and panels is not None:
+                    # Already detected on this same image/confidence earlier
+                    # (for outside-text processing) — reuse instead of
+                    # re-running the panel YOLO model a second time.
+                    log_message(
+                        f"Reusing {len(panels)} panels detected earlier for sorting",
+                        verbose=verbose,
+                    )
                 elif config.detection.use_panel_sorting:
                     try:
                         log_message(

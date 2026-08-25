@@ -252,6 +252,10 @@ def _build_config(
         bubble_detector_model="yolo_1",
         conjoined_detection=True,
         use_panel_sorting=True,
+        # OSB-text-assisted bubble box expansion is only useful when outside
+        # text is actually being translated — skip the extra YOLO pass
+        # (model load + inference on every request) otherwise.
+        use_osb_text_verification=outside_text_enabled,
     )
 
     cleaning = CleaningConfig(
