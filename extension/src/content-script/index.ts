@@ -353,6 +353,7 @@ function scheduleAutoTranslateScan(): void {
   autoTranslateScanTimer = window.setTimeout(() => {
     autoTranslateScanTimer = undefined;
     scanAutoTranslateImages(document);
+    promoteCurrentPageToFront();
     void processAutoTranslateQueue();
   }, 350);
 }
@@ -377,6 +378,50 @@ function isNearViewport(el: Element): boolean {
     && rect.top <= viewportH + AUTO_VIEWPORT_MARGIN_PX
     && rect.right >= -200
     && rect.left <= viewportW + 200;
+}
+
+// The image whose vertical center is closest to the viewport's vertical
+// center — a proxy for "the page the reader is actually looking at right
+// now", as distinct from "somewhere in the near-viewport margin" (which
+// isNearViewport uses and can include the page just above/below it too).
+function getCurrentCenterImg(): HTMLImageElement | null {
+  const viewportCenter = (window.innerHeight || document.documentElement.clientHeight) / 2;
+  let best: HTMLImageElement | null = null;
+  let bestDist = Infinity;
+  for (const img of document.querySelectorAll<HTMLImageElement>('img')) {
+    if (img.classList.contains('mt-page-overlay')) continue;
+    const rect = img.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    if (rect.bottom < 0 || rect.top > (window.innerHeight || document.documentElement.clientHeight)) continue;
+    const elCenter = rect.top + rect.height / 2;
+    const dist = Math.abs(elCenter - viewportCenter);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = img;
+    }
+  }
+  return best;
+}
+
+// Always keep the page closest to viewport center at the true front of the
+// queue — plain unshift-on-discovery order can put a page that just barely
+// entered the margin ahead of the one actually centered on screen (whichever
+// gets scanned last wins), so this re-asserts the invariant every tick.
+function promoteCurrentPageToFront(): void {
+  const current = getCurrentCenterImg();
+  if (!current) return;
+  const url = current.getAttribute('data-mt-raw') ?? resolveMangaUrl(current);
+  if (!url) return;
+  if (translatedCache.has(url) || autoTranslateInFlightUrls.has(url)) return;
+
+  const idx = autoTranslateQueue.findIndex((entry) => entry.url === url);
+  if (idx > 0) {
+    const [entry] = autoTranslateQueue.splice(idx, 1);
+    entry.priority = true;
+    autoTranslateQueue.unshift(entry);
+  } else if (idx === -1) {
+    handleAutoTranslateImage(current, true);
+  }
 }
 
 function isUsableImageUrl(url: string | null | undefined): url is string {
