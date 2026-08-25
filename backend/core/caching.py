@@ -17,9 +17,9 @@ class UnifiedCache:
         from core.text.font_manager import LRUCache
 
         self._lock = threading.Lock()
-        self._yolo_cache = LRUCache(max_size=1)
-        self._sam_cache = LRUCache(max_size=1)
-        self._translation_cache = LRUCache(max_size=1)
+        self._yolo_cache = LRUCache(max_size=300)
+        self._sam_cache = LRUCache(max_size=100)
+        self._translation_cache = LRUCache(max_size=300)
         self._manga_ocr_cache = LRUCache(max_size=20)
         self._upscale_cache = LRUCache(max_size=20)
         self._inpaint_cache = LRUCache(max_size=20)

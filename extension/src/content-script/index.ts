@@ -600,6 +600,22 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   }
 
   const settings = await loadSettings();
+
+  // Content-addressed cache: blob: URLs (e.g. MangaDex's reader) are
+  // regenerated on every page load, so a URL-keyed cache never hits across
+  // reloads/revisits even for pages already translated. Hash the actual
+  // captured image bytes instead — stable across reloads regardless of URL.
+  const contentKey = contentCacheKey(imgData, settings.config.outputLanguage);
+  const contentCached = translatedContentCache.get(contentKey);
+  if (contentCached) {
+    console.log('[MT] content-cache hit:', url);
+    translatedCache.set(url, contentCached);
+    applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
+    if (isNearViewport(img)) queueAutoTranslateLookahead(img);
+    updateAutoTranslateCounter();
+    return;
+  }
+
   const body = buildTranslateRequest(imgData, settings);
 
   console.log('[MT] routing translated body through background:', url);
@@ -620,9 +636,12 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   const translatedB64 = result.translated_image;
   const dataUrl = `data:image/png;base64,${translatedB64}`;
 
-  // Cache it
+  // Cache it (both the fast within-session URL lookup and the persisted
+  // content-addressed lookup that survives reloads/URL changes)
   translatedCache.set(url, translatedB64);
+  translatedContentCache.set(contentKey, translatedB64);
   await saveTranslatedCacheEntry(url, translatedB64);
+  await saveTranslatedContentCacheEntry(contentKey, translatedB64);
 
   // Apply to the image element on page
   applyTranslatedImage(img, dataUrl, url);
@@ -850,7 +869,8 @@ function addTranslatedBadge(img: HTMLImageElement): void {
 // Auto-translate: translated cache persistence
 // ─────────────────────────────────────────────────────────────────────────────
 
-let translatedCache = new Map<string, string>(); // rawUrl -> base64 (no prefix)
+let translatedCache = new Map<string, string>(); // rawUrl -> base64 (no prefix), fast within-session lookup
+let translatedContentCache = new Map<string, string>(); // contentKey -> base64, persisted, survives URL changes/reloads
 
 function cacheStorageKey(url: string): string {
   let hash = 0;
@@ -858,6 +878,18 @@ function cacheStorageKey(url: string): string {
     hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
   }
   return `${TRANSLATED_CACHE_PREFIX}${Math.abs(hash).toString(36)}:${url.slice(-80)}`;
+}
+
+// Hashes the actual translated image bytes (plus target language) rather
+// than its URL, so sites that mint a new blob: URL on every page load
+// (e.g. MangaDex's reader) still get cache hits when revisiting a page
+// already translated in an earlier session.
+function contentCacheKey(base64: string, outputLanguage: string): string {
+  let hash = 0;
+  for (let i = 0; i < base64.length; i++) {
+    hash = ((hash << 5) - hash + base64.charCodeAt(i)) | 0;
+  }
+  return `content_${base64.length}_${outputLanguage}_${Math.abs(hash).toString(36)}`;
 }
 
 async function loadTranslatedCache(): Promise<void> {
@@ -872,9 +904,11 @@ async function loadTranslatedCache(): Promise<void> {
 
     for (const [key, value] of Object.entries(result)) {
       if (!key.startsWith(TRANSLATED_CACHE_PREFIX)) continue;
-      const entry = value as { url?: string; b64?: string };
+      const entry = value as { url?: string; contentKey?: string; b64?: string };
       if (entry?.url && entry?.b64) {
         translatedCache.set(entry.url, entry.b64);
+      } else if (entry?.contentKey && entry?.b64) {
+        translatedContentCache.set(entry.contentKey, entry.b64);
       }
     }
   } catch { /* ignore */ }
@@ -886,8 +920,15 @@ async function saveTranslatedCacheEntry(url: string, b64: string): Promise<void>
   } catch { /* ignore */ }
 }
 
+async function saveTranslatedContentCacheEntry(contentKey: string, b64: string): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [`${TRANSLATED_CACHE_PREFIX}${contentKey}`]: { contentKey, b64 } });
+  } catch { /* ignore */ }
+}
+
 async function clearTranslatedCache(): Promise<void> {
   translatedCache = new Map();
+  translatedContentCache = new Map();
   try {
     const all = await chrome.storage.local.get(null);
     const keys = Object.keys(all).filter((key) => key === TRANSLATED_CACHE_KEY || key.startsWith(TRANSLATED_CACHE_PREFIX));
