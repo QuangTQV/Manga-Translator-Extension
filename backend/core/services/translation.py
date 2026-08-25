@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+import time
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
@@ -638,6 +639,31 @@ def _build_generation_config(
 
 
 def _call_llm_endpoint(
+    config: TranslationConfig,
+    parts: List[Dict[str, Any]],
+    prompt_text: str,
+    debug: bool = False,
+    system_prompt: Optional[str] = None,
+) -> Optional[str]:
+    """Dispatch an LLM API call and log how long it took (for debugging).
+
+    Wraps _call_llm_endpoint_impl purely to time it — every call site goes
+    through here, so this is the single place that needs to log LLM
+    latency separately from the rest of the pipeline (detection/cleaning/
+    upscaling/rendering), which "Processing completed in Xs" lumps together.
+    """
+    start = time.time()
+    try:
+        return _call_llm_endpoint_impl(config, parts, prompt_text, debug, system_prompt)
+    finally:
+        elapsed = time.time() - start
+        log_message(
+            f"LLM call ({config.provider} / {config.model_name}) took {elapsed:.2f}s",
+            always_print=True,
+        )
+
+
+def _call_llm_endpoint_impl(
     config: TranslationConfig,
     parts: List[Dict[str, Any]],
     prompt_text: str,
