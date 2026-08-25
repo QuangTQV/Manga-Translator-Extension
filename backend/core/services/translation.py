@@ -203,7 +203,20 @@ def _build_system_prompt_translation(
     vietnamese_pronoun_rule = ""
     if "vietnamese" in (output_language or "").lower():
         vietnamese_pronoun_rule = """
-- **Vietnamese Pronouns (xưng hô):** Never default to the generic formal "tôi"/"bạn". Infer each speaker pair's natural pronoun set from their apparent age, gender, and relationship (art, honorifics, and dialogue tone are your cues): "tớ"/"cậu" or "mình"/"cậu" for close friends/classmates, "tao"/"mày" for very close friends, rivals, or rough/casual speech, "anh"/"em" or "chị"/"em" for age-gap, romantic, or sibling relationships, family terms ("con"/"mẹ"/"bố"/"ba"/"anh"/"chị") for family members, and formal "tôi"/"bạn" or "anh/chị"/"em" only for genuine strangers or formal settings. Keep the same pronoun pair consistent for a given speaker-listener pair across every line."""  # noqa
+- **Vietnamese Pronouns (xưng hô):** For every line of dialogue, before choosing words, silently work out: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship — use art (apparent age/build), honorifics (-san/-chan/-kun/-senpai/etc.), and dialogue tone as evidence. Then pick ONE pronoun pair for that speaker-listener direction and reuse it for every line between them:
+  - Close friends, classmates, same apparent age, casual tone → "tớ"/"cậu" or "mình"/"cậu".
+  - Very close friends, rivals, or rough/blunt speech → "tao"/"mày".
+  - Noticeable age gap, romantic partners, or siblings → "anh"/"em" or "chị"/"em" (the older speaker says "anh"/"chị", the younger says "em").
+  - Family members → the real family term ("con", "mẹ", "bố"/"ba", "ông", "bà", "anh", "chị", "em"...) — never "tôi"/"bạn" for family.
+  - Genuine strangers, business/formal settings, or relationship truly unclear → "tôi"/"bạn" or "anh/chị"/"em".
+  Treat "tôi"/"bạn" as the last-resort exception, not the safe default — in casual manga dialogue it reads as stiff and impersonal, and is wrong far more often than it's right. If forced to guess between two options, prefer the warmer/more casual one over the formal one, since most manga dialogue is casual."""  # noqa
+
+    natural_style_rule = (
+        """
+- **Natural Vietnamese:** Write each line the way a Vietnamese person would actually say it out loud, not a word-for-word rendering of the source sentence structure. Reorder clauses, drop redundant subject pronouns/particles the source repeats out of grammatical necessity, and use casual contractions ("ko", "z", "j"... are NOT allowed, but natural spoken phrasing like "à", "đấy", "mà", "đâu" is encouraged where it fits the tone). If your draft reads stiff or robotic, rewrite it more casually before finalizing."""  # noqa
+        if "vietnamese" in (output_language or "").lower()
+        else ""
+    )
 
     core_rules = f"""
 ## CORE RULES
@@ -211,7 +224,7 @@ def _build_system_prompt_translation(
 {source_language_rule}
 - **Cohesion:** Treat the input lines as a continuous narrative. Ensure the translation flows logically and naturally as a cohesive whole.{cohesion_visual}
 - **Fidelity:** Focus on intent; translate functionally rather than literally.
-- **Conciseness:** Keep translations idiomatic and concise.
+- **Conciseness:** Keep translations idiomatic and concise.{natural_style_rule}
 - **Emphasis:** If the source text is visually emphasized (bold, slanted, etc.), mirror that emphasis using the STYLING GUIDE.
 - **Punctuation:** Replace ellipses (e.g., "…") with consecutive periods (e.g., "...").
 - **Quotes:** Do not wrap the translated text in quotation marks unless they are explicitly present in the source text.
