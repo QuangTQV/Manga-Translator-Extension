@@ -258,9 +258,14 @@ let autoTranslateProcessing = false;
 let autoTranslateConcurrent = 0;
 let scannerPausedAutoTranslate = false;
 let translatedOverlayCounter = 0;
+let preTranslateEnabled = false;
 const AUTO_MAX_CONCURRENT = 3;
 const AUTO_VIEWPORT_MARGIN_PX = 250;
 const AUTO_PREFETCH_PAGES = 3;
+// Pre-translate mode: how many pages can be queued/in-flight ahead of the
+// viewport at once. Caps API spend/backend load instead of eagerly
+// translating an entire long feed the moment its images hit the DOM.
+const PRE_TRANSLATE_MAX_LOOKAHEAD = 15;
 const AUTO_SCAN_LIMIT = 250;
 const LAZY_IMAGE_ATTRS = ['data-src', 'data-lazy-src', 'data-original', 'data-srcset', 'data-lazy', 'data-image'] as const;
 const AUTO_RETRY_MAP = new Map<string, number>(); // url -> retry count
@@ -278,6 +283,9 @@ async function startAutoTranslate(): Promise<void> {
     clearTimeout(autoTranslateRemoveUiTimer);
     autoTranslateRemoveUiTimer = undefined;
   }
+
+  const settings = await loadSettings();
+  preTranslateEnabled = settings.config.preTranslate ?? false;
 
   // Load already-translated URLs from cache
   await loadTranslatedCache();
@@ -396,7 +404,11 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
   if (!url) return;
   img.setAttribute('data-mt-raw', url);
 
-  if (!force && !isNearViewport(img)) {
+  const withinPreTranslateBudget = preTranslateEnabled
+    && !translatedCache.has(url)
+    && (autoTranslateQueue.length + autoTranslateInFlightUrls.size) < PRE_TRANSLATE_MAX_LOOKAHEAD;
+
+  if (!force && !withinPreTranslateBudget && !isNearViewport(img)) {
     autoTranslateIntersectionObserver?.observe(img);
     return;
   }
@@ -470,6 +482,7 @@ function collectAutoTranslateImageEntries(root: ParentNode): Array<{ img: HTMLIm
 
 function stopAutoTranslate(preserveScannerResume = false): void {
   autoTranslateActive = false;
+  preTranslateEnabled = false;
   if (!preserveScannerResume) scannerPausedAutoTranslate = false;
   autoTranslateQueue = [];
   autoTranslateQueuedUrls = new Set();
@@ -1587,6 +1600,7 @@ function getDefaultSettings(): AppSettings {
       sendFullPageContext: true,
       imageDetail: 'auto',
       outsideTextEnabled: false,
+      preTranslate: false,
     },
   };
 }

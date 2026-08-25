@@ -19,6 +19,7 @@ const backendInput = qs<HTMLInputElement>('f-backend');
 const sourceSelect = qs<HTMLSelectElement>('f-source');
 const targetSelect = qs<HTMLSelectElement>('f-target');
 const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
+const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
@@ -161,6 +162,7 @@ async function loadAndBind(): Promise<void> {
   urlDisplay.textContent = settings.backendUrl.replace(/^https?:\/\//, '');
   renderLanguageSelects();
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
+  preTranslateToggle.checked = settings.config.preTranslate ?? false;
 
   llmProviderSelect.value = settings.config.provider;
   baseUrlInput.value = settings.config.baseUrl ?? '';
@@ -188,7 +190,7 @@ function bind(): void {
   saveConfigBtn.addEventListener('click', async () => { await saveAndReport('statusSettingsSaved'); });
   saveLlmBtn.addEventListener('click', async () => { await saveAndReport('statusLlmSettingsSaved'); });
 
-  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle]) {
+  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
 
@@ -436,6 +438,7 @@ function collectAllSettings(): AppSettings {
       topK: parseInt(topKSlider.value, 10),
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
+      preTranslate: preTranslateToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
     },
   };
