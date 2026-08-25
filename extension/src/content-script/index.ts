@@ -674,7 +674,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   const contentCached = translatedContentCache.get(contentKey);
   if (contentCached) {
     console.log('[MT] content-cache hit:', url);
-    translatedCache.set(url, contentCached);
+    rememberTranslated(url, contentCached);
     applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
     if (isNearViewport(img)) queueAutoTranslateLookahead(img);
     updateAutoTranslateCounter();
@@ -707,8 +707,8 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 
   // Cache it (both the fast within-session URL lookup and the persisted
   // content-addressed lookup that survives reloads/URL changes)
-  translatedCache.set(url, translatedB64);
-  translatedContentCache.set(contentKey, translatedB64);
+  rememberTranslated(url, translatedB64);
+  rememberTranslatedContent(contentKey, translatedB64);
   await saveTranslatedCacheEntry(url, translatedB64);
   await saveTranslatedContentCacheEntry(contentKey, translatedB64);
 
@@ -948,6 +948,41 @@ function addTranslatedBadge(img: HTMLImageElement): void {
 let translatedCache = new Map<string, string>(); // rawUrl -> base64 (no prefix), fast within-session lookup
 let translatedContentCache = new Map<string, string>(); // contentKey -> base64, persisted, survives URL changes/reloads
 
+// Each entry is a full translated page image (often several MB of base64),
+// so both the in-memory maps and their chrome.storage.local backing must
+// stay bounded — otherwise a long browsing/auto-translate session (or
+// unlimitedStorage accumulating across many days) can balloon to gigabytes
+// and crash the tab/browser when loadTranslatedCache() reads it all back in.
+const MAX_CACHE_ENTRIES = 80;
+
+// Map preserves insertion order, so the oldest entry is always first —
+// evicts down to maxEntries and returns the evicted keys so callers can
+// also drop the matching chrome.storage.local record.
+function evictOldest(map: Map<string, string>, maxEntries: number): string[] {
+  const evicted: string[] = [];
+  while (map.size > maxEntries) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey === undefined) break;
+    map.delete(oldestKey);
+    evicted.push(oldestKey);
+  }
+  return evicted;
+}
+
+function rememberTranslated(url: string, b64: string): void {
+  translatedCache.set(url, b64);
+  for (const evictedUrl of evictOldest(translatedCache, MAX_CACHE_ENTRIES)) {
+    void chrome.storage.local.remove(cacheStorageKey(evictedUrl)).catch(() => {});
+  }
+}
+
+function rememberTranslatedContent(contentKey: string, b64: string): void {
+  translatedContentCache.set(contentKey, b64);
+  for (const evictedKey of evictOldest(translatedContentCache, MAX_CACHE_ENTRIES)) {
+    void chrome.storage.local.remove(`${TRANSLATED_CACHE_PREFIX}${evictedKey}`).catch(() => {});
+  }
+}
+
 function cacheStorageKey(url: string): string {
   let hash = 0;
   for (let i = 0; i < url.length; i++) {
@@ -968,14 +1003,33 @@ function contentCacheKey(base64: string, outputLanguage: string): string {
   return `content_${base64.length}_${outputLanguage}_${Math.abs(hash).toString(36)}`;
 }
 
+// Byte-count-only check (no values pulled into memory) before the eager
+// chrome.storage.local.get(null) load below — if the cache somehow grew
+// past this despite the write-time cap (e.g. legacy data from before the
+// cap existed), skip loading it into memory rather than risk the same
+// out-of-memory crash "Clear translated cache" used to hit.
+const MAX_CACHE_STORAGE_BYTES = 50 * 1024 * 1024;
+
 async function loadTranslatedCache(): Promise<void> {
   try {
+    const bytesInUse = await chrome.storage.local.getBytesInUse(null);
+    if (bytesInUse > MAX_CACHE_STORAGE_BYTES) {
+      console.warn(
+        `[MT] Translated cache storage is ${(bytesInUse / 1024 / 1024).toFixed(0)}MB, ` +
+        'skipping eager load to avoid memory pressure. Use "Clear translated cache" in the popup.',
+      );
+      return;
+    }
+
     const result = await chrome.storage.local.get(null);
-    const cached = result[TRANSLATED_CACHE_KEY] as Record<string, string> | undefined;
-    if (cached) {
-      for (const [url, b64] of Object.entries(cached)) {
+    const keysToPrune: string[] = [];
+
+    const legacy = result[TRANSLATED_CACHE_KEY] as Record<string, string> | undefined;
+    if (legacy) {
+      for (const [url, b64] of Object.entries(legacy)) {
         translatedCache.set(url, b64);
       }
+      keysToPrune.push(TRANSLATED_CACHE_KEY);
     }
 
     for (const [key, value] of Object.entries(result)) {
@@ -986,6 +1040,20 @@ async function loadTranslatedCache(): Promise<void> {
       } else if (entry?.contentKey && entry?.b64) {
         translatedContentCache.set(entry.contentKey, entry.b64);
       }
+    }
+
+    // A long testing/browsing history (or storage accumulated before this
+    // cap existed) can leave far more than MAX_CACHE_ENTRIES persisted —
+    // trim both the in-memory maps and their storage records back down in
+    // one batched cleanup instead of holding it all in memory forever.
+    for (const evictedUrl of evictOldest(translatedCache, MAX_CACHE_ENTRIES)) {
+      keysToPrune.push(cacheStorageKey(evictedUrl));
+    }
+    for (const evictedKey of evictOldest(translatedContentCache, MAX_CACHE_ENTRIES)) {
+      keysToPrune.push(`${TRANSLATED_CACHE_PREFIX}${evictedKey}`);
+    }
+    if (keysToPrune.length > 0) {
+      await chrome.storage.local.remove(keysToPrune);
     }
   } catch { /* ignore */ }
 }
@@ -1006,9 +1074,18 @@ async function clearTranslatedCache(): Promise<void> {
   translatedCache = new Map();
   translatedContentCache = new Map();
   try {
-    const all = await chrome.storage.local.get(null);
-    const keys = Object.keys(all).filter((key) => key === TRANSLATED_CACHE_KEY || key.startsWith(TRANSLATED_CACHE_PREFIX));
-    if (keys.length > 0) await chrome.storage.local.remove(keys);
+    // Deliberately avoid chrome.storage.local.get(null) here — after heavy
+    // use the cache can hold hundreds of MB to gigabytes of base64 image
+    // data, and pulling it all into memory just to find which keys to
+    // delete is itself enough to exhaust memory and crash the tab/browser
+    // (this is what "Clear cache" used to do). Settings live under a
+    // single small key, so read only that, hard-clear everything else via
+    // the storage area's native bulk clear, then restore it.
+    const settingsResult = await chrome.storage.local.get(STORAGE_KEY);
+    await chrome.storage.local.clear();
+    if (settingsResult[STORAGE_KEY] !== undefined) {
+      await chrome.storage.local.set({ [STORAGE_KEY]: settingsResult[STORAGE_KEY] });
+    }
   } catch { /* ignore */ }
 }
 
@@ -1453,8 +1530,9 @@ function bindScanner(shadow: ShadowRoot): void {
         if (!wasTranslated) {
           const imgEl = card?.querySelector<HTMLImageElement>('.mts-thumb');
           if (imgEl) {
-            translatedCache.set(page.rawUrl, imgEl.src.replace(/^data:image\/\w+;base64,/, ''));
-            await saveTranslatedCacheEntry(page.rawUrl, imgEl.src.replace(/^data:image\/\w+;base64,/, ''));
+            const b64 = imgEl.src.replace(/^data:image\/\w+;base64,/, '');
+            rememberTranslated(page.rawUrl, b64);
+            await saveTranslatedCacheEntry(page.rawUrl, b64);
           }
         }
         success++;
@@ -1621,7 +1699,7 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
     const translatedDataUrl = `data:image/png;base64,${translatedB64}`;
     imageCache.set(page.rawUrl, translatedDataUrl);
 
-    translatedCache.set(page.rawUrl, translatedB64);
+    rememberTranslated(page.rawUrl, translatedB64);
     await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
     applyTranslatedImageToPage(page.rawUrl, translatedDataUrl);
 
