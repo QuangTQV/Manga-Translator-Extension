@@ -327,7 +327,10 @@
         </div>
 
         <div class="toggle-row">
-          <label class="label" data-i18n="labelFullPageContext">Full Page Context</label>
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelFullPageContext">Full Page Context</div>
+            <div class="toggle-hint" data-i18n="hintFullPageContext">Send the whole page image, not just each cropped bubble, so the model can see character art/interactions (e.g. for correct pronouns). Costs more tokens/latency.</div>
+          </div>
           <label class="toggle">
             <input id="f-context" type="checkbox" checked />
             <span class="toggle-slider"></span>
