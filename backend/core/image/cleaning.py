@@ -14,7 +14,7 @@ from utils.exceptions import CleaningError, ImageProcessingError, ValidationErro
 from utils.logging import log_message
 
 from .detection import detect_speech_bubbles
-from .image_utils import pil_to_cv2
+from .image_utils import cv2_to_pil, pil_to_cv2
 from .inpainting import FluxKleinInpainter, FluxKontextInpainter
 
 # Cleaning parameters
@@ -709,6 +709,20 @@ def clean_speech_bubbles(
                         continue
 
             if final_mask is not None and fill_color_bgr is not None:
+                bubble_bbox = detection.get("bbox")
+                original_crop_pil = None
+                if bubble_bbox and len(bubble_bbox) == 4:
+                    bx0, by0, bx1, by1 = [int(c) for c in bubble_bbox]
+                    bx0 = max(0, min(img_width, bx0))
+                    bx1 = max(0, min(img_width, bx1))
+                    by0 = max(0, min(img_height, by0))
+                    by1 = max(0, min(img_height, by1))
+                    if bx1 > bx0 and by1 > by0:
+                        # Cropped from the untouched original image (not
+                        # cleaned_image), so it's safe to restore later if
+                        # rendering the translation into this bubble fails.
+                        original_crop_pil = cv2_to_pil(image[by0:by1, bx0:bx1].copy())
+
                 processed_bubbles.append(
                     {
                         "mask": final_mask,
@@ -716,12 +730,13 @@ def clean_speech_bubbles(
                         "color": (
                             sample_color_bgr if sample_color_bgr else fill_color_bgr
                         ),
-                        "bbox": detection.get("bbox"),
+                        "bbox": bubble_bbox,
                         "is_colored": is_colored_bubble,
                         "text_bbox": text_bbox,
                         "text_color_bgr": text_color_bgr,
                         "is_sam": is_sam_mask,
                         "inpainted": False,
+                        "original_crop_pil": original_crop_pil,
                     }
                 )
                 log_message(

@@ -1301,6 +1301,7 @@ def translate_and_render(
                         "is_colored": info.get("is_colored", False),
                         "text_bbox": info.get("text_bbox"),
                         "text_color_bgr": info.get("text_color_bgr"),
+                        "original_crop_pil": info.get("original_crop_pil"),
                     }
                     for info in processed_bubbles_info
                     if "bbox" in info and "color" in info and "mask" in info
@@ -1312,6 +1313,7 @@ def translate_and_render(
                         bbox = bubble["bbox"]
                         text = bubble.get("translation", "")
                         is_outside_text = bubble.get("is_outside_text", False)
+                        original_crop_pil = None
 
                         # Convert OSB text to uppercase
                         if is_outside_text and text:
@@ -1397,7 +1399,11 @@ def translate_and_render(
                             base_mask = None
                             is_sam_mask = False
                             text_color_rgb = None
+                            original_crop_pil = None
                             if render_info:
+                                original_crop_pil = render_info.get(
+                                    "original_crop_pil"
+                                )
                                 bubble_color_bgr = render_info["color"]
                                 cleaned_mask = render_info.get("mask")
                                 base_mask = render_info.get("base_mask")
@@ -1695,6 +1701,21 @@ def translate_and_render(
                                 )
                                 rendered_image = pil_cleaned_image
                                 success = False
+
+                        if not success and original_crop_pil is not None:
+                            # All render attempts failed after the bubble was
+                            # already cleaned (original text erased) — restore
+                            # the original crop rather than leaving it blank.
+                            log_message(
+                                f"Restoring original bubble patch for {bbox}",
+                                verbose=verbose,
+                                always_print=True,
+                            )
+                            rendered_image = pil_cleaned_image.copy()
+                            rendered_image.paste(
+                                original_crop_pil, (int(bbox[0]), int(bbox[1]))
+                            )
+                            success = True
 
                         if success:
                             pil_cleaned_image = rendered_image
