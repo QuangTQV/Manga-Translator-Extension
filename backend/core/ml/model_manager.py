@@ -252,7 +252,7 @@ class ModelManager:
             f"Downloading {target.name} from Hugging Face ({repo_id})...",
             verbose=verbose,
         )
-        effective_token = token if token is not None else self.hf_token
+        effective_token = token if token else self.hf_token
         downloaded = hf_hub_download(
             repo_id=repo_id,
             filename=filename,
@@ -325,7 +325,7 @@ class ModelManager:
             ),
             verbose=verbose,
         )
-        effective_token = token if token is not None else self.hf_token
+        effective_token = token if token else self.hf_token
         try:
             snapshot_download(
                 repo_id=repo_id,
@@ -763,7 +763,7 @@ class ModelManager:
             hf_info = self.model_hf_repos[ModelType.SAM3]
             cache_dir = "models/sam"
 
-            effective_token = token if token is not None else self.hf_token
+            effective_token = token if token else self.hf_token
             processor = Sam3TrackerProcessor.from_pretrained(
                 hf_info["repo_id"], cache_dir=cache_dir, token=effective_token
             )
