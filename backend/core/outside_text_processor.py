@@ -494,7 +494,6 @@ def process_outside_text(
                 )
 
                 extracted_text_colors = {}
-                precise_text_masks = {}
                 flux_inpaints = 0
                 cv2_inpaints = 0
                 none_skips = 0
@@ -697,27 +696,6 @@ def process_outside_text(
                                                 clean_mask, [cnt], -1, 255, cv2.FILLED
                                             )
 
-                                    if composite_clip_bbox and np.any(clean_mask):
-                                        precise_mask = np.zeros(
-                                            (img_h, img_w), dtype=bool
-                                        )
-                                        precise_mask[ry0:ry1, rx0:rx1] = (
-                                            clean_mask > 0
-                                        )
-                                        precise_mask = cv2.dilate(
-                                            precise_mask.astype(np.uint8),
-                                            np.ones((3, 3), np.uint8),
-                                            iterations=1,
-                                        ).astype(bool)
-                                        precise_mask = np.logical_and(
-                                            precise_mask,
-                                            np.logical_not(total_bubble_mask),
-                                        )
-                                        if np.any(precise_mask):
-                                            precise_text_masks[composite_clip_bbox] = (
-                                                precise_mask
-                                            )
-
                                     text_pixels_rgb = crop_rgb[clean_mask == 255]
                                     if len(text_pixels_rgb) >= 10:
                                         text_color_rgb = tuple(
@@ -877,29 +855,8 @@ def process_outside_text(
                                                 verbose=verbose,
                                             )
 
-                    def apply_simple_fill(color_to_use, fill_bounds=True):
+                    def apply_simple_fill(color_to_use):
                         new_img = current_image.copy()
-
-                        if not fill_bounds:
-                            mask_to_fill = (
-                                precise_text_masks.get(composite_clip_bbox)
-                                if composite_clip_bbox
-                                else None
-                            )
-                            if mask_to_fill is None:
-                                mask_to_fill = combined_mask
-                            mask_to_fill = np.logical_and(
-                                mask_to_fill, np.logical_not(total_bubble_mask)
-                            )
-                            if np.any(mask_to_fill):
-                                mask_pil = Image.fromarray(
-                                    (mask_to_fill * 255).astype(np.uint8), mode="L"
-                                )
-                                patch = Image.new(
-                                    "RGB", new_img.size, color_to_use
-                                )
-                                new_img.paste(patch, (0, 0), mask=mask_pil)
-                            return new_img
 
                         mask_indices = group.get("mask_indices", [])
                         if mask_indices and outside_text_results:
@@ -985,7 +942,7 @@ def process_outside_text(
                         return new_img
 
                     if fill_color is not None:
-                        current_image = apply_simple_fill(fill_color, fill_bounds=True)
+                        current_image = apply_simple_fill(fill_color)
                         cv2_inpaints += 1
                         continue
 
@@ -996,14 +953,11 @@ def process_outside_text(
                             else (255, 255, 255)
                         )
                         log_message(
-                            "Using lightweight mask-limited CV2 fill for "
+                            "Using lightweight full-bounds CV2 fill for "
                             f"non-solid OSB region {i + 1} ({fallback_color_to_use})",
                             verbose=verbose,
                         )
-                        current_image = apply_simple_fill(
-                            fallback_color_to_use,
-                            fill_bounds=False,
-                        )
+                        current_image = apply_simple_fill(fallback_color_to_use)
                         cv2_inpaints += 1
                         continue
 
@@ -1092,13 +1046,10 @@ def process_outside_text(
                         log_message(
                             f"Flux failed for OSB region {i + 1}"
                             + (f" ({flux_fail_reason})" if flux_fail_reason else "")
-                            + f"; falling back to mask-limited CV2 fill ({fallback_color_to_use})",
+                            + f"; falling back to full-bounds CV2 fill ({fallback_color_to_use})",
                             always_print=True,
                         )
-                        current_image = apply_simple_fill(
-                            fallback_color_to_use,
-                            fill_bounds=False,
-                        )
+                        current_image = apply_simple_fill(fallback_color_to_use)
                         cv2_inpaints += 1
                         continue
 
