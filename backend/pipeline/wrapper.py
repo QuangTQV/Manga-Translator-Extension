@@ -287,7 +287,7 @@ def _build_config(
         media_resolution="high",
         media_resolution_bubbles="high",
         media_resolution_context="high",
-        image_detail="high" if image_detail == "auto" else image_detail,
+        image_detail=image_detail,
         enable_web_search=False,
         enable_code_execution=False,
     )

@@ -316,6 +316,16 @@
           <div class="toggle-hint" data-i18n="hintReasoningEffort">Lower = faster, less careful. Only applies to reasoning-capable models (e.g. GPT-5/o-series, Gemini 3, Claude 4.x).</div>
         </div>
 
+        <div class="field">
+          <label class="label" data-i18n="labelImageDetail">Image Detail</label>
+          <select id="f-image-detail" class="select">
+            <option value="auto" data-i18n="imageDetailAuto">Auto</option>
+            <option value="low">Low</option>
+            <option value="high">High</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintImageDetail">Low = faster/cheaper, may miss small text. High = most accurate, slowest. Auto lets the provider decide (OpenAI/Azure only).</div>
+        </div>
+
         <div class="toggle-row">
           <label class="label" data-i18n="labelFullPageContext">Full Page Context</label>
           <label class="toggle">

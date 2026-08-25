@@ -43,6 +43,7 @@ const tempVal = qs<HTMLSpanElement>('val-temp');
 const topPVal = qs<HTMLSpanElement>('val-topp');
 const topKVal = qs<HTMLSpanElement>('val-topk');
 const reasoningEffortSelect = qs<HTMLSelectElement>('f-reasoning-effort');
+const imageDetailSelect = qs<HTMLSelectElement>('f-image-detail');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
@@ -176,6 +177,7 @@ async function loadAndBind(): Promise<void> {
   topPSlider.value = String(settings.config.topP);
   topKSlider.value = String(settings.config.topK);
   reasoningEffortSelect.value = settings.config.reasoningEffort ?? '';
+  imageDetailSelect.value = settings.config.imageDetail || 'auto';
   tempVal.textContent = Number(settings.config.temperature).toFixed(2);
   topPVal.textContent = Number(settings.config.topP).toFixed(2);
   topKVal.textContent = String(settings.config.topK);
@@ -224,6 +226,7 @@ function bind(): void {
     el.addEventListener('change', () => { void autoSave(); });
   }
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
+  imageDetailSelect.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
@@ -442,6 +445,7 @@ function collectAllSettings(): AppSettings {
       topP: parseFloat(topPSlider.value),
       topK: parseInt(topKSlider.value, 10),
       reasoningEffort: reasoningEffortSelect.value || undefined,
+      imageDetail: imageDetailSelect.value || 'auto',
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,
