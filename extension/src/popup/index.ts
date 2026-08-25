@@ -20,6 +20,7 @@ const sourceSelect = qs<HTMLSelectElement>('f-source');
 const targetSelect = qs<HTMLSelectElement>('f-target');
 const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
+const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
@@ -164,6 +165,7 @@ async function loadAndBind(): Promise<void> {
   renderLanguageSelects();
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
+  previousContextToggle.checked = settings.config.previousContextEnabled ?? true;
 
   llmProviderSelect.value = settings.config.provider;
   baseUrlInput.value = settings.config.baseUrl ?? '';
@@ -192,7 +194,7 @@ function bind(): void {
   saveConfigBtn.addEventListener('click', async () => { await saveAndReport('statusSettingsSaved'); });
   saveLlmBtn.addEventListener('click', async () => { await saveAndReport('statusLlmSettingsSaved'); });
 
-  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle]) {
+  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
 
@@ -443,6 +445,7 @@ function collectAllSettings(): AppSettings {
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,
+      previousContextEnabled: previousContextToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
     },
   };

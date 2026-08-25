@@ -626,7 +626,11 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     return;
   }
 
-  const body = buildTranslateRequest(imgData, settings, autoTranslatePreviousTexts);
+  const body = buildTranslateRequest(
+    imgData,
+    settings,
+    settings.config.previousContextEnabled ?? true ? autoTranslatePreviousTexts : undefined,
+  );
 
   console.log('[MT] routing translated body through background:', url);
   const result = await bgTranslateImageWithBody(url, pageUrl, body);
@@ -1671,6 +1675,7 @@ function getDefaultSettings(): AppSettings {
       imageDetail: 'auto',
       outsideTextEnabled: false,
       preTranslate: false,
+      previousContextEnabled: true,
     },
   };
 }

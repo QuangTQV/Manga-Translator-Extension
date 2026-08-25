@@ -25,6 +25,7 @@ export interface TranslateConfig {
   imageDetail: string;
   outsideTextEnabled: boolean;
   preTranslate: boolean; // eagerly translate pages as they load, not just near viewport (Auto-translate only)
+  previousContextEnabled: boolean; // send prior pages' OCR text for pronoun/name consistency (costs latency)
 }
 
 export interface BubbleInfo {
@@ -138,6 +139,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     imageDetail: 'auto',
     outsideTextEnabled: false,
     preTranslate: false,
+    previousContextEnabled: true,
   },
 };
 
