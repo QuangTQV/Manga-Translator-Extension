@@ -292,6 +292,20 @@
           <input id="f-topk" class="slider" type="range" min="1" max="20" step="1" value="1" />
         </div>
 
+        <div class="field">
+          <label class="label" data-i18n="labelReasoningEffort">Reasoning Effort</label>
+          <select id="f-reasoning-effort" class="select">
+            <option value="" data-i18n="reasoningAuto">Auto (provider default)</option>
+            <option value="none">None</option>
+            <option value="minimal">Minimal</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="xhigh">X-High</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintReasoningEffort">Lower = faster, less careful. Only applies to reasoning-capable models (e.g. GPT-5/o-series, Gemini 3, Claude 4.x).</div>
+        </div>
+
         <div class="toggle-row">
           <label class="label" data-i18n="labelFullPageContext">Full Page Context</label>
           <label class="toggle">

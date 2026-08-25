@@ -41,6 +41,7 @@ const topKSlider = qs<HTMLInputElement>('f-topk');
 const tempVal = qs<HTMLSpanElement>('val-temp');
 const topPVal = qs<HTMLSpanElement>('val-topp');
 const topKVal = qs<HTMLSpanElement>('val-topk');
+const reasoningEffortSelect = qs<HTMLSelectElement>('f-reasoning-effort');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
@@ -172,6 +173,7 @@ async function loadAndBind(): Promise<void> {
   tempSlider.value = String(settings.config.temperature);
   topPSlider.value = String(settings.config.topP);
   topKSlider.value = String(settings.config.topK);
+  reasoningEffortSelect.value = settings.config.reasoningEffort ?? '';
   tempVal.textContent = Number(settings.config.temperature).toFixed(2);
   topPVal.textContent = Number(settings.config.topP).toFixed(2);
   topKVal.textContent = String(settings.config.topK);
@@ -219,6 +221,7 @@ function bind(): void {
   for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
+  reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
@@ -436,6 +439,7 @@ function collectAllSettings(): AppSettings {
       temperature: parseFloat(tempSlider.value),
       topP: parseFloat(topPSlider.value),
       topK: parseInt(topKSlider.value, 10),
+      reasoningEffort: reasoningEffortSelect.value || undefined,
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,
