@@ -157,7 +157,7 @@ export const LANGUAGES = [
   'Ukrainian', 'Urdu', 'Uzbek', 'Vietnamese', 'Welsh',
 ] as const;
 
-export const SOURCE_LANGUAGES = ['Japanese', 'Korean', 'English', 'Vietnamese'] as const;
+export const SOURCE_LANGUAGES = ['Auto', 'Japanese', 'Korean', 'English', 'Vietnamese'] as const;
 export const TARGET_LANGUAGES = ['Japanese', 'Korean', 'English', 'Vietnamese'] as const;
 
 export const PROVIDERS = [

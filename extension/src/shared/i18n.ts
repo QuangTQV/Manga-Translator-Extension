@@ -507,6 +507,7 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
 
 const LANGUAGE_LABELS: Record<UiLanguage, Record<string, string>> = {
   en: {
+    Auto: 'Auto-detect',
     Japanese: 'Japanese',
     Korean: 'Korean',
     English: 'English',
@@ -515,6 +516,7 @@ const LANGUAGE_LABELS: Record<UiLanguage, Record<string, string>> = {
     'Chinese (Traditional)': 'Chinese (Traditional)',
   },
   vi: {
+    Auto: 'Tự động nhận diện',
     Japanese: 'Tiếng Nhật',
     Korean: 'Tiếng Hàn',
     English: 'Tiếng Anh',
@@ -523,6 +525,7 @@ const LANGUAGE_LABELS: Record<UiLanguage, Record<string, string>> = {
     'Chinese (Traditional)': 'Tiếng Trung (Phồn thể)',
   },
   zh: {
+    Auto: '自动检测',
     Japanese: '日语',
     Korean: '韩语',
     English: '英语',
@@ -531,6 +534,7 @@ const LANGUAGE_LABELS: Record<UiLanguage, Record<string, string>> = {
     'Chinese (Traditional)': '中文（繁体）',
   },
   ja: {
+    Auto: '自動検出',
     Japanese: '日本語',
     Korean: '韓国語',
     English: '英語',
@@ -539,6 +543,7 @@ const LANGUAGE_LABELS: Record<UiLanguage, Record<string, string>> = {
     'Chinese (Traditional)': '中国語（繁体字）',
   },
   ko: {
+    Auto: '자동 감지',
     Japanese: '일본어',
     Korean: '한국어',
     English: '영어',

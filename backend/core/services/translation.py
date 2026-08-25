@@ -69,7 +69,8 @@ def _build_system_prompt_ocr(
     input_language: Optional[str],
     reading_direction: str,
 ) -> str:
-    lang_label = f"{input_language} " if input_language else ""
+    is_auto_language = not input_language or input_language.strip().lower() == "auto"
+    lang_label = "" if is_auto_language else f"{input_language} "
     direction = (
         "right-to-left"
         if (reading_direction or "rtl").lower() == "rtl"
@@ -87,7 +88,7 @@ Your sole purpose is to accurately transcribe the original text from a series of
 - **Reading Context:** The image crops are presented in a {direction} reading order. Do not reorder them.
 - **Transcription Policy:** Preserve all original punctuation, ellipses, and casing. Collapse multi-line text into a single line, separated by a single space.
 - **Ignore Policy:** Ignore all non-text visual elements (borders, tails, watermarks, etc.).
-- **Language Focus:** Transcribe only the original {lang_label}text.
+- **Language Focus:** Transcribe only the original {lang_label}text.{" Auto-detect the source language directly from the text itself — do not assume any particular language." if is_auto_language else ""}
 - **Ruby/Furigana Policy:** If small phonetic characters (ruby/furigana) are present, you must ignore them and transcribe only the main, larger base text.
 - **Visual Emphasis Policy:** If the source text is visually emphasized (bold, slanted, etc.), you must mirror that emphasis in your transcription using markdown-style markers: `*italic*` for slanted text, `**bold**` for bold text, `***bold-italic***` for both.
 - **Quotes:** Do not wrap the transcribed text in quotation marks unless they are explicitly present in the image.
@@ -145,6 +146,7 @@ def _build_system_prompt_translation(
     full_page_context: bool = False,
     previous_context_image_count: int = 0,
     previous_context_text_count: int = 0,
+    input_language: Optional[str] = None,
 ) -> str:
     direction = (
         "right-to-left"
@@ -152,6 +154,16 @@ def _build_system_prompt_translation(
         else "left-to-right"
     )
     input_type = "transcriptions" if mode == "two-step" else "image crops"
+
+    if input_language and input_language.strip().lower() != "auto":
+        source_language_rule = (
+            f"- **Source Language:** The original text is in {input_language}."
+        )
+    else:
+        source_language_rule = (
+            "- **Source Language:** Auto-detect the original language directly "
+            "from the text itself — do not assume any particular language."
+        )
 
     cohesion_visual = (
         " Refer to the full-page image to resolve ambiguous context."
@@ -196,6 +208,7 @@ def _build_system_prompt_translation(
     core_rules = f"""
 ## CORE RULES
 - **Reading Context:** The {input_type} are presented in a {direction} reading order. Do not reorder them.
+{source_language_rule}
 - **Cohesion:** Treat the input lines as a continuous narrative. Ensure the translation flows logically and naturally as a cohesive whole.{cohesion_visual}
 - **Fidelity:** Focus on intent; translate functionally rather than literally.
 - **Conciseness:** Keep translations idiomatic and concise.
@@ -1710,6 +1723,7 @@ The target language is {output_language}. Use the appropriate translation approa
                     ),
                     previous_context_image_count=previous_context_image_count,
                     previous_context_text_count=previous_context_text_count,
+                    input_language=input_language,
                 )
             translation_response_text = _call_llm_endpoint(
                 config,
@@ -1805,6 +1819,7 @@ For each image, you must perform two steps:
                 ),
                 previous_context_image_count=previous_context_image_count,
                 previous_context_text_count=previous_context_text_count,
+                input_language=input_language,
             )
             response_text = _call_llm_endpoint(
                 config,
