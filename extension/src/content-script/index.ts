@@ -422,11 +422,14 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
     return;
   }
 
-  queueAutoTranslateImage(img, url);
+  // Near-viewport (or force-triggered) images are what the reader is actually
+  // looking at right now — jump them to the front of the queue so eager
+  // pre-translate work queued for pages further ahead never delays them.
+  queueAutoTranslateImage(img, url, force || isNearViewport(img));
   queueAutoTranslateLookahead(img);
 }
 
-function queueAutoTranslateImage(img: HTMLImageElement, url: string): boolean {
+function queueAutoTranslateImage(img: HTMLImageElement, url: string, priority = false): boolean {
   if (translatedCache.has(url)) {
     applyTranslatedImage(img, `data:image/png;base64,${translatedCache.get(url)!}`, url);
     return false;
@@ -436,7 +439,11 @@ function queueAutoTranslateImage(img: HTMLImageElement, url: string): boolean {
   if ((AUTO_RETRY_MAP.get(url) ?? 0) >= AUTO_RETRY_MAX) return false;
 
   autoTranslateQueuedUrls.add(url);
-  autoTranslateQueue.push({ img, url });
+  if (priority) {
+    autoTranslateQueue.unshift({ img, url });
+  } else {
+    autoTranslateQueue.push({ img, url });
+  }
   autoTranslateIntersectionObserver?.unobserve(img);
   return true;
 }
