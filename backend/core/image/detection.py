@@ -149,13 +149,14 @@ def _expand_boxes_with_osb_text(
             _, osb_boxes, _ = cached
         else:
             osb_model = model_manager.load_yolo_osbtext(token=hf_token)
-            osb_results = osb_model(
-                image_cv,
-                conf=confidence,
-                device=device,
-                verbose=False,
-                imgsz=640,
-            )[0]
+            with model_manager.get_yolo_inference_lock(ModelType.YOLO_OSBTEXT):
+                osb_results = osb_model(
+                    image_cv,
+                    conf=confidence,
+                    device=device,
+                    verbose=False,
+                    imgsz=640,
+                )[0]
             osb_boxes = (
                 osb_results.boxes.xyxy
                 if osb_results.boxes is not None
@@ -1359,14 +1360,16 @@ def detect_speech_bubbles(
         primary_results, primary_boxes = cached_yolo
     else:
         primary_imgsz = 1600 if bubble_detector_model == "yolo_2" else 640
-        primary_results = primary_model(
-            image_cv,
-            conf=confidence,
-            device=_device,
-            verbose=False,
-            imgsz=primary_imgsz,
-            retina_masks=True,
-        )[0]
+        primary_model_type = model_manager._resolve_speech_bubble_model_type(model_path)
+        with model_manager.get_yolo_inference_lock(primary_model_type):
+            primary_results = primary_model(
+                image_cv,
+                conf=confidence,
+                device=_device,
+                verbose=False,
+                imgsz=primary_imgsz,
+                retina_masks=True,
+            )[0]
         primary_boxes = (
             primary_results.boxes.xyxy
             if primary_results.boxes is not None
@@ -1421,13 +1424,14 @@ def detect_speech_bubbles(
                 verbose=verbose,
             )
 
-            secondary_results = secondary_model(
-                image_cv,
-                conf=conjoined_confidence,
-                device=_device,
-                verbose=False,
-                imgsz=1024,
-            )[0]
+            with model_manager.get_yolo_inference_lock(ModelType.YOLO_CONJOINED_BUBBLE):
+                secondary_results = secondary_model(
+                    image_cv,
+                    conf=conjoined_confidence,
+                    device=_device,
+                    verbose=False,
+                    imgsz=1024,
+                )[0]
             secondary_boxes = (
                 secondary_results.boxes.xyxy
                 if secondary_results.boxes is not None
@@ -1888,13 +1892,14 @@ def detect_panels(
         raise ModelError(f"Error loading panel model: {e}")
 
     try:
-        results = panel_model(
-            image_cv,
-            conf=confidence,
-            device=_device,
-            verbose=False,
-            imgsz=640,
-        )[0]
+        with model_manager.get_yolo_inference_lock(ModelType.YOLO_PANEL):
+            results = panel_model(
+                image_cv,
+                conf=confidence,
+                device=_device,
+                verbose=False,
+                imgsz=640,
+            )[0]
         boxes = results.boxes.xyxy if results.boxes is not None else torch.tensor([])
         classes = results.boxes.cls if results.boxes is not None else torch.tensor([])
 

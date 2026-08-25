@@ -4,7 +4,7 @@ import threading
 import urllib.request
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import torch
 from huggingface_hub import hf_hub_download, snapshot_download
@@ -85,6 +85,25 @@ class ModelManager:
 
             # Serializes Flux pipeline inference across threads (CPU offload is not thread-safe)
             self.flux_inference_lock = threading.Lock()
+
+            # Serializes inference on each shared YOLO model instance. Concurrent
+            # requests all run detection on the SAME singleton model object (it's
+            # loaded once and cached), and Ultralytics models aren't safe to call
+            # from multiple threads at once — concurrent first-use can corrupt
+            # the model's internal fused Conv+BatchNorm state, surfacing as
+            # "'Conv' object has no attribute 'bn'" and failing the whole
+            # request. One lock per model type so unrelated model types (e.g.
+            # speech bubble vs. panel) can still run truly in parallel.
+            self._yolo_inference_locks: Dict[ModelType, threading.Lock] = {
+                model_type: threading.Lock()
+                for model_type in (
+                    ModelType.YOLO_SPEECH_BUBBLE,
+                    ModelType.YOLO_SPEECH_BUBBLE_2,
+                    ModelType.YOLO_CONJOINED_BUBBLE,
+                    ModelType.YOLO_OSBTEXT,
+                    ModelType.YOLO_PANEL,
+                )
+            }
 
             self._initialized = True
             log_message(
@@ -360,6 +379,15 @@ class ModelManager:
         """Check if a model is currently loaded."""
         with self._lock:
             return model_type in self.models and self.models[model_type] is not None
+
+    def get_yolo_inference_lock(self, model_type: ModelType) -> threading.Lock:
+        """Lock guarding concurrent inference calls on a shared YOLO model.
+
+        Call sites should wrap the actual model(...) / model.predict(...)
+        invocation with `with model_manager.get_yolo_inference_lock(model_type):`
+        — see the class docstring above for why this is necessary.
+        """
+        return self._yolo_inference_locks[model_type]
 
     def load_upscale(self, verbose: bool = False):
         """Load upscale model (AnimeSharpV4 RCAN)."""
