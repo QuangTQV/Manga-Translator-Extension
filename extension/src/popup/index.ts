@@ -177,7 +177,7 @@ async function loadAndBind(): Promise<void> {
   renderLanguageSelects();
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
-  previousContextToggle.checked = settings.config.previousContextEnabled ?? true;
+  previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
 
   llmProviderSelect.value = settings.config.provider;
   baseUrlInput.value = settings.config.baseUrl ?? '';

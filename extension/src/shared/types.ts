@@ -145,7 +145,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     imageDetail: 'auto',
     outsideTextEnabled: false,
     preTranslate: false,
-    previousContextEnabled: true,
+    previousContextEnabled: false,
   },
 };
 
