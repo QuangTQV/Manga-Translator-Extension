@@ -52,6 +52,8 @@ Kết quả build nằm ở `extension/dist/`.
 2. Bật **Developer mode** (công tắc góc trên bên phải).
 3. Bấm nút **Load unpacked** vừa hiện ra, chọn thư mục `extension/dist/`.
 
+Mỗi khi code extension được cập nhật (chạy lại `npm run build`), quay lại `chrome://extensions/` và bấm nút **reload (biểu tượng ⟳)** trên thẻ MangaTranslator để nạp bản mới — không cần Load unpacked lại từ đầu.
+
 ## 6. Cấu hình LLM
 
 Bấm icon extension trên thanh công cụ → tab **LLM Config**:
@@ -77,15 +79,25 @@ export ANTHROPIC_API_KEY="..."
 
 ## 7. Dùng thử
 
-Mở một trang truyện → bấm icon extension → chọn ngôn ngữ Source/Target ở tab **Translate** → bấm:
+Mở popup extension, việc đầu tiên nhìn thấy là công tắc **Extension Enabled** ở trên cùng — đây là công tắc tổng, tắt đi thì đảm bảo **không có yêu cầu dịch nào được gửi đi** (không tốn API, không tự dịch ngoài ý muốn) bất kể bạn bấm gì bên dưới. Mặc định luôn bật; chỉ tắt khi thật sự muốn chắc chắn extension không hoạt động.
+
+Mở một trang truyện → bấm icon extension → chọn ngôn ngữ Source/Target ở tab **Translate** (Source có tuỳ chọn **Auto-detect** nếu không chắc ngôn ngữ gốc là gì) → bấm:
 
 - **Scan & Translate Page**: quét và cho bạn chọn thủ công ảnh cần dịch.
 - **Auto-translate**: tự động dịch khi bạn cuộn trang.
+- **Clear translated cache** (chữ nhỏ dưới cùng): xoá cache ảnh đã dịch lưu trên máy — dùng khi muốn dịch lại từ đầu hoặc thấy máy chậm/tốn ổ đĩa do cache tích luỹ lâu ngày.
 
-Tab **Translate** còn có 2 tuỳ chọn:
+Tab **Translate** còn có các tuỳ chọn:
 
 - **Outside text**: nhận diện và dịch cả SFX/lời dẫn/caption nằm ngoài bong bóng thoại.
 - **Pre-translate** (mặc định tắt): dịch trang ngay khi vừa tải xong thay vì đợi bạn cuộn tới gần — hữu ích khi hay bị chậm lúc mới sang chương mới. Giới hạn cứng tối đa 15 trang dịch cùng lúc để tránh tốn quá nhiều lượt gọi API.
+- **Previous-page context** (mặc định tắt): gửi kèm chữ đã dịch ở vài trang trước để giữ tên nhân vật/xưng hô nhất quán qua các trang — đổi lại tốn thêm token và chậm hơn một chút.
+
+Tab **LLM Config** còn có:
+
+- **Image Detail**: `Auto` để provider tự quyết, `Low` nhanh/rẻ hơn nhưng dễ bỏ sót chữ nhỏ, `High` chính xác nhất nhưng chậm/tốn nhất.
+- **Full Page Context** (mặc định bật): gửi kèm cả ảnh trang, không chỉ từng bong bóng cắt riêng — giúp model thấy được tranh vẽ/quan hệ nhân vật để dịch đúng ngữ cảnh hơn (vd chọn đúng xưng hô), đổi lại tốn thêm token mỗi lần dịch.
+- **Special Instructions** (tuỳ chọn): ghi chú thêm cho model, ví dụ glossary tên riêng, văn phong mong muốn, quan hệ nhân vật cố định trong truyện.
 
 ## Xử lý sự cố thường gặp
 
@@ -96,6 +108,7 @@ Tab **Translate** còn có 2 tuỳ chọn:
 | Lỗi provider/model | Kiểm tra lại API key, Base URL, tên model/deployment. |
 | Dịch chậm (nhiều chục giây/trang) | Hạ **Reasoning Effort** xuống Minimal/Low, hoặc đổi sang model không-reasoning (vd `gpt-4o-mini`) thay vì model dòng GPT-5/o-series. |
 | Sang chương mới bị chậm hơn hẳn | Bật **Pre-translate** ở tab Translate. |
+| Bấm dịch mà không thấy gì xảy ra | Kiểm tra công tắc **Extension Enabled** ở đầu popup có đang tắt không. |
 
 ## Dừng / chạy lại backend
 
