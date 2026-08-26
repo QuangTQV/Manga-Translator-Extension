@@ -215,6 +215,7 @@ def _build_config(
     models_dir: Path,
     fonts_base_dir: Path,
     base_url: str | None = None,
+    llm_instructions: str | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -278,6 +279,7 @@ def _build_config(
         translation_mode=translation_mode,
         reasoning_effort=reasoning_effort,
         special_instructions=special_instructions,
+        llm_instructions=llm_instructions,
         ocr_method=ocr_method,
         send_full_page_context=send_full_page_context,
         whiteout_conjoined_bubbles=True,

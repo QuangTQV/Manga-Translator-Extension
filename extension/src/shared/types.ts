@@ -16,7 +16,8 @@ export interface TranslateConfig {
   translationMode: 'one-step' | 'two-step';
   ocrMethod: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoningEffort?: string;
-  specialInstructions?: string;
+  specialInstructions?: string; // per-story notes (glossary, character relationships)
+  llmInstructions?: string; // persistent, story-independent style/behavior guidance
   fontDir?: string;
   maxFontSize: number;
   minFontSize: number;
@@ -86,6 +87,7 @@ export interface TranslateRequest {
   ocr_method: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoning_effort?: string;
   special_instructions?: string;
+  llm_instructions?: string;
   font_dir?: string;
   max_font_size: number;
   min_font_size: number;

@@ -97,7 +97,8 @@ class TranslationConfig:
     previous_context_image_count: int = 0
     previous_context_text_count: int = 0
     osb_min_side_pixels: int = 128
-    special_instructions: Optional[str] = None
+    special_instructions: Optional[str] = None  # per-story notes (glossary, character relationships)
+    llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
     ocr_method: str = "LLM"  # "LLM", "manga-ocr", or "paddleocr-vl"
 
 

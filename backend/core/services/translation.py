@@ -1069,21 +1069,25 @@ def _format_previous_context_texts(
 
 
 def _format_special_instructions(config: TranslationConfig) -> str:
-    """Format user's special instructions section for prompts.
+    """Format the user's instruction fields for prompts.
 
-    Args:
-        config: TranslationConfig with special_instructions
+    Two independent, optional fields:
+    - llm_instructions: persistent style/behavior guidance the user sets
+      once and expects to apply regardless of which manga is being
+      translated (e.g. "prefer literal translation of idioms").
+    - special_instructions: notes specific to the current story (cast,
+      relationships, glossary) — what "Suggest Notes" drafts.
 
-    Returns:
-        Formatted special instructions string (empty if none)
+    Returns a combined section (empty string if neither is set).
     """
+    sections = []
+    if config.llm_instructions and config.llm_instructions.strip():
+        sections.append(f"## GENERAL INSTRUCTIONS\n{config.llm_instructions.strip()}")
     if config.special_instructions and config.special_instructions.strip():
-        return f"""
-
-## SPECIAL INSTRUCTIONS
-{config.special_instructions.strip()}
-"""
-    return ""
+        sections.append(f"## STORY NOTES\n{config.special_instructions.strip()}")
+    if not sections:
+        return ""
+    return "\n\n" + "\n\n".join(sections) + "\n"
 
 
 def _build_rosetta_instruction(

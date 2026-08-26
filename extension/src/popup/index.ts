@@ -49,6 +49,7 @@ const imageDetailSelect = qs<HTMLSelectElement>('f-image-detail');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
 const suggestInstructionsBtn = qs<HTMLButtonElement>('btn-suggest-instructions');
+const llmInstructionsInput = qs<HTMLTextAreaElement>('f-llm-instructions');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
 const uiLanguageSelect = qs<HTMLSelectElement>('f-ui-language');
 
@@ -195,6 +196,7 @@ async function loadAndBind(): Promise<void> {
   topKVal.textContent = String(settings.config.topK);
   contextToggle.checked = settings.config.sendFullPageContext;
   instructionsInput.value = settings.config.specialInstructions ?? '';
+  llmInstructionsInput.value = settings.config.llmInstructions ?? '';
 
   bind();
   await checkHealth(settings.backendUrl);
@@ -247,7 +249,7 @@ function bind(): void {
     updateProviderFieldHints();
     void autoSave();
   });
-  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput]) {
+  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput, llmInstructionsInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
@@ -503,6 +505,7 @@ function collectAllSettings(): AppSettings {
       preTranslate: preTranslateToggle.checked,
       previousContextEnabled: previousContextToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
+      llmInstructions: llmInstructionsInput.value.trim() || undefined,
     },
   };
 }

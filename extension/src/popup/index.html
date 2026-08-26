@@ -243,6 +243,14 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+
+        <div class="field">
+          <div class="model-picker-header">
+            <label class="label"><span data-i18n="labelSpecialInstructions">Story Notes</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+            <button id="btn-suggest-instructions" class="btn-fetch-models" type="button" data-i18n="btnSuggestInstructions" title="Analyzes pages already scanned on the active tab">Suggest</button>
+          </div>
+          <textarea id="f-instructions" class="textarea" placeholder="e.g. Keep honorifics, use casual tone..." data-i18n-placeholder="placeholderInstructions"></textarea>
+        </div>
       </div>
       <div class="actions">
         <button id="btn-scan" class="btn btn-primary" data-i18n="btnScan">Scan &amp; Translate Page</button>
@@ -360,11 +368,9 @@
         </div>
 
         <div class="field">
-          <div class="model-picker-header">
-            <label class="label"><span data-i18n="labelSpecialInstructions">Special Instructions</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
-            <button id="btn-suggest-instructions" class="btn-fetch-models" type="button" data-i18n="btnSuggestInstructions" title="Analyzes pages already scanned on the active tab">Suggest</button>
-          </div>
-          <textarea id="f-instructions" class="textarea" placeholder="e.g. Keep honorifics, use casual tone..." data-i18n-placeholder="placeholderInstructions"></textarea>
+          <label class="label"><span data-i18n="labelLlmInstructions">LLM Instructions</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+          <div class="toggle-hint" data-i18n="hintLlmInstructions">Applies to every translation regardless of manga/story — general style or behavior rules. For per-story notes (cast, relationships), use Story Notes in the Translate tab instead.</div>
+          <textarea id="f-llm-instructions" class="textarea" placeholder="e.g. Prefer literal translation of idioms, keep sentence length short..." data-i18n-placeholder="placeholderLlmInstructions"></textarea>
         </div>
       </div>
 

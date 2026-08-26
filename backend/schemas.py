@@ -28,6 +28,7 @@ class TranslateOptions(BaseModel):
     ocr_method: str = "LLM"
     reasoning_effort: Optional[str] = None
     special_instructions: Optional[str] = None
+    llm_instructions: Optional[str] = None
     font_dir: Optional[str] = None
     max_font_size: int = 16
     min_font_size: int = 8
