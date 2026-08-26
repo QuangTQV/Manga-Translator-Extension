@@ -203,7 +203,7 @@ def _build_system_prompt_translation(
     vietnamese_pronoun_rule = ""
     if "vietnamese" in (output_language or "").lower():
         vietnamese_pronoun_rule = """
-- **Vietnamese Pronouns (xưng hô):** For every line of dialogue, before choosing words, silently work out: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship — use art (apparent age/build), honorifics (-san/-chan/-kun/-senpai/etc.), and dialogue tone as evidence. Then pick ONE pronoun pair for that speaker-listener direction and reuse it for every line between them:
+- **Vietnamese Pronouns (xưng hô):** Before translating any dialogue, work out for every distinct speaker-listener pair: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship — use art (apparent age/build), honorifics (-san/-chan/-kun/-senpai/etc.), and dialogue tone as evidence. Then pick ONE pronoun pair for that speaker-listener direction, write it down in the required `PRONOUN MAP:` section (see OUTPUT SCHEMA below), and reuse it for every line between them:
   - Close friends, classmates, same apparent age, casual tone → "tớ"/"cậu" or "mình"/"cậu".
   - Very close friends, rivals, or rough/blunt speech → "tao"/"mày".
   - Noticeable age gap, romantic partners, or siblings → "anh"/"em" or "chị"/"em" (the older speaker says "anh"/"chị", the younger says "em").
@@ -217,6 +217,8 @@ def _build_system_prompt_translation(
         if "vietnamese" in (output_language or "").lower()
         else ""
     )
+
+    is_vietnamese_output = "vietnamese" in (output_language or "").lower()
 
     core_rules = f"""
 ## CORE RULES
@@ -252,22 +254,36 @@ You must use the following markdown-style markers to convey emphasis:
 {core_rules}
 """  # noqa
 
+    pronoun_map_instruction = (
+        """
+- **Before the numbered list**, output a section titled exactly `PRONOUN MAP:` — one short line per distinct speaker-listener pair appearing in this batch, each line starting with `-` (a dash, never a digit — digits are reserved for the list below), format `- <brief descriptor of speaker> -> <brief descriptor of listener>: <chosen pronoun pair>` (e.g. `- girl, short hair -> boy, glasses: tớ-cậu`). Base each line on the reasoning from the Vietnamese Pronouns rule above — actually work through speaker/listener/relationship for each pair here, don't skip straight to a guess. One line per distinct pair (not per dialogue line, not per image). If a line has no clear second party (narration, SFX, monologue), skip it. This section is required whenever any dialogue is present."""
+        if is_vietnamese_output
+        else ""
+    )
+    pronoun_map_exception = (
+        " (except the required `PRONOUN MAP:` section above the list)"
+        if is_vietnamese_output
+        else ""
+    )
+
     if mode == "one-step":
         output_schema = f"""
 ## OUTPUT SCHEMA
+{pronoun_map_instruction}
 - You must return your response as a single numbered list with exactly one line per input image.
 - The numbering must correspond to the input image order (1, 2, 3...).
 - For each item, provide both transcription and translation in the format:
   `i: <transcribed text> || <translated {output_language} text>` where `i` is the input image number.
-- Do not include section headers, explanations, or formatting outside of this list.
+- Do not include section headers, explanations, or formatting outside of this list{pronoun_map_exception}.
 """
     elif mode == "two-step":
         output_schema = f"""
 ## OUTPUT SCHEMA
+{pronoun_map_instruction}
 - You must return your response as a single numbered list with exactly one line per input text.
 - The numbering must correspond to the input order (1, 2, 3...).
 - The format must be `i: <translated {output_language} text>` where `i` is the input text number.
-- Do not include section headers, explanations, or formatting outside of this list.
+- Do not include section headers, explanations, or formatting outside of this list{pronoun_map_exception}.
 """  # noqa
     else:
         raise ValueError(

@@ -253,6 +253,11 @@ class UnifiedCache:
                 if config.special_instructions
                 else None
             ),
+            "llm_instructions": (
+                config.llm_instructions.strip()
+                if getattr(config, "llm_instructions", None)
+                else None
+            ),
             "max_tokens": config.max_tokens,
             "reasoning_effort": config.reasoning_effort,
             "effort": config.effort,
