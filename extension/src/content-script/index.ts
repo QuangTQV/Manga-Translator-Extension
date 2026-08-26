@@ -40,6 +40,7 @@ const EN_MESSAGES = {
   bubbles: '{count} bubbles - {time}s',
   doneWithTime: 'Done - {time}s',
   networkError: 'Network error',
+  extensionDisabled: 'Extension is disabled',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -77,6 +78,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} bubble - {time}s',
     doneWithTime: 'Xong - {time}s',
     networkError: 'Loi mang',
+    extensionDisabled: 'Tien ich dang tat',
   },
   zh: {
     autoMt: '自动 MT',
@@ -109,6 +111,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} 个气泡 - {time}s',
     doneWithTime: '完成 - {time}s',
     networkError: '网络错误',
+    extensionDisabled: '扩展已停用',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -141,6 +144,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} 吹き出し - {time}s',
     doneWithTime: '完了 - {time}s',
     networkError: 'ネットワークエラー',
+    extensionDisabled: '拡張機能は無効です',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -173,6 +177,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '말풍선 {count}개 - {time}s',
     doneWithTime: '완료 - {time}s',
     networkError: '네트워크 오류',
+    extensionDisabled: '확장 프로그램이 꺼져 있습니다',
   },
 };
 
@@ -286,13 +291,19 @@ const AUTO_RETRY_MAX = 3;
 async function startAutoTranslate(): Promise<void> {
   if (autoTranslateActive) return;
   await refreshUiLanguage();
+
+  const settings = await loadSettings();
+  if (settings.extensionEnabled === false) {
+    toast(tr('extensionDisabled'), true);
+    throw new Error(tr('extensionDisabled'));
+  }
+
   autoTranslateActive = true;
   if (autoTranslateRemoveUiTimer !== undefined) {
     clearTimeout(autoTranslateRemoveUiTimer);
     autoTranslateRemoveUiTimer = undefined;
   }
 
-  const settings = await loadSettings();
   preTranslateEnabled = settings.config.preTranslate ?? false;
   autoTranslatePreviousTexts = [];
 
@@ -1501,6 +1512,12 @@ function bindScanner(shadow: ShadowRoot): void {
     const chosen = Array.from(selected).map((i) => currentPages[i]);
     if (chosen.length === 0) return;
 
+    const settings = await loadSettings();
+    if (settings.extensionEnabled === false) {
+      toast(tr('extensionDisabled'), true);
+      return;
+    }
+
     translateBtn.style.display = 'none';
     selectAllBtn.style.display = 'none';
     deselectAllBtn.style.display = 'none';
@@ -1824,6 +1841,7 @@ function getDefaultSettings(): AppSettings {
     backendUrl: DEFAULT_BACKEND_URL,
     autoDetect: false,
     showBubbleBboxes: false,
+    extensionEnabled: true,
     uiLanguage: 'en',
     config: {
       inputLanguage: 'Japanese',

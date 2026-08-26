@@ -10,6 +10,9 @@ export type UiLanguage = typeof UI_LANGUAGES[number]['code'];
 
 const EN = {
   popupSubtitle: 'Scan page · Select · Translate',
+  labelExtensionEnabled: 'Extension Enabled',
+  hintExtensionEnabled: 'Turn off to guarantee no translate requests are sent — no API cost, no surprise auto-translate.',
+  statusExtensionDisabled: 'Extension is disabled — turn it back on to translate.',
   healthChecking: 'Checking',
   healthOk: 'Backend OK',
   healthError: 'Error',
@@ -114,6 +117,9 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
   en: EN,
   vi: {
     popupSubtitle: 'Quét trang · Chọn · Dịch',
+    labelExtensionEnabled: 'Bật tiện ích',
+    hintExtensionEnabled: 'Tắt để chắc chắn không có yêu cầu dịch nào được gửi đi — không tốn API, không tự dịch bất ngờ.',
+    statusExtensionDisabled: 'Tiện ích đang tắt — bật lại để dịch.',
     healthChecking: 'Đang kiểm tra',
     healthOk: 'Backend OK',
     healthError: 'Lỗi',
@@ -213,6 +219,9 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
   },
   zh: {
     popupSubtitle: '扫描页面 · 选择 · 翻译',
+    labelExtensionEnabled: '启用扩展',
+    hintExtensionEnabled: '关闭后确保不会发送任何翻译请求——不消耗 API 额度，也不会意外自动翻译。',
+    statusExtensionDisabled: '扩展已停用——重新开启后才能翻译。',
     healthChecking: '检查中',
     healthOk: '后端正常',
     healthError: '错误',
@@ -312,6 +321,9 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
   },
   ja: {
     popupSubtitle: 'ページをスキャン · 選択 · 翻訳',
+    labelExtensionEnabled: '拡張機能を有効化',
+    hintExtensionEnabled: 'オフにすると翻訳リクエストが一切送信されなくなります——API費用もかからず、意図しない自動翻訳も防げます。',
+    statusExtensionDisabled: '拡張機能は無効です——翻訳するには再度有効にしてください。',
     healthChecking: '確認中',
     healthOk: 'Backend OK',
     healthError: 'エラー',
@@ -411,6 +423,9 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
   },
   ko: {
     popupSubtitle: '페이지 스캔 · 선택 · 번역',
+    labelExtensionEnabled: '확장 프로그램 사용',
+    hintExtensionEnabled: '끄면 번역 요청이 전혀 전송되지 않습니다 — API 비용 없음, 예상치 못한 자동 번역 없음.',
+    statusExtensionDisabled: '확장 프로그램이 꺼져 있습니다 — 번역하려면 다시 켜세요.',
     healthChecking: '확인 중',
     healthOk: 'Backend OK',
     healthError: '오류',

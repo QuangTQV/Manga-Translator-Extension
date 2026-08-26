@@ -161,6 +161,17 @@
     #popup-status.err { color: #f87171; }
     #popup-status.ok { color: #4ade80; }
     .popup-footer { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 10px; color: #3a4f6a; }
+    .master-toggle-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 12px; border-radius: 10px;
+      background: rgba(22,163,74,0.08); border: 1px solid rgba(22,163,74,0.25);
+    }
+    .master-toggle-row.disabled { background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.35); }
+    .master-toggle-copy { min-width: 0; }
+    .master-toggle-title { font-size: 12px; font-weight: 700; color: #dde6f5; }
+    .master-toggle-hint { font-size: 10px; color: #6b7fa8; margin-top: 2px; line-height: 1.4; }
+    body.mt-extension-disabled .tabs,
+    body.mt-extension-disabled .tab-pane { opacity: 0.4; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -171,6 +182,17 @@
         <div class="popup-subtitle" data-i18n="popupSubtitle">Scan page · Select · Translate</div>
       </div>
       <span id="health-badge" class="health-badge" data-i18n="healthChecking">Checking</span>
+    </div>
+
+    <div id="master-toggle-row" class="master-toggle-row">
+      <div class="master-toggle-copy">
+        <div class="master-toggle-title" data-i18n="labelExtensionEnabled">Extension Enabled</div>
+        <div class="master-toggle-hint" data-i18n="hintExtensionEnabled">Turn off to guarantee no translate requests are sent — no API cost, no surprise auto-translate.</div>
+      </div>
+      <label class="toggle">
+        <input id="f-extension-enabled" type="checkbox" checked />
+        <span class="toggle-slider"></span>
+      </label>
     </div>
 
     <div class="tabs">

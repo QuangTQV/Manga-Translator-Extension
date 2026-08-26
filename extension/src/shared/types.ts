@@ -114,6 +114,11 @@ export interface AppSettings {
   backendUrl: string;
   autoDetect: boolean;
   showBubbleBboxes: boolean;
+  // Master kill switch: when false, no translate request is ever sent
+  // (checked in the background service worker, which is the single choke
+  // point every translate path routes through) regardless of what UI
+  // action triggered it.
+  extensionEnabled: boolean;
   uiLanguage: UiLanguage;
   config: TranslateConfig;
 }
@@ -122,6 +127,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backendUrl: 'http://localhost:7677',
   autoDetect: false,
   showBubbleBboxes: false,
+  extensionEnabled: true,
   uiLanguage: 'en',
   config: {
     inputLanguage: 'Japanese',

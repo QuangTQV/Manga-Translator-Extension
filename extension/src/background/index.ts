@@ -217,6 +217,13 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
   void imageUrl; void pageUrl;
 
   const settings = await getSettings();
+  // Master kill switch — every translate path (scan, auto-translate, batch
+  // scanner) routes through here, so this is the single place that
+  // guarantees no API call goes out while the extension is disabled.
+  if (settings.extensionEnabled === false) {
+    console.log('[BG] fetchAndTranslateWithBody skipped: extension disabled');
+    return { error: 'Extension is disabled' };
+  }
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
   const endpoint = `${backendUrl.replace(/\/$/, '')}/translate`;
 
@@ -261,6 +268,11 @@ interface TranslateResult {
 }
 
 async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined): Promise<TranslateResult> {
+  const settings = await getSettings();
+  if (settings.extensionEnabled === false) {
+    console.log('[BG] fetchAndTranslate skipped: extension disabled');
+    return { error: 'Extension is disabled' };
+  }
   const referer = pageUrl ? pageUrl.split('/').slice(0, 3).join('/') : '';
   console.log('[BG] fetchAndTranslate url:', imageUrl, 'referer:', referer);
   // 1. Fetch image
@@ -290,7 +302,6 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
   }
 
   // 2. Translate
-  const settings = await getSettings();
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
   const endpoint = `${backendUrl.replace(/\/$/, '')}/translate`;
 

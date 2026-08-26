@@ -15,6 +15,8 @@ function qs<T extends HTMLElement>(id: string): T {
   return el;
 }
 
+const extensionEnabledToggle = qs<HTMLInputElement>('f-extension-enabled');
+const masterToggleRow = qs<HTMLDivElement>('master-toggle-row');
 const backendInput = qs<HTMLInputElement>('f-backend');
 const sourceSelect = qs<HTMLSelectElement>('f-source');
 const targetSelect = qs<HTMLSelectElement>('f-target');
@@ -111,6 +113,12 @@ function applyI18n(): void {
   setAutoButtonState(autoBtn.classList.contains('active'));
 }
 
+function applyExtensionEnabledState(): void {
+  const enabled = extensionEnabledToggle.checked;
+  document.body.classList.toggle('mt-extension-disabled', !enabled);
+  masterToggleRow.classList.toggle('disabled', !enabled);
+}
+
 function setHealthState(state: HealthState): void {
   healthState = state;
   healthBadge.className = state === 'ok' ? 'health-badge ok' : state === 'checking' ? 'health-badge' : 'health-badge err';
@@ -161,6 +169,9 @@ async function loadAndBind(): Promise<void> {
   populateUiLanguageSelect(settings.uiLanguage);
   applyI18n();
 
+  extensionEnabledToggle.checked = settings.extensionEnabled;
+  applyExtensionEnabledState();
+
   backendInput.value = settings.backendUrl;
   urlDisplay.textContent = settings.backendUrl.replace(/^https?:\/\//, '');
   renderLanguageSelects();
@@ -195,6 +206,19 @@ function bind(): void {
   saveBtn.addEventListener('click', async () => { await saveAndReport('statusSettingsSaved'); });
   saveConfigBtn.addEventListener('click', async () => { await saveAndReport('statusSettingsSaved'); });
   saveLlmBtn.addEventListener('click', async () => { await saveAndReport('statusLlmSettingsSaved'); });
+
+  extensionEnabledToggle.addEventListener('change', () => {
+    applyExtensionEnabledState();
+    void autoSave();
+    if (!extensionEnabledToggle.checked) {
+      // Stop any auto-translate loop already running in the active tab
+      // immediately, rather than waiting for it to hit the background's
+      // disabled-check on its next request.
+      void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+        if (tab?.id) void chrome.tabs.sendMessage(tab.id, { type: 'STOP_AUTO_TRANSLATE' }).catch(() => {});
+      });
+    }
+  });
 
   for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
@@ -431,6 +455,7 @@ function collectAllSettings(): AppSettings {
   const model = modelInput.value.trim();
   return {
     ...settings,
+    extensionEnabled: extensionEnabledToggle.checked,
     backendUrl: backendInput.value.trim() || DEFAULT_SETTINGS.backendUrl,
     uiLanguage: normalizeUiLanguage(uiLanguageSelect.value),
     config: {
