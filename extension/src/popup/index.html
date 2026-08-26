@@ -360,7 +360,10 @@
         </div>
 
         <div class="field">
-          <label class="label"><span data-i18n="labelSpecialInstructions">Special Instructions</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+          <div class="model-picker-header">
+            <label class="label"><span data-i18n="labelSpecialInstructions">Special Instructions</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+            <button id="btn-suggest-instructions" class="btn-fetch-models" type="button" data-i18n="btnSuggestInstructions" title="Analyzes pages already scanned on the active tab">Suggest</button>
+          </div>
           <textarea id="f-instructions" class="textarea" placeholder="e.g. Keep honorifics, use casual tone..." data-i18n-placeholder="placeholderInstructions"></textarea>
         </div>
       </div>

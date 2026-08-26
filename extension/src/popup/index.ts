@@ -48,6 +48,7 @@ const reasoningEffortSelect = qs<HTMLSelectElement>('f-reasoning-effort');
 const imageDetailSelect = qs<HTMLSelectElement>('f-image-detail');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
+const suggestInstructionsBtn = qs<HTMLButtonElement>('btn-suggest-instructions');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
 const uiLanguageSelect = qs<HTMLSelectElement>('f-ui-language');
 
@@ -314,6 +315,32 @@ function bind(): void {
     } catch {
       setStatus(t(uiLanguage, 'statusCacheCleared'), 'ok');
       clearCacheBtn.disabled = false;
+    }
+  });
+
+  suggestInstructionsBtn.addEventListener('click', async () => {
+    suggestInstructionsBtn.disabled = true;
+    setStatus(t(uiLanguage, 'statusSuggestingInstructions'), '');
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) throw new Error(t(uiLanguage, 'errorNoActiveTab'));
+      const injected = await ensureContentScript(tab.id);
+      if (!injected) throw new Error(t(uiLanguage, 'errorInjectContent'));
+
+      const result = await chrome.tabs.sendMessage(tab.id, { type: 'SUGGEST_FROM_SCAN' } as never) as { ok: boolean; error?: string };
+      if (!result?.ok) {
+        throw new Error(result?.error || t(uiLanguage, 'errorNoScanFound'));
+      }
+
+      // The content script wrote directly to storage — re-read it so the
+      // popup's in-memory settings and the textarea both reflect it.
+      settings = await getSettings();
+      instructionsInput.value = settings.config.specialInstructions ?? '';
+      setStatus(t(uiLanguage, 'statusSuggestInstructionsDone'), 'ok');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err), 'err');
+    } finally {
+      suggestInstructionsBtn.disabled = false;
     }
   });
 

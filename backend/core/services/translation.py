@@ -1875,6 +1875,66 @@ For each image, you must perform two steps:
         return [f"[Translation Error: {e}]"] * total_elements
 
 
+def generate_character_notes(
+    config: TranslationConfig,
+    images_b64: List[str],
+    output_language: str,
+    debug: bool = False,
+) -> str:
+    """One-off LLM call: look at a handful of sample manga pages and draft
+    Special Instructions text (cast, apparent relationships, suggested
+    pronoun/register choices, tone) for the user to review before saving.
+
+    This is a single explicit, user-triggered call — not something that
+    runs automatically per page — so it doesn't touch the translation
+    cache or per-page pipeline at all.
+    """
+    if not images_b64:
+        raise TranslationError("No sample images provided.")
+
+    parts = [
+        {"inline_data": {"mime_type": "image/jpeg", "data": img}}
+        for img in images_b64
+    ]
+
+    system_prompt = (
+        "You are a manga localization consultant. You will be shown several "
+        "sample pages from the SAME manga/comic. Your job is only to draft "
+        "concise notes a translator can paste into a style-guide field — "
+        "you are not transcribing or translating any dialogue."
+    )
+
+    prompt_text = f"""
+## TASK
+Based only on these sample pages, draft short notes to guide translation
+into {output_language}, covering only what you can actually tell from the
+art/context (do not invent details you can't support):
+- Main recurring characters you can identify (by appearance if no name is
+  visible) and their apparent age/gender.
+- Apparent relationships between characters (siblings, friends, romantic,
+  boss/subordinate, family, strangers, etc.) and, if {output_language}
+  uses relationship-based pronouns/register (e.g. Vietnamese xưng hô,
+  Japanese pronoun choice), what pairing you'd suggest for each pair.
+- Overall tone/register of the dialogue (casual/formal, blunt/polite, any
+  recurring verbal tics).
+- Any recurring proper nouns, titles, or made-up terms worth keeping
+  consistent.
+
+## OUTPUT
+Plain bullet points only, no headers, no preamble, no closing remarks —
+ready to be pasted directly into a "special instructions" field. If the
+sample pages don't give you enough to say anything useful for a bullet,
+omit it rather than guessing.
+"""
+
+    result = _call_llm_endpoint(
+        config, parts, prompt_text, debug=debug, system_prompt=system_prompt
+    )
+    if not result or not result.strip():
+        raise TranslationError("Empty response while generating suggested instructions.")
+    return result.strip()
+
+
 def prepare_bubble_images_for_translation(
     bubble_data: List[Dict[str, Any]],
     original_cv_image: np.ndarray,

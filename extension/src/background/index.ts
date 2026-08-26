@@ -141,6 +141,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       return;
     }
+
+    if (message.type === 'SUGGEST_INSTRUCTIONS') {
+      const { body } = message as { type: string; body: SuggestInstructionsBody };
+      try {
+        const result = await fetchSuggestInstructions(body);
+        sendResponse(result);
+      } catch (error) {
+        sendResponse({ error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
   })();
 
   return true;
@@ -256,6 +267,50 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
     const msg = e instanceof Error ? e.message : String(e);
     console.log('[BG] fetchAndTranslateWithBody backend exception:', msg);
     return { error: `Translate error: ${msg}` };
+  }
+}
+
+interface SuggestInstructionsBody {
+  images: string[];
+  output_language: string;
+  provider: string;
+  base_url?: string;
+  model_name?: string;
+  api_key?: string;
+  temperature: number;
+  top_p: number;
+  top_k: number;
+  reasoning_effort?: string;
+}
+
+async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<{ suggestion?: string; error?: string }> {
+  const settings = await getSettings();
+  if (settings.extensionEnabled === false) {
+    return { error: 'Extension is disabled' };
+  }
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const endpoint = `${backendUrl.replace(/\/$/, '')}/suggest-instructions`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+        else detail = JSON.stringify(errBody).slice(0, 200);
+      } catch { /* ignore */ }
+      return { error: `Suggest instructions failed: ${detail}` };
+    }
+    const data = (await res.json()) as { suggestion: string };
+    return { suggestion: data.suggestion };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `Suggest instructions error: ${msg}` };
   }
 }
 

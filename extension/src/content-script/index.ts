@@ -41,6 +41,11 @@ const EN_MESSAGES = {
   doneWithTime: 'Done - {time}s',
   networkError: 'Network error',
   extensionDisabled: 'Extension is disabled',
+  suggestInstructions: 'Suggest Notes',
+  suggestInstructionsHint: 'Analyze selected pages and draft Special Instructions (cast, relationships, tone)',
+  suggesting: 'Analyzing...',
+  suggestionSaved: 'Suggestion saved to Special Instructions',
+  suggestNoImagesReady: 'Selected pages are still loading, wait a moment and try again',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -79,6 +84,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: 'Xong - {time}s',
     networkError: 'Loi mang',
     extensionDisabled: 'Tien ich dang tat',
+    suggestInstructions: 'Goi y ghi chu',
+    suggestInstructionsHint: 'Phan tich cac trang da chon va soan Special Instructions (nhan vat, quan he, van phong)',
+    suggesting: 'Dang phan tich...',
+    suggestionSaved: 'Da luu goi y vao Special Instructions',
+    suggestNoImagesReady: 'Trang da chon van dang tai, doi chut roi thu lai',
   },
   zh: {
     autoMt: '自动 MT',
@@ -112,6 +122,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: '完成 - {time}s',
     networkError: '网络错误',
     extensionDisabled: '扩展已停用',
+    suggestInstructions: '生成建议',
+    suggestInstructionsHint: '分析已选页面并起草特殊指令（角色、关系、语气）',
+    suggesting: '分析中...',
+    suggestionSaved: '建议已保存到特殊指令',
+    suggestNoImagesReady: '所选页面仍在加载，请稍后重试',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -145,6 +160,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: '完了 - {time}s',
     networkError: 'ネットワークエラー',
     extensionDisabled: '拡張機能は無効です',
+    suggestInstructions: 'ノートを提案',
+    suggestInstructionsHint: '選択したページを分析し、特殊指示（登場人物・関係・トーン）を作成します',
+    suggesting: '分析中...',
+    suggestionSaved: '提案を特殊指示に保存しました',
+    suggestNoImagesReady: '選択したページがまだ読み込み中です。しばらくしてから再試行してください',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -178,6 +198,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: '완료 - {time}s',
     networkError: '네트워크 오류',
     extensionDisabled: '확장 프로그램이 꺼져 있습니다',
+    suggestInstructions: '메모 제안',
+    suggestInstructionsHint: '선택한 페이지를 분석해 특수 지시사항(등장인물, 관계, 어조)을 작성합니다',
+    suggesting: '분석 중...',
+    suggestionSaved: '제안이 특수 지시사항에 저장되었습니다',
+    suggestNoImagesReady: '선택한 페이지를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요',
   },
 };
 
@@ -212,6 +237,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     void clearTranslatedCache();
     send({ ok: true });
     return false;
+  }
+  if (msg.type === 'SUGGEST_FROM_SCAN') {
+    void (async () => {
+      const images = Array.from(imageCache.values())
+        .map(extractBase64FromDataUrl)
+        .filter((b64): b64 is string => Boolean(b64))
+        .slice(0, SUGGEST_INSTRUCTIONS_MAX_IMAGES);
+      const result = await runSuggestInstructions(images);
+      send(result);
+    })();
+    return true;
   }
   return false;
 });
@@ -273,6 +309,20 @@ let preTranslateEnabled = false;
 let autoTranslatePreviousTexts: string[][] = [];
 const PREVIOUS_CONTEXT_MAX_PAGES = 3;
 const AUTO_MAX_CONCURRENT = 5;
+const SUGGEST_INSTRUCTIONS_MAX_IMAGES = 8;
+
+// imageCache can hold a plain (non-data:) URL when bgFetchImage's base64
+// conversion failed or timed out — a fine fallback for <img src> thumbnail
+// display, but never valid image bytes. It can also hold a "successfully
+// fetched" data URL whose payload is actually a placeholder (some lazy
+// readers serve an inline SVG placeholder that ends up base64-wrapped
+// here instead of the real page). Requiring the captured portion to be
+// pure base64 alphabet rejects both cases instead of forwarding garbage
+// to the backend.
+function extractBase64FromDataUrl(src: string): string | null {
+  const match = /^data:image\/[\w+.-]+;base64,([A-Za-z0-9+/]+=*)$/.exec(src);
+  return match ? match[1] : null;
+}
 const AUTO_VIEWPORT_MARGIN_PX = 250;
 const AUTO_PREFETCH_PAGES = 3;
 // Pre-translate mode: how many pages can be queued/in-flight ahead of the
@@ -1219,6 +1269,77 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
   });
 }
 
+function bgSuggestInstructions(images: string[], outputLanguage: string, settings: AppSettings): Promise<{ suggestion?: string; error?: string }> {
+  return new Promise((resolve) => {
+    const tid = setTimeout(() => resolve({ error: 'Backend timeout after 2 minutes' }), 120_000);
+    chrome.runtime.sendMessage(
+      {
+        type: 'SUGGEST_INSTRUCTIONS',
+        body: {
+          images,
+          output_language: outputLanguage,
+          provider: settings.config.provider,
+          base_url: settings.config.baseUrl,
+          model_name: settings.config.modelName,
+          api_key: settings.config.apiKey,
+          temperature: settings.config.temperature,
+          top_p: settings.config.topP,
+          top_k: settings.config.topK,
+          reasoning_effort: settings.config.reasoningEffort || undefined,
+        },
+      },
+      (resp: unknown) => {
+        clearTimeout(tid);
+        const lastError = chrome.runtime.lastError;
+        if (lastError) {
+          resolve({ error: `extension error: ${lastError.message}` });
+          return;
+        }
+        resolve((resp as { suggestion?: string; error?: string }) ?? { error: 'no response' });
+      },
+    );
+  });
+}
+
+async function appendSpecialInstructions(suggestion: string): Promise<void> {
+  const result = await chrome.storage.local.get(STORAGE_KEY);
+  const stored = normalizeSettings(result[STORAGE_KEY] as Partial<AppSettings> | undefined);
+  const existing = stored.config.specialInstructions?.trim();
+  stored.config.specialInstructions = existing ? `${existing}\n\n${suggestion}` : suggestion;
+  await chrome.storage.local.set({ [STORAGE_KEY]: stored });
+}
+
+/** Shared by the Scanner's "Suggest Notes" button and the popup's own
+ * suggest button (which asks this tab's content script for whatever
+ * sample images are already loaded, since the popup itself has no image
+ * data of its own). */
+async function runSuggestInstructions(images: string[]): Promise<{ ok: boolean; error?: string }> {
+  if (images.length === 0) {
+    const error = tr('suggestNoImagesReady');
+    toast(error, true);
+    return { ok: false, error };
+  }
+
+  const settings = await loadSettings();
+  if (settings.extensionEnabled === false) {
+    const error = tr('extensionDisabled');
+    toast(error, true);
+    return { ok: false, error };
+  }
+
+  const result = await bgSuggestInstructions(images, settings.config.outputLanguage, settings);
+  if (result.error) {
+    toast(result.error, true);
+    return { ok: false, error: result.error };
+  }
+  if (result.suggestion) {
+    await appendSpecialInstructions(result.suggestion);
+    toast(tr('suggestionSaved'), false);
+    return { ok: true };
+  }
+  return { ok: false, error: 'no suggestion returned' };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scanner entry
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1405,6 +1526,7 @@ function buildScannerHTML(): string {
       <div class="mts-toolbar">
         <span class="mts-count" id="mts-count">0 / ${currentPages.length}</span>
         <button class="mts-btn-toolbar" data-action="cancel" id="mts-cancel-btn" style="display:none">${tr('cancel')}</button>
+        <button class="mts-btn-toolbar" data-action="suggest-instructions" disabled title="${tr('suggestInstructionsHint')}">${tr('suggestInstructions')}</button>
         <button class="mts-btn-primary mts-btn-translate" data-action="translate" disabled>${tr('translate')}</button>
       </div>
       <div class="mts-grid">${cards}</div>
@@ -1453,6 +1575,7 @@ function bindScanner(shadow: ShadowRoot): void {
   const grid = shadow.querySelector<HTMLElement>('.mts-grid')!;
   const countEl = shadow.querySelector<HTMLElement>('#mts-count')!;
   const translateBtn = shadow.querySelector<HTMLButtonElement>('[data-action="translate"]')!;
+  const suggestBtn = shadow.querySelector<HTMLButtonElement>('[data-action="suggest-instructions"]')!;
   const cancelBtn = shadow.querySelector<HTMLButtonElement>('#mts-cancel-btn')!;
   const closeBtn = shadow.querySelector<HTMLButtonElement>('[data-action="close"]')!;
   const backdrop = shadow.querySelector<HTMLElement>('.mts-backdrop')!;
@@ -1466,6 +1589,7 @@ function bindScanner(shadow: ShadowRoot): void {
   const refresh = () => {
     countEl.textContent = `${selected.size} / ${currentPages.length}`;
     translateBtn.disabled = selected.size === 0;
+    suggestBtn.disabled = selected.size === 0;
   };
 
   grid.addEventListener('click', (e) => {
@@ -1507,6 +1631,29 @@ function bindScanner(shadow: ShadowRoot): void {
   });
 
   stopCollectBtn.addEventListener('click', () => { abortCollect = true; });
+
+  suggestBtn.addEventListener('click', async () => {
+    const chosen = Array.from(selected).map((i) => currentPages[i]);
+    if (chosen.length === 0) return;
+
+    const images = chosen
+      .map((p) => imageCache.get(p.rawUrl))
+      .filter((src): src is string => Boolean(src))
+      .map(extractBase64FromDataUrl)
+      .filter((b64): b64 is string => Boolean(b64))
+      .slice(0, SUGGEST_INSTRUCTIONS_MAX_IMAGES);
+
+    suggestBtn.disabled = true;
+    const originalLabel = suggestBtn.textContent;
+    suggestBtn.textContent = tr('suggesting');
+
+    try {
+      await runSuggestInstructions(images);
+    } finally {
+      suggestBtn.textContent = originalLabel;
+      suggestBtn.disabled = selected.size === 0;
+    }
+  });
 
   translateBtn.addEventListener('click', async () => {
     const chosen = Array.from(selected).map((i) => currentPages[i]);

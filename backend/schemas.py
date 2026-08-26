@@ -75,3 +75,24 @@ class TranslateBatchResponse(BaseModel):
     total_time_seconds: float
     success_count: int
     error_count: int
+
+
+class SuggestInstructionsRequest(BaseModel):
+    """A handful of sample page images from the same manga, used for a
+    one-off LLM call that drafts Special Instructions text (cast,
+    relationships, tone) for the user to review before saving."""
+
+    images: List[str]  # raw base64 sample page images, no data: prefix
+    output_language: str
+    provider: str
+    base_url: Optional[str] = None
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    temperature: float = 0.1
+    top_p: float = 0.95
+    top_k: int = 40
+    reasoning_effort: Optional[str] = None
+
+
+class SuggestInstructionsResponse(BaseModel):
+    suggestion: str

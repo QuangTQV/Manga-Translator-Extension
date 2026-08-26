@@ -1,11 +1,16 @@
 """FastAPI translation endpoints."""
 import asyncio
+import base64
+import io
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, HTTPException
+from PIL import Image
 
 from schemas import (
+    SuggestInstructionsRequest,
+    SuggestInstructionsResponse,
     TranslateBatchItem,
     TranslateBatchItemResponse,
     TranslateBatchRequest,
@@ -13,12 +18,19 @@ from schemas import (
     TranslateRequest,
     TranslateResponse,
 )
+from core.services.translation import generate_character_notes
 from pipeline.wrapper import (
     _build_config,
     image_to_base64_raw,
     translate_image_base64,
 )
 from config import settings
+
+# Sample images for /suggest-instructions are for a cast/tone overview, not
+# pixel-perfect reading — cap count and resolution so this stays a cheap,
+# one-off call regardless of how many/how large the pages the user selected.
+SUGGEST_INSTRUCTIONS_MAX_IMAGES = 8
+SUGGEST_INSTRUCTIONS_MAX_DIMENSION = 1024
 
 router = APIRouter(prefix="", tags=["translate"])
 
@@ -186,6 +198,83 @@ async def translate_batch(req: TranslateBatchRequest) -> TranslateBatchResponse:
         success_count=success_count,
         error_count=error_count,
     )
+
+
+def _downscale_and_reencode_jpeg(raw_b64: str, max_dimension: int) -> str:
+    """Decode a client-supplied base64 image, downscale if needed, and
+    re-encode as JPEG. Guarantees the mime type we tell the LLM provider
+    (image/jpeg) actually matches the bytes, regardless of what format the
+    client originally captured (PNG from canvas capture, JPEG from a raw
+    fetch fallback, etc.)."""
+    image = Image.open(io.BytesIO(base64.b64decode(raw_b64)))
+    image.load()
+    if image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+    if max(image.size) > max_dimension:
+        scale = max_dimension / max(image.size)
+        new_size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+        image = image.resize(new_size, Image.LANCZOS)
+    return image_to_base64_raw(image, fmt="JPEG")
+
+
+@router.post("/suggest-instructions", response_model=SuggestInstructionsResponse)
+async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstructionsResponse:
+    """Draft Special Instructions text from a handful of sample pages.
+
+    A single explicit, user-triggered LLM call — not part of the
+    per-page translation pipeline or cache. The user is expected to
+    review/edit the result before saving it.
+    """
+    if not req.images:
+        raise HTTPException(status_code=400, detail="No sample images provided.")
+
+    sample_images = req.images[:SUGGEST_INSTRUCTIONS_MAX_IMAGES]
+
+    try:
+        prepared_images = [
+            _downscale_and_reencode_jpeg(img, SUGGEST_INSTRUCTIONS_MAX_DIMENSION)
+            for img in sample_images
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid sample image: {e}")
+
+    config = _build_config(
+        input_language="Auto",
+        output_language=req.output_language,
+        provider=req.provider,
+        base_url=req.base_url,
+        model_name=req.model_name,
+        api_key=req.api_key,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        top_k=req.top_k,
+        max_tokens=None,
+        translation_mode="one-step",
+        ocr_method="LLM",
+        reasoning_effort=req.reasoning_effort,
+        special_instructions=None,
+        font_dir=None,
+        max_font_size=16,
+        min_font_size=8,
+        supersampling_factor=1,
+        send_full_page_context=False,
+        image_detail="auto",
+        outside_text_enabled=False,
+        models_dir=settings.models_dir,
+        fonts_base_dir=settings.fonts_base_dir,
+    )
+
+    try:
+        suggestion = await asyncio.to_thread(
+            generate_character_notes,
+            config.translation,
+            prepared_images,
+            req.output_language,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate suggestion: {e}")
+
+    return SuggestInstructionsResponse(suggestion=suggestion)
 
 
 @router.get("/health")
