@@ -2374,6 +2374,14 @@ async function loadThumbnailsInBackground(): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveLazySrc(img: HTMLImageElement): string | null {
+  // Reuse the URL Auto-translate already resolved and cached under for this
+  // element (data-mt-raw), same as resolveMangaUrl does — otherwise a page
+  // whose lazy-load attribute got swapped/removed after it finished loading
+  // resolves to a DIFFERENT URL here than the one it was translated and
+  // cached under, so the scanner's translatedCache lookup misses and the
+  // "MT" badge never shows even though the page really is translated.
+  const existingRaw = img.getAttribute('data-mt-raw');
+  if (existingRaw && !existingRaw.startsWith('data:')) return existingRaw;
   return resolveLazyAttributeSrc(img) ?? (isUsableImageUrl(img.currentSrc || img.src) ? (img.currentSrc || img.src) : null);
 }
 
@@ -2522,7 +2530,11 @@ function bindScanner(shadow: ShadowRoot): void {
     countEl.textContent = `${selected.size} / ${currentPages.length}`;
     translateBtn.disabled = selected.size === 0;
     suggestBtn.disabled = selected.size === 0;
-    fixSelectedBtn.disabled = selected.size === 0;
+    // Fix Selected only acts on pages that are already translated (it re-
+    // translates them with a correction attached) — disable it rather than
+    // silently no-op with just a toast when nothing selected qualifies, so
+    // it's clear at a glance which pages the button will actually affect.
+    fixSelectedBtn.disabled = !Array.from(selected).some((i) => translatedCache.has(currentPages[i].rawUrl));
   };
 
   grid.addEventListener('click', (e) => {
