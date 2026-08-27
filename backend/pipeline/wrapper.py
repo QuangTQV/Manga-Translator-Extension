@@ -216,6 +216,8 @@ def _build_config(
     fonts_base_dir: Path,
     base_url: str | None = None,
     llm_instructions: str | None = None,
+    context_memory_enabled: bool = False,
+    context_memory: str | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -280,6 +282,8 @@ def _build_config(
         reasoning_effort=reasoning_effort,
         special_instructions=special_instructions,
         llm_instructions=llm_instructions,
+        context_memory_enabled=context_memory_enabled,
+        context_memory=context_memory,
         ocr_method=ocr_method,
         send_full_page_context=send_full_page_context,
         whiteout_conjoined_bubbles=True,
@@ -453,7 +457,7 @@ def translate_image_base64(
     image_b64: str,
     config: MangaTranslatorConfig,
     previous_context_texts: list[list[str]] | None = None,
-) -> tuple[Image.Image, list[dict[str, Any]], float, list[str]]:
+) -> tuple[Image.Image, list[dict[str, Any]], float, list[str], str | None]:
     """Translate a base64-encoded image using MangaTranslator pipeline.
 
     Args:
@@ -466,7 +470,8 @@ def translate_image_base64(
     Returns:
         Tuple of (translated PIL Image, bubble info list, processing time in
         seconds, this page's OCR transcripts in reading order — pass this back
-        in as part of previous_context_texts on the next page's call)
+        in as part of previous_context_texts on the next page's call, this
+        page's MEMORY NOTE summary or None if context_memory_enabled was off)
     """
     start = time.time()
 
@@ -488,6 +493,7 @@ def translate_image_base64(
     bubbles_info: list[dict[str, Any]] = []
     translated_image: Image.Image = pil_image
     ocr_texts_out: list[str] = []
+    memory_note_out: list[str] = []
 
     if previous_context_texts:
         config.translation.previous_context_text_count = min(
@@ -504,6 +510,7 @@ def translate_image_base64(
             output_path=tmp_output_path,
             previous_context_texts=previous_context_texts,
             ocr_texts_out=ocr_texts_out,
+            memory_note_out=memory_note_out,
         )
 
         if isinstance(result, Image.Image):
@@ -530,4 +537,5 @@ def translate_image_base64(
             pass
 
     elapsed = time.time() - start
-    return translated_image, bubbles_info, elapsed, ocr_texts_out
+    memory_note = memory_note_out[0] if memory_note_out else None
+    return translated_image, bubbles_info, elapsed, ocr_texts_out, memory_note

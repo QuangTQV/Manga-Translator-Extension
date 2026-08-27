@@ -18,6 +18,7 @@ export interface TranslateConfig {
   reasoningEffort?: string;
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
+  contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
   fontDir?: string;
   maxFontSize: number;
   minFontSize: number;
@@ -44,6 +45,7 @@ export interface TranslateResponse {
   target_language: string;
   provider: string;
   ocr_texts?: string[]; // this page's OCR transcripts, in reading order
+  memory_note?: string; // this page's one-sentence context-memory summary, if enabled
 }
 
 export interface TranslateBatchItemResponse {
@@ -53,6 +55,7 @@ export interface TranslateBatchItemResponse {
   error?: string;
   processing_time_seconds?: number;
   ocr_texts?: string[];
+  memory_note?: string;
 }
 
 export interface TranslateBatchResponse {
@@ -88,6 +91,8 @@ export interface TranslateRequest {
   reasoning_effort?: string;
   special_instructions?: string;
   llm_instructions?: string;
+  context_memory_enabled?: boolean;
+  context_memory?: string;
   font_dir?: string;
   max_font_size: number;
   min_font_size: number;
@@ -148,6 +153,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     outsideTextEnabled: false,
     preTranslate: false,
     previousContextEnabled: false,
+    contextMemoryEnabled: false,
   },
 };
 

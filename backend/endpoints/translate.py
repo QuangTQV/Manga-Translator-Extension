@@ -81,6 +81,8 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
         reasoning_effort=req.reasoning_effort,
         special_instructions=req.special_instructions,
         llm_instructions=req.llm_instructions,
+        context_memory_enabled=req.context_memory_enabled,
+        context_memory=req.context_memory,
         font_dir=req.font_dir,
         max_font_size=req.max_font_size,
         min_font_size=req.min_font_size,
@@ -94,7 +96,7 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
 
     start = time.time()
     try:
-        result_image, bubbles, elapsed, ocr_texts = await asyncio.to_thread(
+        result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
             translate_image_base64, req.image, config, req.previous_context_texts
         )
     except Exception as e:
@@ -110,6 +112,7 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
         target_language=req.output_language,
         provider=req.provider,
         ocr_texts=ocr_texts,
+        memory_note=memory_note,
     )
 
 
@@ -140,6 +143,8 @@ def _translate_single_item(
             reasoning_effort=req.reasoning_effort,
             special_instructions=req.special_instructions,
             llm_instructions=req.llm_instructions,
+            context_memory_enabled=req.context_memory_enabled,
+            context_memory=req.context_memory,
             font_dir=req.font_dir,
             max_font_size=req.max_font_size,
             min_font_size=req.min_font_size,
@@ -151,7 +156,7 @@ def _translate_single_item(
             fonts_base_dir=fonts_dir,
         )
 
-        result_image, bubbles, _, ocr_texts = translate_image_base64(
+        result_image, bubbles, _, ocr_texts, memory_note = translate_image_base64(
             item.image, config, req.previous_context_texts
         )
         translated_b64 = image_to_base64_raw(result_image)
@@ -161,6 +166,7 @@ def _translate_single_item(
             bubbles=_build_bubble_info(bubbles),
             processing_time_seconds=t.time() - item_start,
             ocr_texts=ocr_texts,
+            memory_note=memory_note,
         )
     except Exception as e:
         return TranslateBatchItemResponse(

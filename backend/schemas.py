@@ -37,6 +37,8 @@ class TranslateOptions(BaseModel):
     image_detail: str = "auto"
     outside_text_enabled: bool = False
     previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
+    context_memory_enabled: bool = False  # ask the model for a MEMORY NOTE summary each page
+    context_memory: Optional[str] = None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted
 
 
 class TranslateRequest(TranslateOptions):
@@ -51,6 +53,7 @@ class TranslateResponse(BaseModel):
     target_language: str
     provider: str
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
+    memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
 
 
 class TranslateBatchItem(BaseModel):
@@ -69,6 +72,7 @@ class TranslateBatchItemResponse(BaseModel):
     error: Optional[str] = None
     processing_time_seconds: Optional[float] = None
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
+    memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
 
 
 class TranslateBatchResponse(BaseModel):

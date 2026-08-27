@@ -742,10 +742,15 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     return;
   }
 
+  const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
+  const storyKey = contextMemoryEnabled ? contextMemoryStoryKey(pageUrl) : '';
+  const contextMemoryText = contextMemoryEnabled ? await loadContextMemoryText(storyKey) : '';
+
   const body = buildTranslateRequest(
     imgData,
     settings,
     settings.config.previousContextEnabled ?? false ? autoTranslatePreviousTexts : undefined,
+    contextMemoryText,
   );
 
   console.log('[MT] routing translated body through background:', url);
@@ -778,6 +783,10 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     if (autoTranslatePreviousTexts.length > PREVIOUS_CONTEXT_MAX_PAGES) {
       autoTranslatePreviousTexts.shift();
     }
+  }
+
+  if (contextMemoryEnabled && result.memory_note) {
+    void appendContextMemoryNote(storyKey, result.memory_note);
   }
 
   // Apply to the image element on page
@@ -1151,6 +1160,90 @@ async function clearTranslatedCache(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Context memory: per-story rolling MEMORY NOTE summaries ("trí nhớ context")
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CONTEXT_MEMORY_PREFIX = 'mt_context_memory:';
+const CONTEXT_MEMORY_INDEX_KEY = 'mt_context_memory_index';
+// Rolling summaries kept per story, and distinct stories kept overall —
+// both small (short sentences / short key list), so no unbounded growth risk.
+const MAX_CONTEXT_MEMORY_PAGES = 10;
+const MAX_CONTEXT_MEMORY_STORIES = 20;
+
+interface ContextMemoryEntry {
+  pages: string[];
+}
+
+// Groups pages of the same chapter/story together by stripping the trailing
+// numeric page-number path segment (and query string) from the URL — good
+// enough for a single reading session without needing full chapter-URL
+// pattern detection (that lives in background/index.ts for chapter collection).
+function contextMemoryStoryKey(pageUrl: string): string {
+  try {
+    const u = new URL(pageUrl);
+    const path = u.pathname.replace(/\/(\d+)\/?$/, '/');
+    return `${u.origin}${path}`;
+  } catch {
+    return pageUrl;
+  }
+}
+
+function contextMemoryStorageKey(storyKey: string): string {
+  let hash = 0;
+  for (let i = 0; i < storyKey.length; i++) {
+    hash = ((hash << 5) - hash + storyKey.charCodeAt(i)) | 0;
+  }
+  return `${CONTEXT_MEMORY_PREFIX}${Math.abs(hash).toString(36)}`;
+}
+
+async function loadContextMemoryText(storyKey: string): Promise<string> {
+  try {
+    const key = contextMemoryStorageKey(storyKey);
+    const result = await chrome.storage.local.get(key);
+    const entry = result[key] as ContextMemoryEntry | undefined;
+    if (!entry?.pages?.length) return '';
+    return entry.pages.map((s, i) => `Page ${i + 1}: ${s}`).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+// Bumps storyKey's storage key to most-recently-used in a small bounded
+// index, evicting the least-recently-used story's memory once over the cap.
+// Deliberately never reads chrome.storage.local.get(null) — that pulls the
+// (potentially huge) translated-image cache into memory too. See
+// clearTranslatedCache() above for why that's a real crash risk.
+async function touchContextMemoryIndex(storageKey: string): Promise<void> {
+  try {
+    const result = await chrome.storage.local.get(CONTEXT_MEMORY_INDEX_KEY);
+    let index = (result[CONTEXT_MEMORY_INDEX_KEY] as string[] | undefined) ?? [];
+    index = index.filter((k) => k !== storageKey);
+    index.push(storageKey);
+    const toRemove: string[] = [];
+    while (index.length > MAX_CONTEXT_MEMORY_STORIES) {
+      const evicted = index.shift();
+      if (evicted) toRemove.push(evicted);
+    }
+    await chrome.storage.local.set({ [CONTEXT_MEMORY_INDEX_KEY]: index });
+    if (toRemove.length) await chrome.storage.local.remove(toRemove);
+  } catch { /* ignore */ }
+}
+
+async function appendContextMemoryNote(storyKey: string, note: string): Promise<void> {
+  const trimmed = note.trim();
+  if (!trimmed) return;
+  try {
+    const key = contextMemoryStorageKey(storyKey);
+    const result = await chrome.storage.local.get(key);
+    const entry = result[key] as ContextMemoryEntry | undefined;
+    const pages = [...(entry?.pages ?? []), trimmed];
+    while (pages.length > MAX_CONTEXT_MEMORY_PAGES) pages.shift();
+    await chrome.storage.local.set({ [key]: { pages } as ContextMemoryEntry });
+    await touchContextMemoryIndex(key);
+  } catch { /* ignore */ }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Auto-translate: floating UI
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1254,7 +1347,7 @@ function updateAutoTranslateCounter(): void {
 // Background helpers (bypass CORS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; error?: string }> {
+function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 5 minutes' }), 300_000);
     chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE_WITH_BODY', imageUrl, pageUrl, body }, (resp: unknown) => {
@@ -1264,7 +1357,7 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
         resolve({ error: `extension error: ${lastError.message}` });
         return;
       }
-      resolve((resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; error?: string }) ?? { error: 'no response' });
+      resolve((resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; error?: string }) ?? { error: 'no response' });
     });
   });
 }
@@ -1781,7 +1874,9 @@ function buildTranslateRequest(
   image: string,
   settings: AppSettings,
   previousContextTexts?: string[][],
+  contextMemoryText?: string,
 ): TranslateRequest {
+  const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
   return {
     image,
     input_language: settings.config.inputLanguage,
@@ -1807,6 +1902,8 @@ function buildTranslateRequest(
     image_detail: settings.config.imageDetail,
     outside_text_enabled: settings.config.outsideTextEnabled ?? false,
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
+    context_memory_enabled: contextMemoryEnabled,
+    context_memory: contextMemoryEnabled && contextMemoryText ? contextMemoryText : undefined,
   };
 }
 
@@ -1845,7 +1942,11 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 
   if (statusEl) { statusEl.textContent = tr('sending'); statusEl.className = 'mts-card-status translating'; }
 
-  const body = buildTranslateRequest(imgData, settings);
+  const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
+  const storyKey = contextMemoryEnabled ? contextMemoryStoryKey(window.location.href) : '';
+  const contextMemoryText = contextMemoryEnabled ? await loadContextMemoryText(storyKey) : '';
+
+  const body = buildTranslateRequest(imgData, settings, undefined, contextMemoryText);
 
   try {
     if (statusEl) statusEl.textContent = tr('translating');
@@ -1858,6 +1959,10 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
     if (!result.translated_image) {
       if (statusEl) { statusEl.textContent = tr('noResult'); statusEl.className = 'mts-card-status failed'; }
       return false;
+    }
+
+    if (contextMemoryEnabled && result.memory_note) {
+      void appendContextMemoryNote(storyKey, result.memory_note);
     }
 
     const translatedB64 = result.translated_image;
@@ -2008,6 +2113,7 @@ function getDefaultSettings(): AppSettings {
       outsideTextEnabled: false,
       preTranslate: false,
       previousContextEnabled: false,
+      contextMemoryEnabled: false,
     },
   };
 }

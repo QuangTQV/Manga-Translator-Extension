@@ -23,6 +23,7 @@ const targetSelect = qs<HTMLSelectElement>('f-target');
 const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
 const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
+const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
@@ -180,6 +181,7 @@ async function loadAndBind(): Promise<void> {
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
+  contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
 
   llmProviderSelect.value = settings.config.provider;
   baseUrlInput.value = settings.config.baseUrl ?? '';
@@ -223,7 +225,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle]) {
+  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
 
@@ -504,6 +506,7 @@ function collectAllSettings(): AppSettings {
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,
       previousContextEnabled: previousContextToggle.checked,
+      contextMemoryEnabled: contextMemoryToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
     },

@@ -99,6 +99,8 @@ class TranslationConfig:
     osb_min_side_pixels: int = 128
     special_instructions: Optional[str] = None  # per-story notes (glossary, character relationships)
     llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
+    context_memory_enabled: bool = False  # require a MEMORY NOTE summary each page, for the caller to accumulate
+    context_memory: Optional[str] = None  # caller-accumulated MEMORY NOTE summaries from earlier pages of this story
     ocr_method: str = "LLM"  # "LLM", "manga-ocr", or "paddleocr-vl"
 
 
