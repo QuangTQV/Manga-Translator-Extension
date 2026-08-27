@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import time
+from dataclasses import replace
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
@@ -716,6 +717,80 @@ def _build_generation_config(
         raise TranslationError(f"Unknown provider for generation config: {provider}")
 
 
+# Maps each provider to the TranslationConfig field holding its API key —
+# used to build rotated config variants for backup keys / fallback providers
+# without needing a separate branch per provider.
+_PROVIDER_API_KEY_FIELD = {
+    "Google": "google_api_key",
+    "OpenAI": "openai_api_key",
+    "Azure OpenAI": "azure_openai_api_key",
+    "Anthropic": "anthropic_api_key",
+    "xAI": "xai_api_key",
+    "DeepSeek": "deepseek_api_key",
+    "Z.ai": "zai_api_key",
+    "Moonshot AI": "moonshot_api_key",
+    "OpenRouter": "openrouter_api_key",
+    "OpenAI-Compatible": "openai_compatible_api_key",
+}
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """True if this is a TranslationError raised after a provider endpoint
+    exhausted its own internal 429 retries — every utils/endpoints/*.py
+    module raises with this exact wording on that path."""
+    return "Rate limited after" in str(exc)
+
+
+def _iter_llm_candidates(config: TranslationConfig):
+    """Yield TranslationConfig variants to try in order: the config exactly
+    as given (so "API key is missing" etc. behave unchanged when no backups/
+    fallbacks are configured), then the same provider/model with each backup
+    key, then each fallback provider with each of its keys in turn.
+
+    A (provider, key) pair is only ever yielded once — retrying the exact
+    same account under a different label wastes a rate-limited request
+    instead of actually rotating to fresh quota, so duplicates anywhere in
+    the chain (primary vs. backups, backups vs. each other, vs. a fallback
+    provider reusing the same key) are silently skipped after the first.
+    """
+    yield config
+    seen: set = set()
+
+    key_field = _PROVIDER_API_KEY_FIELD.get(config.provider)
+    primary_key = getattr(config, key_field, None) if key_field else None
+    if key_field and primary_key:
+        seen.add((config.provider, primary_key))
+    if key_field:
+        for backup_key in config.backup_api_keys or []:
+            if not backup_key or (config.provider, backup_key) in seen:
+                continue
+            seen.add((config.provider, backup_key))
+            yield replace(config, **{key_field: backup_key})
+
+    for fb in config.fallback_providers or []:
+        fb_key_field = _PROVIDER_API_KEY_FIELD.get(fb.provider)
+        if fb_key_field is None:
+            continue
+        extra_fields: Dict[str, Any] = {}
+        if fb.provider == "Azure OpenAI":
+            extra_fields["azure_openai_endpoint"] = fb.azure_openai_endpoint
+            extra_fields["azure_openai_api_version"] = fb.azure_openai_api_version
+            extra_fields["azure_openai_is_v1"] = fb.azure_openai_is_v1
+        elif fb.provider == "OpenAI-Compatible":
+            extra_fields["openai_compatible_url"] = fb.openai_compatible_url
+        for fb_key in fb.api_keys or []:
+            if not fb_key or (fb.provider, fb_key) in seen:
+                continue
+            seen.add((fb.provider, fb_key))
+            yield replace(
+                config,
+                provider=fb.provider,
+                model_name=fb.model_name or config.model_name,
+                **{fb_key_field: fb_key},
+                **extra_fields,
+            )
+
+
 def _call_llm_endpoint(
     config: TranslationConfig,
     parts: List[Dict[str, Any]],
@@ -723,22 +798,48 @@ def _call_llm_endpoint(
     debug: bool = False,
     system_prompt: Optional[str] = None,
 ) -> Optional[str]:
-    """Dispatch an LLM API call and log how long it took (for debugging).
+    """Dispatch an LLM API call, rotating through backup keys and fallback
+    providers on rate limit, and log how long each attempt took.
 
-    Wraps _call_llm_endpoint_impl purely to time it — every call site goes
-    through here, so this is the single place that needs to log LLM
-    latency separately from the rest of the pipeline (detection/cleaning/
-    upscaling/rendering), which "Processing completed in Xs" lumps together.
+    Every call site goes through here, so this is the single place that
+    needs to log LLM latency separately from the rest of the pipeline
+    (detection/cleaning/upscaling/rendering), which "Processing completed
+    in Xs" lumps together — and the single choke point for key/provider
+    rotation, so OCR and translation calls both benefit automatically.
     """
-    start = time.time()
-    try:
-        return _call_llm_endpoint_impl(config, parts, prompt_text, debug, system_prompt)
-    finally:
-        elapsed = time.time() - start
-        log_message(
-            f"LLM call ({config.provider} / {config.model_name}) took {elapsed:.2f}s",
-            always_print=True,
-        )
+    candidates = list(_iter_llm_candidates(config))
+    last_error: Optional[Exception] = None
+    for idx, candidate in enumerate(candidates):
+        start = time.time()
+        try:
+            result = _call_llm_endpoint_impl(
+                candidate, parts, prompt_text, debug, system_prompt
+            )
+            elapsed = time.time() - start
+            log_message(
+                f"LLM call ({candidate.provider} / {candidate.model_name}) took {elapsed:.2f}s",
+                always_print=True,
+            )
+            return result
+        except TranslationError as e:
+            elapsed = time.time() - start
+            log_message(
+                f"LLM call ({candidate.provider} / {candidate.model_name}) "
+                f"failed after {elapsed:.2f}s: {e}",
+                always_print=True,
+            )
+            last_error = e
+            if idx < len(candidates) - 1 and _is_rate_limit_error(e):
+                log_message(
+                    f"Rate limited on candidate {idx + 1}/{len(candidates)} "
+                    f"({candidate.provider}) — rotating to next key/provider.",
+                    always_print=True,
+                )
+                continue
+            raise
+    if last_error:
+        raise last_error
+    return None
 
 
 def _call_llm_endpoint_impl(

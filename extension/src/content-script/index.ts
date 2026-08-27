@@ -1904,6 +1904,15 @@ function buildTranslateRequest(
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
     context_memory_enabled: contextMemoryEnabled,
     context_memory: contextMemoryEnabled && contextMemoryText ? contextMemoryText : undefined,
+    backup_api_keys: settings.config.backupApiKeys?.length ? settings.config.backupApiKeys : undefined,
+    fallback_providers: settings.config.fallbackProviders?.length
+      ? settings.config.fallbackProviders.map((fb) => ({
+          provider: fb.provider,
+          model_name: fb.modelName,
+          api_keys: fb.apiKeys,
+          base_url: fb.baseUrl,
+        }))
+      : undefined,
   };
 }
 

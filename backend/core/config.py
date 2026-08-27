@@ -1,10 +1,27 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional
 
 import torch
 
 from core.device import get_best_device
 from core.llm_defaults import DEFAULT_LLM_PROVIDER, get_provider_sampling_defaults
+
+
+@dataclass
+class FallbackProviderConfig:
+    """A fallback LLM provider to try if the primary provider (and its
+    backup keys) are all rate-limited. Endpoint/version fields are only
+    used when `provider` needs them (Azure OpenAI, OpenAI-Compatible) —
+    pre-normalized the same way the primary provider's are, in
+    pipeline/wrapper.py:_build_config()."""
+
+    provider: str
+    model_name: str = ""
+    api_keys: List[str] = field(default_factory=list)
+    azure_openai_endpoint: str = ""
+    azure_openai_api_version: str = ""
+    azure_openai_is_v1: bool = False
+    openai_compatible_url: str = ""
 
 
 @dataclass
@@ -102,6 +119,10 @@ class TranslationConfig:
     context_memory_enabled: bool = False  # require a MEMORY NOTE summary each page, for the caller to accumulate
     context_memory: Optional[str] = None  # caller-accumulated MEMORY NOTE summaries from earlier pages of this story
     ocr_method: str = "LLM"  # "LLM", "manga-ocr", or "paddleocr-vl"
+    backup_api_keys: List[str] = field(default_factory=list)  # extra keys for the same provider/model, tried on rate limit
+    fallback_providers: List[FallbackProviderConfig] = field(
+        default_factory=list
+    )  # tried in order after the primary provider and its backup keys are all rate-limited
 
 
 @dataclass

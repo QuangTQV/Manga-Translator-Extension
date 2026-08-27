@@ -83,6 +83,12 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
         llm_instructions=req.llm_instructions,
         context_memory_enabled=req.context_memory_enabled,
         context_memory=req.context_memory,
+        backup_api_keys=req.backup_api_keys,
+        fallback_providers=(
+            [fb.model_dump() for fb in req.fallback_providers]
+            if req.fallback_providers
+            else None
+        ),
         font_dir=req.font_dir,
         max_font_size=req.max_font_size,
         min_font_size=req.min_font_size,
@@ -145,6 +151,12 @@ def _translate_single_item(
             llm_instructions=req.llm_instructions,
             context_memory_enabled=req.context_memory_enabled,
             context_memory=req.context_memory,
+            backup_api_keys=req.backup_api_keys,
+            fallback_providers=(
+                [fb.model_dump() for fb in req.fallback_providers]
+                if req.fallback_providers
+                else None
+            ),
             font_dir=req.font_dir,
             max_font_size=req.max_font_size,
             min_font_size=req.min_font_size,

@@ -11,6 +11,16 @@ class BubbleInfo(BaseModel):
     translated_text: str
 
 
+class FallbackProviderConfig(BaseModel):
+    """A fallback LLM provider to try if the primary provider (and its
+    backup keys) are all rate-limited."""
+
+    provider: str
+    model_name: Optional[str] = None
+    api_keys: List[str] = []
+    base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
+
+
 class TranslateOptions(BaseModel):
     """Fields shared by single and batch translation requests."""
 
@@ -39,6 +49,8 @@ class TranslateOptions(BaseModel):
     previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
     context_memory_enabled: bool = False  # ask the model for a MEMORY NOTE summary each page
     context_memory: Optional[str] = None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted
+    backup_api_keys: Optional[List[str]] = None  # extra keys for the same provider/model, tried on rate limit
+    fallback_providers: Optional[List[FallbackProviderConfig]] = None  # tried after primary + backup keys are rate-limited
 
 
 class TranslateRequest(TranslateOptions):
