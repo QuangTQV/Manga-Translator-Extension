@@ -1,4 +1,5 @@
 import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
+import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
 const STYLE_ID = 'mt-scanner-style';
@@ -54,6 +55,16 @@ const EN_MESSAGES = {
   fixHintApplying: 'Re-translating...',
   fixHintEmpty: 'Enter a correction first',
   fixHintError: 'Fix failed — try again',
+  exportPageTitle: 'Download this translated page',
+  btnExportAll: 'Export',
+  exportingStatus: 'Exporting...',
+  exportNoneTranslated: 'No translated pages to export yet',
+  exportDone: 'Exported {count} page(s)',
+  btnFixSelected: 'Fix Selected',
+  fixSelectedTitle: 'Fix translation for {count} selected page(s)',
+  fixSelectedPlaceholder: 'Describe the correction, e.g. "character name Yuki was mistranslated as Yuuki"',
+  fixSelectedNoneTranslated: 'None of the selected pages are translated yet',
+  fixSelectedDone: 'Fixed {success}/{total} page(s)',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -105,6 +116,16 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintApplying: 'Dang dich lai...',
     fixHintEmpty: 'Nhap noi dung can sua truoc',
     fixHintError: 'Sua that bai - thu lai',
+    exportPageTitle: 'Tai anh da dich cua trang nay',
+    btnExportAll: 'Xuat',
+    exportingStatus: 'Dang xuat...',
+    exportNoneTranslated: 'Chua co trang nao da dich de xuat',
+    exportDone: 'Da xuat {count} trang',
+    btnFixSelected: 'Sua trang da chon',
+    fixSelectedTitle: 'Sua ban dich cho {count} trang da chon',
+    fixSelectedPlaceholder: 'Mo ta cach sua, vd "ten nhan vat Yuki bi dich nham thanh Yuuki"',
+    fixSelectedNoneTranslated: 'Chua co trang nao trong lua chon duoc dich',
+    fixSelectedDone: 'Da sua {success}/{total} trang',
   },
   zh: {
     autoMt: '自动 MT',
@@ -151,6 +172,16 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintApplying: '重新翻译中...',
     fixHintEmpty: '请先输入修正内容',
     fixHintError: '修正失败 - 请重试',
+    exportPageTitle: '下载这一页的翻译图片',
+    btnExportAll: '导出',
+    exportingStatus: '正在导出...',
+    exportNoneTranslated: '还没有已翻译的页面可导出',
+    exportDone: '已导出 {count} 页',
+    btnFixSelected: '修正所选页面',
+    fixSelectedTitle: '为已选的 {count} 个页面修正翻译',
+    fixSelectedPlaceholder: '描述修正内容，例如"角色名 Yuki 被误译为 Yuuki"',
+    fixSelectedNoneTranslated: '所选页面中还没有已翻译的',
+    fixSelectedDone: '已修正 {success}/{total} 页',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -197,6 +228,16 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintApplying: '再翻訳中...',
     fixHintEmpty: '修正内容を入力してください',
     fixHintError: '修正に失敗しました - 再試行してください',
+    exportPageTitle: 'このページの翻訳画像をダウンロード',
+    btnExportAll: 'エクスポート',
+    exportingStatus: 'エクスポート中...',
+    exportNoneTranslated: 'まだエクスポートできる翻訳済みページがありません',
+    exportDone: '{count} ページをエクスポートしました',
+    btnFixSelected: '選択したページを修正',
+    fixSelectedTitle: '選択した {count} ページの翻訳を修正',
+    fixSelectedPlaceholder: '修正内容を入力（例:「キャラクター名 Yuki が Yuuki と誤訳されている」）',
+    fixSelectedNoneTranslated: '選択したページの中に翻訳済みのものがありません',
+    fixSelectedDone: '{success}/{total} ページを修正しました',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -243,6 +284,16 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintApplying: '다시 번역 중...',
     fixHintEmpty: '수정 내용을 먼저 입력하세요',
     fixHintError: '수정 실패 - 다시 시도하세요',
+    exportPageTitle: '이 페이지의 번역 이미지 다운로드',
+    btnExportAll: '내보내기',
+    exportingStatus: '내보내는 중...',
+    exportNoneTranslated: '아직 내보낼 번역된 페이지가 없습니다',
+    exportDone: '{count}개 페이지를 내보냈습니다',
+    btnFixSelected: '선택한 페이지 수정',
+    fixSelectedTitle: '선택한 {count}개 페이지의 번역 수정',
+    fixSelectedPlaceholder: '수정 내용을 입력하세요 (예: "캐릭터 이름 Yuki가 Yuuki로 잘못 번역됨")',
+    fixSelectedNoneTranslated: '선택한 페이지 중 번역된 것이 없습니다',
+    fixSelectedDone: '{success}/{total}개 페이지를 수정했습니다',
   },
 };
 
@@ -363,6 +414,60 @@ function extractBase64FromDataUrl(src: string): string | null {
   const match = /^data:image\/[\w+.-]+;base64,([A-Za-z0-9+/]+=*)$/.exec(src);
   return match ? match[1] : null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Export: download translated page(s) as PNG (single page) or a ZIP (batch)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function base64ToBlob(base64: string, mimeType = 'image/png'): Blob {
+  const byteChars = atob(base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  return new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// Best-effort readable filename from the source image URL — falls back to a
+// generic name if the URL has no usable path segment (e.g. a blob: URL).
+function filenameFromUrl(url: string, index?: number): string {
+  let base = '';
+  try {
+    const parsed = new URL(url);
+    const last = parsed.pathname.split('/').filter(Boolean).pop();
+    if (last) base = last.replace(/\.[a-zA-Z0-9]+$/, '');
+  } catch { /* not a parseable absolute URL (e.g. blob:) */ }
+  if (!base) base = index !== undefined ? `page_${String(index + 1).padStart(3, '0')}` : 'page';
+  return `${base}-translated.png`;
+}
+
+function downloadTranslatedPage(base64: string, url: string, index?: number): void {
+  triggerDownload(base64ToBlob(base64), filenameFromUrl(url, index));
+}
+
+async function exportTranslatedPagesAsZip(
+  entries: Array<{ url: string; base64: string; index: number }>,
+  onStatus?: (text: string) => void,
+): Promise<void> {
+  const zip = new JSZip();
+  entries.forEach(({ url, base64, index }) => {
+    zip.file(filenameFromUrl(url, index).replace(/-translated\.png$/, '.png'), base64, { base64: true });
+  });
+  onStatus?.(tr('exportingStatus'));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  triggerDownload(blob, `manga-translated-${stamp}.zip`);
+}
+
 const AUTO_VIEWPORT_MARGIN_PX = 250;
 const AUTO_PREFETCH_PAGES = 3;
 // Pre-translate mode: how many pages can be queued/in-flight ahead of the
@@ -908,6 +1013,7 @@ function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: s
 
   // Add a subtle badge overlay
   addTranslatedBadge(img);
+  addExportButton(img);
 }
 
 function applyTranslatedOverlay(img: HTMLImageElement, dataUrl: string): void {
@@ -1024,10 +1130,91 @@ function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | 
   targetBadge.style.transform = 'translateX(-100%)';
 }
 
+function findExportButton(parent: HTMLElement, overlayId: string): HTMLElement | null {
+  for (const child of Array.from(parent.children)) {
+    if (
+      child instanceof HTMLElement
+      && child.classList.contains('mt-export-btn')
+      && child.getAttribute('data-mt-for') === overlayId
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const overlayId = getTranslatedOverlayId(img);
+  const targetBtn = btn ?? findExportButton(parent, overlayId);
+  if (!targetBtn) return;
+
+  const pos = getImagePositionWithinParent(img, parent);
+  // Stacked directly below the "MT" badge — avoids needing to know the
+  // badge's rendered width to sit beside it horizontally.
+  targetBtn.style.left = `${pos.x + pos.width - 4}px`;
+  targetBtn.style.top = `${pos.y + 22}px`;
+  targetBtn.style.right = 'auto';
+  targetBtn.style.transform = 'translateX(-100%)';
+}
+
+// A small per-page download button next to the "MT" badge — lets the
+// reader save just this page's translated image without opening the
+// scanner. Reads translatedCache at click time (not a captured dataUrl)
+// so it always exports whatever is currently applied, including after a
+// click-to-fix correction.
+function addExportButton(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') parent.style.position = 'relative';
+
+  const overlayId = getTranslatedOverlayId(img);
+  let btn = findExportButton(parent, overlayId);
+  if (!btn) {
+    btn = document.createElement('div');
+    btn.className = 'mt-export-btn';
+    btn.setAttribute('data-mt-for', overlayId);
+    parent.appendChild(btn);
+  }
+
+  btn.textContent = '⬇';
+  btn.title = tr('exportPageTitle');
+  btn.style.position = 'absolute';
+  btn.style.background = 'rgba(15,23,42,0.85)';
+  btn.style.color = 'white';
+  btn.style.fontSize = '10px';
+  btn.style.lineHeight = '1';
+  btn.style.padding = '2px 5px';
+  btn.style.borderRadius = '4px';
+  btn.style.cursor = 'pointer';
+  btn.style.pointerEvents = 'auto';
+  btn.style.zIndex = '10';
+  btn.style.fontFamily = 'Inter, system-ui, sans-serif';
+
+  const exportBtn = btn;
+  exportBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    const url = img.getAttribute('data-mt-raw') ?? resolveMangaUrl(img);
+    if (!url) return;
+    const b64 = translatedCache.get(url);
+    if (!b64) return;
+    downloadTranslatedPage(b64, url);
+  };
+
+  syncExportButtonLayout(img, btn);
+  scheduleTranslatedDecorationSync(img);
+}
+
 function syncTranslatedDecorations(img: HTMLImageElement): void {
   syncTranslatedOverlayLayout(img);
   syncTranslatedBadgeLayout(img);
   syncFixHitLayerLayout(img);
+  syncExportButtonLayout(img);
 }
 
 function scheduleTranslatedDecorationSync(img: HTMLImageElement): void {
@@ -1480,6 +1667,154 @@ async function submitFixHint(img: HTMLImageElement, bubbleIndex: number, bubble:
     fixHintPending--;
     if (fixHintPending === 0) void processAutoTranslateQueue();
   }
+}
+
+// Re-translates one already-translated scanner page with a general
+// (not bubble-targeted) correction note attached. Used by the "Fix
+// Selected" batch action — the same instruction is applied to every
+// chosen page, e.g. a character name mistranslated the same way across
+// several pages.
+async function fixOnePage(page: PageEntry, instruction: string): Promise<boolean> {
+  const settings = await loadSettings();
+  const imgData = await fetchImageData(page.rawUrl, window.location.href);
+  if (!imgData) return false;
+
+  const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
+  const storyKey = contextMemoryEnabled ? contextMemoryStoryKey(window.location.href) : '';
+  const contextMemoryText = contextMemoryEnabled ? await loadContextMemoryText(storyKey) : '';
+
+  const body: TranslateRequest = {
+    ...buildTranslateRequest(imgData, settings, undefined, contextMemoryText),
+    fix_hint: { instruction },
+  };
+
+  const result = await bgTranslateImageWithBody(page.rawUrl, window.location.href, body);
+  if (result.error || !result.translated_image) return false;
+
+  const translatedB64 = result.translated_image;
+  const translatedDataUrl = `data:image/png;base64,${translatedB64}`;
+  imageCache.set(page.rawUrl, translatedDataUrl);
+  rememberTranslated(page.rawUrl, translatedB64);
+  await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
+
+  if (contextMemoryEnabled && result.memory_note) {
+    void appendContextMemoryNote(storyKey, result.memory_note);
+  }
+
+  if (currentShadow) {
+    const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
+    const imgEl = card?.querySelector<HTMLImageElement>('.mts-thumb');
+    if (imgEl) imgEl.src = translatedDataUrl;
+  }
+
+  return true;
+}
+
+function openFixSelectedPopover(pages: PageEntry[]): void {
+  closeFixHintPopover();
+
+  const popover = document.createElement('div');
+  popover.className = 'mt-fix-popover';
+  popover.style.position = 'fixed';
+  popover.style.zIndex = '2147483647';
+  popover.style.background = '#1f2937';
+  popover.style.color = '#f9fafb';
+  popover.style.border = '1px solid rgba(255,255,255,0.15)';
+  popover.style.borderRadius = '8px';
+  popover.style.padding = '14px';
+  popover.style.width = '320px';
+  popover.style.boxShadow = '0 8px 24px rgba(0,0,0,0.35)';
+  popover.style.fontFamily = 'Inter, system-ui, sans-serif';
+  popover.style.fontSize = '12px';
+  popover.style.lineHeight = '1.4';
+  popover.style.top = '50%';
+  popover.style.left = '50%';
+  popover.style.transform = 'translate(-50%, -50%)';
+
+  const title = document.createElement('div');
+  title.style.fontWeight = '700';
+  title.style.marginBottom = '8px';
+  title.textContent = tr('fixSelectedTitle', { count: pages.length });
+  popover.appendChild(title);
+
+  const textarea = document.createElement('textarea');
+  textarea.placeholder = tr('fixSelectedPlaceholder');
+  textarea.rows = 4;
+  textarea.style.width = '100%';
+  textarea.style.boxSizing = 'border-box';
+  textarea.style.resize = 'vertical';
+  textarea.style.borderRadius = '6px';
+  textarea.style.border = '1px solid rgba(255,255,255,0.2)';
+  textarea.style.background = '#111827';
+  textarea.style.color = '#f9fafb';
+  textarea.style.padding = '6px';
+  textarea.style.fontFamily = 'inherit';
+  textarea.style.fontSize = '12px';
+  popover.appendChild(textarea);
+
+  const statusLine = document.createElement('div');
+  statusLine.style.minHeight = '14px';
+  statusLine.style.marginTop = '6px';
+  statusLine.style.fontSize = '11px';
+  popover.appendChild(statusLine);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.display = 'flex';
+  btnRow.style.justifyContent = 'flex-end';
+  btnRow.style.gap = '6px';
+  btnRow.style.marginTop = '8px';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = tr('cancel');
+  styleFixPopoverButton(cancelBtn, false);
+  cancelBtn.onclick = (ev) => { ev.stopPropagation(); closeFixHintPopover(); };
+
+  const applyBtn = document.createElement('button');
+  applyBtn.textContent = tr('fixHintApply');
+  styleFixPopoverButton(applyBtn, true);
+  applyBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    const instruction = textarea.value.trim();
+    if (!instruction) {
+      statusLine.style.color = '#fca5a5';
+      statusLine.textContent = tr('fixHintEmpty');
+      return;
+    }
+    applyBtn.disabled = true;
+    cancelBtn.disabled = true;
+    textarea.disabled = true;
+
+    void (async () => {
+      let success = 0;
+      let completed = 0;
+      let nextIndex = 0;
+      async function worker(): Promise<void> {
+        while (nextIndex < pages.length) {
+          const page = pages[nextIndex++];
+          const ok = await fixOnePage(page, instruction);
+          completed++;
+          if (ok) success++;
+          statusLine.style.color = '#93c5fd';
+          statusLine.textContent = `${completed} / ${pages.length}`;
+        }
+      }
+      const workerCount = Math.min(AUTO_MAX_CONCURRENT, pages.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      closeFixHintPopover();
+      toast(tr('fixSelectedDone', { success, total: pages.length }));
+    })();
+  };
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(applyBtn);
+  popover.appendChild(btnRow);
+
+  document.body.appendChild(popover);
+  activeFixPopover = popover;
+  textarea.focus();
+
+  document.addEventListener('keydown', handleFixPopoverKeydown, true);
+  window.setTimeout(() => document.addEventListener('click', handleFixPopoverOutsideClick, true), 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2091,6 +2426,8 @@ function buildScannerHTML(): string {
         <span class="mts-count" id="mts-count">0 / ${currentPages.length}</span>
         <button class="mts-btn-toolbar" data-action="cancel" id="mts-cancel-btn" style="display:none">${tr('cancel')}</button>
         <button class="mts-btn-toolbar" data-action="suggest-instructions" disabled title="${tr('suggestInstructionsHint')}">${tr('suggestInstructions')}</button>
+        <button class="mts-btn-toolbar" data-action="fix-selected" disabled>${tr('btnFixSelected')}</button>
+        <button class="mts-btn-toolbar" data-action="export-all">${tr('btnExportAll')}</button>
         <button class="mts-btn-primary mts-btn-translate" data-action="translate" disabled>${tr('translate')}</button>
       </div>
       <div class="mts-grid">${cards}</div>
@@ -2140,6 +2477,7 @@ function bindScanner(shadow: ShadowRoot): void {
   const countEl = shadow.querySelector<HTMLElement>('#mts-count')!;
   const translateBtn = shadow.querySelector<HTMLButtonElement>('[data-action="translate"]')!;
   const suggestBtn = shadow.querySelector<HTMLButtonElement>('[data-action="suggest-instructions"]')!;
+  const fixSelectedBtn = shadow.querySelector<HTMLButtonElement>('[data-action="fix-selected"]')!;
   const cancelBtn = shadow.querySelector<HTMLButtonElement>('#mts-cancel-btn')!;
   const closeBtn = shadow.querySelector<HTMLButtonElement>('[data-action="close"]')!;
   const backdrop = shadow.querySelector<HTMLElement>('.mts-backdrop')!;
@@ -2154,6 +2492,7 @@ function bindScanner(shadow: ShadowRoot): void {
     countEl.textContent = `${selected.size} / ${currentPages.length}`;
     translateBtn.disabled = selected.size === 0;
     suggestBtn.disabled = selected.size === 0;
+    fixSelectedBtn.disabled = selected.size === 0;
   };
 
   grid.addEventListener('click', (e) => {
@@ -2216,6 +2555,38 @@ function bindScanner(shadow: ShadowRoot): void {
     } finally {
       suggestBtn.textContent = originalLabel;
       suggestBtn.disabled = selected.size === 0;
+    }
+  });
+
+  fixSelectedBtn.addEventListener('click', () => {
+    const chosen = Array.from(selected).map((i) => currentPages[i]);
+    const translatedChosen = chosen.filter((p) => translatedCache.has(p.rawUrl));
+    if (translatedChosen.length === 0) {
+      toast(tr('fixSelectedNoneTranslated'), true);
+      return;
+    }
+    openFixSelectedPopover(translatedChosen);
+  });
+
+  const exportAllBtn = shadow.querySelector<HTMLButtonElement>('[data-action="export-all"]')!;
+  exportAllBtn.addEventListener('click', async () => {
+    const entries = currentPages
+      .filter((p) => translatedCache.has(p.rawUrl))
+      .map((p) => ({ url: p.rawUrl, base64: translatedCache.get(p.rawUrl)!, index: p.index }));
+
+    if (entries.length === 0) {
+      toast(tr('exportNoneTranslated'), true);
+      return;
+    }
+
+    exportAllBtn.disabled = true;
+    const originalLabel = exportAllBtn.textContent;
+    try {
+      await exportTranslatedPagesAsZip(entries, (status) => { exportAllBtn.textContent = status; });
+      toast(tr('exportDone', { count: entries.length }));
+    } finally {
+      exportAllBtn.textContent = originalLabel;
+      exportAllBtn.disabled = false;
     }
   });
 

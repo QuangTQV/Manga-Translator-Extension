@@ -1447,24 +1447,35 @@ def _format_special_instructions(config: TranslationConfig) -> str:
 
 
 def _format_fix_hint(config: TranslationConfig) -> str:
-    """Format a one-off targeted correction for a single bubble, requested
-    by the user after seeing a bad translation (a full-page re-translate
-    with this note attached). Item numbering matches the 1-indexed
-    ordering used elsewhere in the prompt (`Items [N]`, `## INPUT DATA`),
-    so bubble_index (0-based, from the prior response's `bubbles` list)
-    is offset by one. original_text is included as a visual/textual
-    anchor since bubble order/count can shift slightly between calls.
+    """Format a one-off correction requested by the user after seeing a bad
+    translation (a full-page re-translate with this note attached).
+
+    Two shapes:
+    - Targeted (fix_hint_bubble_index set): fixes one specific bubble, the
+      rest translate normally. Item numbering matches the 1-indexed
+      ordering used elsewhere in the prompt (`Items [N]`, `## INPUT DATA`),
+      so bubble_index (0-based, from the prior response's `bubbles` list)
+      is offset by one. original_text is included as a visual/textual
+      anchor since bubble order/count can shift slightly between calls.
+    - General (no bubble_index): applied across the whole page — e.g. a
+      recurring mistake (wrong character name, wrong pronoun pair) the user
+      is fixing across several already-translated pages at once.
     """
     instruction = (config.fix_hint_instruction or "").strip()
     if not instruction:
         return ""
     bubble_index = config.fix_hint_bubble_index
-    item_ref = f"item #{bubble_index + 1}" if bubble_index is not None else "the bubble described below"
+    if bubble_index is None:
+        return (
+            "\n\n## CORRECTION\n"
+            f"The previous translation of this page had a mistake. Apply this correction "
+            f"throughout the page, to every item it's relevant to: {instruction}\n"
+        )
     anchor = (config.fix_hint_original_text or "").strip()
     anchor_note = f' (original text: "{anchor}")' if anchor else ""
     return (
         "\n\n## TARGETED CORRECTION\n"
-        f"The previous translation of {item_ref}{anchor_note} was wrong. "
+        f"The previous translation of item #{bubble_index + 1}{anchor_note} was wrong. "
         f"Apply this correction to that item: {instruction}\n"
         "If item numbering has shifted, use the original text quoted above to find the right one. "
         "Translate every other item normally, unaffected by this note.\n"

@@ -48,11 +48,13 @@ export interface BubbleInfo {
   translatedText: string;
 }
 
-// A user-supplied correction for one bubble, applied on a re-translate of
-// the whole page. bubbleIndex/originalText identify the bubble from a
-// prior TranslateResponse.bubbles list.
+// A user-supplied correction, applied on a re-translate of the whole page.
+// With bubbleIndex/originalText set, it targets one bubble from a prior
+// TranslateResponse.bubbles list; without it, the instruction is applied
+// as a general correction across the whole page (e.g. a recurring mistake
+// fixed across several selected pages at once).
 export interface FixHint {
-  bubbleIndex: number;
+  bubbleIndex?: number;
   originalText?: string;
   instruction: string;
 }
@@ -115,7 +117,7 @@ export interface TranslateRequest {
   context_memory?: string;
   backup_api_keys?: string[];
   fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
-  fix_hint?: { bubble_index: number; original_text?: string; instruction: string };
+  fix_hint?: { bubble_index?: number; original_text?: string; instruction: string };
   font_dir?: string;
   max_font_size: number;
   min_font_size: number;
