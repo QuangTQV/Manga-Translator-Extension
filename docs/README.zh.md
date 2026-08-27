@@ -72,9 +72,12 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | 模块 | 功能 |
 | --- | --- |
 | 自带 LLM | 使用用户配置的 provider、API key、model 和 Base URL。 |
+| Provider/密钥轮换 | 遇到限流时自动依次尝试同一 provider 的备用密钥，再切换到已配置的备用 provider。 |
 | 页面扫描器 | 在当前页面查找 manga/comic 图片，并让你选择要翻译的页面。 |
 | 自动翻译 | 监听当前阅读页，在滚动时自动翻译图片。 |
 | 气泡翻译 | 检测对话气泡，清除原文，翻译并把文字重新渲染回图片。 |
+| 故事笔记 | 针对当前作品的专属说明（术语表、人物关系、语气），模型会始终遵循；可点击"Suggest"根据已扫描页面自动生成草稿。与适用于所有作品的"LLM 通用指令"不同。 |
+| 上下文记忆 | 可选：模型为每页写一句摘要，并在同一作品的后续页面中复用，以更低成本保持人物/剧情一致（无需发送完整的前页图片/文字）。 |
 | 气泡外文字 | 默认使用轻量 cleanup 处理 SFX/旁白等气泡外文字。 |
 | 可选 Flux | 高级用户可下载 Flux Klein 4B 获得更重的 inpainting，而不增加默认 release 体积。 |
 | Provider 支持 | Google、OpenAI、Anthropic、xAI、DeepSeek、Z.ai、Moonshot AI、OpenRouter 和 OpenAI-compatible endpoint。 |
@@ -159,8 +162,8 @@ chrome://extensions/
 
 | Tab | 选项 |
 | --- | --- |
-| `Translate` | 源语言、目标语言、气泡外文字开关。 |
-| `LLM Config` | Provider、Base URL、model、API key、temperature、Top P、Top K、整页上下文、特殊指令。 |
+| `Translate` | 源语言、目标语言、气泡外文字开关、Previous-page context、上下文记忆、故事笔记（可点击"Suggest"生成草稿）。 |
+| `LLM Config` | Provider、Base URL、model、API key（+ 可选的备用密钥和备用 provider，限流时按顺序尝试）、temperature、Top P、Top K、整页上下文、LLM 通用指令。 |
 | `Config` | 扩展 UI 语言和 backend URL。 |
 
 默认 backend URL：

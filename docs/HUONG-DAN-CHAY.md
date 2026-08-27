@@ -64,6 +64,8 @@ Bấm icon extension trên thanh công cụ → tab **LLM Config**:
   - Kiểu Azure AI Foundry v1: dán URL dạng `https://<resource>.services.ai.azure.com/api/projects/<project>/openai/v1/responses`
   - Extension tự nhận diện kiểu URL và tự tách đúng deployment/api-version, bạn không cần tự cắt.
 - **API Key**: key thật của provider.
+- **Backup API Keys** (tuỳ chọn): mỗi dòng 1 key dự phòng, cùng provider/model với key chính ở trên — được thử lần lượt nếu key chính bị rate limit. Nhập key trùng nhau (kể cả trùng với key chính) sẽ có cảnh báo màu đỏ ngay dưới ô.
+- **Fallback Providers** (tuỳ chọn): bấm "+ Add fallback provider" để thêm provider dự phòng (mỗi cái có provider/model/API key/base URL riêng) — chỉ được dùng đến khi key chính và toàn bộ Backup API Keys ở trên đều đã bị rate limit, thử lần lượt theo đúng thứ tự trong danh sách.
 - **Reasoning Effort** (tuỳ chọn, chỉ áp dụng với model có khả năng suy luận như GPT-5/dòng o, Gemini 3, Claude 4.x): hạ xuống **Minimal** hoặc **Low** nếu thấy dịch chậm — model reasoning mặc định có thể mất 45-85 giây/trang, hạ mức này giúp nhanh hơn đáng kể (đánh đổi: kém "cẩn thận" hơn một chút).
 - Bấm **Save LLM Settings**.
 
@@ -92,12 +94,14 @@ Tab **Translate** còn có các tuỳ chọn:
 - **Outside text**: nhận diện và dịch cả SFX/lời dẫn/caption nằm ngoài bong bóng thoại.
 - **Pre-translate** (mặc định tắt): dịch trang ngay khi vừa tải xong thay vì đợi bạn cuộn tới gần — hữu ích khi hay bị chậm lúc mới sang chương mới. Giới hạn cứng tối đa 15 trang dịch cùng lúc để tránh tốn quá nhiều lượt gọi API.
 - **Previous-page context** (mặc định tắt): gửi kèm chữ đã dịch ở vài trang trước để giữ tên nhân vật/xưng hô nhất quán qua các trang — đổi lại tốn thêm token và chậm hơn một chút.
+- **Context Memory** (mặc định tắt): model tự viết 1 câu tóm tắt mỗi trang và dùng lại ở các trang sau trong cùng truyện để nhân vật/sự kiện nhất quán — rẻ hơn Previous-page context vì không gửi kèm ảnh/toàn bộ chữ trang trước, chỉ vài câu tóm tắt ngắn.
+- **Story Notes** (tuỳ chọn): ghi chú riêng cho truyện đang dịch — glossary tên riêng, văn phong mong muốn, quan hệ nhân vật cố định. Bấm nút **Suggest** để model tự soạn nháp dựa trên các trang đã quét trong Scanner, rồi bạn chỉnh sửa lại cho đúng.
 
 Tab **LLM Config** còn có:
 
 - **Image Detail**: `Auto` để provider tự quyết, `Low` nhanh/rẻ hơn nhưng dễ bỏ sót chữ nhỏ, `High` chính xác nhất nhưng chậm/tốn nhất.
 - **Full Page Context** (mặc định bật): gửi kèm cả ảnh trang, không chỉ từng bong bóng cắt riêng — giúp model thấy được tranh vẽ/quan hệ nhân vật để dịch đúng ngữ cảnh hơn (vd chọn đúng xưng hô), đổi lại tốn thêm token mỗi lần dịch.
-- **Special Instructions** (tuỳ chọn): ghi chú thêm cho model, ví dụ glossary tên riêng, văn phong mong muốn, quan hệ nhân vật cố định trong truyện.
+- **General LLM Instructions** (tuỳ chọn): chỉ dẫn chung áp dụng cho *mọi* truyện, không riêng truyện đang dịch — vd quy tắc văn phong/hành vi cố định bạn luôn muốn. Khác với Story Notes (riêng theo từng truyện, ở tab Translate).
 
 ## Xử lý sự cố thường gặp
 

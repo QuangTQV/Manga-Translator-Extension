@@ -72,9 +72,12 @@ Gói mặc định được giữ nhẹ hơn: bao gồm runtime backend và mode
 | Khu vực | Chức năng |
 | --- | --- |
 | LLM của bạn | Sử dụng provider, API key, model và Base URL do người dùng cấu hình. |
+| Xoay tua provider/key | Khi bị rate limit, tự động thử lần lượt các API key dự phòng cùng provider, rồi chuyển sang các provider dự phòng đã cấu hình. |
 | Trình quét trang | Tìm ảnh manga/comic trên trang hiện tại và cho phép chọn trang cần dịch. |
 | Tự động dịch | Theo dõi trang đọc hiện tại và dịch ảnh khi bạn cuộn. |
 | Dịch bubble | Nhận diện bubble thoại, xóa chữ gốc, dịch và render chữ lại vào ảnh. |
+| Ghi chú truyện | Ghi chú riêng cho từng truyện (glossary, quan hệ nhân vật, văn phong) mà model luôn tuân theo; có nút "Suggest" để tự soạn nháp từ các trang đã quét. Khác với Chỉ dẫn chung cho LLM (áp dụng mọi truyện). |
+| Trí nhớ context | Tùy chọn: model tự viết 1 câu tóm tắt mỗi trang và dùng lại ở các trang sau trong cùng truyện, giữ nhân vật/sự kiện nhất quán mà rẻ hơn gửi kèm ảnh/chữ đầy đủ của trang trước. |
 | Chữ ngoài bubble | Xử lý SFX/lời dẫn ngoài bubble bằng cleanup nhẹ mặc định. |
 | Flux tùy chọn | Cho phép người dùng nâng cao tải Flux Klein 4B để inpainting nặng hơn mà không làm nặng release mặc định. |
 | Provider | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter và endpoint OpenAI-compatible. |
@@ -159,8 +162,8 @@ Mở popup extension và dùng ba tab:
 
 | Tab | Tùy chọn |
 | --- | --- |
-| `Translate` | Ngôn ngữ nguồn, ngôn ngữ đích, bật/tắt chữ ngoài bubble. |
-| `LLM Config` | Provider, Base URL, model, API key, temperature, Top P, Top K, ngữ cảnh toàn trang, chỉ dẫn bổ sung. |
+| `Translate` | Ngôn ngữ nguồn, ngôn ngữ đích, bật/tắt chữ ngoài bubble, Previous-page context, Trí nhớ context, Ghi chú truyện (có nút "Suggest" để soạn nháp). |
+| `LLM Config` | Provider, Base URL, model, API key (+ key dự phòng và provider dự phòng tùy chọn, thử lần lượt khi bị rate limit), temperature, Top P, Top K, ngữ cảnh toàn trang, Chỉ dẫn chung cho LLM. |
 | `Config` | Ngôn ngữ giao diện extension và backend URL. |
 
 Backend URL mặc định:

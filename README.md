@@ -72,9 +72,12 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Area | What it does |
 | --- | --- |
 | Bring-your-own LLM | Uses the LLM provider, API key, model, and Base URL configured by the user. |
+| Provider/key rotation | On rate limit, automatically retries with backup API keys for the same provider, then falls back to other configured providers, in order. |
 | Page scanner | Finds manga/comic images on the active page and lets you choose which pages to translate. |
 | Auto-translate | Watches the current reading page and translates images as you scroll. |
 | Bubble translation | Detects speech bubbles, removes original text, translates, and renders text back into the image. |
+| Story Notes | Per-story notes (glossary, character relationships, tone) the model always follows; a "Suggest" button drafts them from your already-scanned pages. Separate from General LLM Instructions, which apply to every story. |
+| Context Memory | Optional: the model writes a one-sentence summary each page and reuses it on later pages of the same story, keeping characters/events consistent for cheaper than sending prior pages' full text/images. |
 | Outside-bubble text | Handles SFX/narration outside speech bubbles with lightweight cleanup by default. |
 | Optional Flux | Lets advanced users download Flux Klein 4B for heavier inpainting without shipping it in the default release. |
 | Provider support | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter, and OpenAI-compatible endpoints. |
@@ -159,8 +162,8 @@ Open the extension popup and use the three tabs:
 
 | Tab | Options |
 | --- | --- |
-| `Translate` | Source language, target language, outside-bubble text toggle. |
-| `LLM Config` | Provider, Base URL, model, API key, temperature, Top P, Top K, full-page context, special instructions. |
+| `Translate` | Source language, target language, outside-bubble text toggle, Previous-page context, Context Memory, Story Notes (with "Suggest" to draft them). |
+| `LLM Config` | Provider, Base URL, model, API key (+ optional backup keys and fallback providers, tried in order on rate limit), temperature, Top P, Top K, full-page context, General LLM Instructions. |
 | `Config` | Extension UI language and backend URL. |
 
 Default backend URL:
