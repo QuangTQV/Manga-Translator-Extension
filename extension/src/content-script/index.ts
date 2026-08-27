@@ -66,6 +66,7 @@ const EN_MESSAGES = {
   fixSelectedNoneTranslated: 'None of the selected pages are translated yet',
   fixSelectedDone: 'Fixed {success}/{total} page(s)',
   cacheTooLargeToLoad: 'Translated page cache is {mb}MB — too large to load, so previously translated pages won\'t show as translated this session. Use "Clear translated cache" in Config to reset it.',
+  btnBackToTranslate: 'Translate',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -128,6 +129,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedNoneTranslated: 'Chua co trang nao trong lua chon duoc dich',
     fixSelectedDone: 'Da sua {success}/{total} trang',
     cacheTooLargeToLoad: 'Cache trang da dich dang {mb}MB - qua lon de tai, nen cac trang da dich truoc do se khong hien la da dich trong phien nay. Dung "Clear translated cache" trong Config de reset.',
+    btnBackToTranslate: 'Dich',
   },
   zh: {
     autoMt: '自动 MT',
@@ -185,6 +187,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedNoneTranslated: '所选页面中还没有已翻译的',
     fixSelectedDone: '已修正 {success}/{total} 页',
     cacheTooLargeToLoad: '已翻译页面缓存为 {mb}MB，太大无法加载，因此本次会话中之前翻译过的页面不会显示为已翻译。请在设置的 Config 中使用"Clear translated cache"重置。',
+    btnBackToTranslate: '翻译',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -242,6 +245,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedNoneTranslated: '選択したページの中に翻訳済みのものがありません',
     fixSelectedDone: '{success}/{total} ページを修正しました',
     cacheTooLargeToLoad: '翻訳済みページのキャッシュが {mb}MB あり、大きすぎて読み込めません。そのため今回のセッションでは以前翻訳したページが「翻訳済み」と表示されません。Config の「Clear translated cache」でリセットしてください。',
+    btnBackToTranslate: '翻訳',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -299,6 +303,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedNoneTranslated: '선택한 페이지 중 번역된 것이 없습니다',
     fixSelectedDone: '{success}/{total}개 페이지를 수정했습니다',
     cacheTooLargeToLoad: '번역된 페이지 캐시가 {mb}MB로 너무 커서 불러올 수 없습니다. 이번 세션에서는 이전에 번역한 페이지가 번역됨으로 표시되지 않습니다. Config의 "Clear translated cache"로 초기화하세요.',
+    btnBackToTranslate: '번역',
   },
 };
 
@@ -1267,7 +1272,20 @@ function urlsMatch(a: string | null | undefined, b: string): boolean {
   }
 }
 
-function applyTranslatedImageToPage(rawUrl: string, dataUrl: string): boolean {
+// bubbles/body are optional: when the caller has fresh data from a translate
+// response (not just a cache hit), passing them wires up lastTranslateInfo
+// and renders clickable per-bubble fix targets — without this, pages
+// translated via the scanner's "Translate" button or "Fix Selected" (as
+// opposed to auto-translate, the only path that used to set this) never
+// got click-to-fix working: clicking a bubble would open the popover fine,
+// but Apply had nothing to send and returned immediately with no request
+// ever reaching the backend.
+function applyTranslatedImageToPage(
+  rawUrl: string,
+  dataUrl: string,
+  bubbles?: BubbleInfo[],
+  body?: TranslateRequest,
+): boolean {
   let applied = false;
 
   for (const img of document.querySelectorAll<HTMLImageElement>('img')) {
@@ -1288,6 +1306,11 @@ function applyTranslatedImageToPage(rawUrl: string, dataUrl: string): boolean {
 
     applyTranslatedImage(img, dataUrl, rawUrl);
     applied = true;
+
+    if (bubbles && body) {
+      lastTranslateInfo.set(img, { bubbles, body, url: rawUrl });
+      renderBubbleFixTargets(img, bubbles);
+    }
   }
 
   for (const el of document.querySelectorAll<HTMLElement>('[style*="background-image"]')) {
@@ -1736,6 +1759,12 @@ async function fixOnePage(page: PageEntry, instruction: string): Promise<boolean
     void appendContextMemoryNote(storyKey, result.memory_note);
   }
 
+  // Update the overlay actually shown on the manga page itself, not just
+  // the cache and the scanner's own thumbnail — without this the fix was
+  // only visible after a full page reload re-applied the (now-updated)
+  // cache from scratch.
+  applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles as BubbleInfo[] | undefined, body);
+
   if (currentShadow) {
     const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
     const imgEl = card?.querySelector<HTMLImageElement>('.mts-thumb');
@@ -1764,6 +1793,7 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
   popover.style.lineHeight = '1.4';
   popover.style.top = '50%';
   popover.style.left = '50%';
+  popover.style.margin = '0';
   popover.style.transform = 'translate(-50%, -50%)';
 
   const title = document.createElement('div');
@@ -1818,6 +1848,12 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
     applyBtn.disabled = true;
     cancelBtn.disabled = true;
     textarea.disabled = true;
+    applyBtn.textContent = tr('fixHintApplying');
+    applyBtn.style.background = '#1e3a5f';
+    applyBtn.style.cursor = 'wait';
+    applyBtn.style.opacity = '0.8';
+    statusLine.style.color = '#93c5fd';
+    statusLine.textContent = `0 / ${pages.length}`;
 
     void (async () => {
       let success = 0;
@@ -1844,7 +1880,18 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
   btnRow.appendChild(applyBtn);
   popover.appendChild(btnRow);
 
+  // The scanner root uses the native Popover API (see createScannerRoot),
+  // which renders it in the browser's top layer — always above ANY
+  // regularly-positioned element regardless of z-index. Without also
+  // joining the top layer here, this popover was created and appended
+  // correctly but rendered fully hidden behind the scanner panel: it
+  // existed in the DOM (so a DOM-only check reported it as present) but
+  // was never actually visible, so clicking "Fix Selected" looked like it
+  // did nothing. Top-layer elements stack by show order, so showing this
+  // one after the already-open scanner puts it above.
+  popover.setAttribute('popover', 'manual');
   document.body.appendChild(popover);
+  popover.showPopover();
   activeFixPopover = popover;
   textarea.focus();
 
@@ -2243,6 +2290,15 @@ function bgSuggestInstructions(images: string[], outputLanguage: string, setting
           top_p: settings.config.topP,
           top_k: settings.config.topK,
           reasoning_effort: settings.config.reasoningEffort || undefined,
+          backup_api_keys: settings.config.backupApiKeys?.length ? settings.config.backupApiKeys : undefined,
+          fallback_providers: settings.config.fallbackProviders?.length
+            ? settings.config.fallbackProviders.map((fb) => ({
+                provider: fb.provider,
+                model_name: fb.modelName,
+                api_keys: fb.apiKeys,
+                base_url: fb.baseUrl,
+              }))
+            : undefined,
         },
       },
       (resp: unknown) => {
@@ -2476,6 +2532,7 @@ function buildScannerHTML(): string {
         <div class="mts-header-row">
           <span class="mts-found-count" id="mts-found-count">${seenUrls.size}${totalLabel} ${tr('pagesLabel')}</span>
           <div class="mts-header-actions">
+            <button class="mts-btn-toolbar" data-action="back-to-popup">&#x2190; ${tr('btnBackToTranslate')}</button>
             <button class="mts-btn-toolbar" data-action="select-all">${tr('all')}</button>
             <button class="mts-btn-toolbar" data-action="deselect-all">${tr('none')}</button>
             <button class="mts-btn-close" data-action="close" type="button" title="${tr('close')}">&#x2715;</button>
@@ -2562,7 +2619,7 @@ function bindScanner(shadow: ShadowRoot): void {
     // translates them with a correction attached) — disable it rather than
     // silently no-op with just a toast when nothing selected qualifies, so
     // it's clear at a glance which pages the button will actually affect.
-    fixSelectedBtn.disabled = !Array.from(selected).some((i) => translatedCache.has(currentPages[i].rawUrl));
+    fixSelectedBtn.disabled = !Array.from(selected).some((i) => translatedCache.has(currentPages[i]?.rawUrl ?? ''));
   };
 
   grid.addEventListener('click', (e) => {
@@ -2588,6 +2645,16 @@ function bindScanner(shadow: ShadowRoot): void {
 
   backdrop.addEventListener('click', () => closeScanner());
   closeBtn.addEventListener('click', () => closeScanner());
+
+  const backToPopupBtn = shadow.querySelector<HTMLButtonElement>('[data-action="back-to-popup"]')!;
+  backToPopupBtn.addEventListener('click', () => {
+    closeScanner();
+    // Best-effort — chrome.action.openPopup() requires a fresh-enough user
+    // gesture and can be refused by the browser in some states (e.g.
+    // another window focused); there's no visible fallback if it fails
+    // since content scripts can't open the popup any other way.
+    chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => {});
+  });
 
   autoCollectBtn.addEventListener('click', async () => {
     autoCollectBtn.style.display = 'none';
@@ -2629,7 +2696,14 @@ function bindScanner(shadow: ShadowRoot): void {
   });
 
   fixSelectedBtn.addEventListener('click', () => {
-    const chosen = Array.from(selected).map((i) => currentPages[i]);
+    // currentPages can be reassigned by a background rescan (auto-collect,
+    // lazy-load discovering more pages) between when a card was selected
+    // and this click — filter out any index that's no longer valid instead
+    // of letting `.rawUrl` on undefined throw and silently kill the whole
+    // handler with no visible feedback.
+    const chosen = Array.from(selected)
+      .map((i) => currentPages[i])
+      .filter((p): p is PageEntry => Boolean(p));
     const translatedChosen = chosen.filter((p) => translatedCache.has(p.rawUrl));
     if (translatedChosen.length === 0) {
       toast(tr('fixSelectedNoneTranslated'), true);
@@ -2892,7 +2966,7 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 
     rememberTranslated(page.rawUrl, translatedB64);
     await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
-    applyTranslatedImageToPage(page.rawUrl, translatedDataUrl);
+    applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles as BubbleInfo[] | undefined, body);
 
     if (currentShadow) {
       const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
@@ -2920,6 +2994,16 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 
 function captureImgElement(img: HTMLImageElement): string | null {
   try {
+    // naturalWidth/naturalHeight can already be non-zero (reported from
+    // image headers) before the pixel data has fully decoded — drawImage
+    // at that point can paint an incomplete/blank frame onto the canvas
+    // (the white fillRect below then shows through as a "translated" blank
+    // white page, since nothing catches or retries this: canvas.toDataURL
+    // still succeeds and returns a normal-looking, just-empty PNG). Bail
+    // out to fetchImageData's network-fetch fallbacks instead, which pull
+    // the actual image bytes directly rather than reading current canvas
+    // paint state.
+    if (!img.complete) return null;
     const w = img.naturalWidth || img.width;
     const h = img.naturalHeight || img.height;
     if (w === 0 || h === 0) return null;

@@ -279,6 +279,12 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
         ocr_method="LLM",
         reasoning_effort=req.reasoning_effort,
         special_instructions=None,
+        backup_api_keys=req.backup_api_keys,
+        fallback_providers=(
+            [fb.model_dump() for fb in req.fallback_providers]
+            if req.fallback_providers
+            else None
+        ),
         font_dir=None,
         max_font_size=16,
         min_font_size=8,

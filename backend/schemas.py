@@ -124,6 +124,8 @@ class SuggestInstructionsRequest(BaseModel):
     top_p: float = 0.95
     top_k: int = 40
     reasoning_effort: Optional[str] = None
+    backup_api_keys: Optional[List[str]] = None
+    fallback_providers: Optional[List[FallbackProviderConfig]] = None
 
 
 class SuggestInstructionsResponse(BaseModel):

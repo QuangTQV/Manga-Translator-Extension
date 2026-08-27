@@ -49,6 +49,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'OPEN_POPUP') {
+      try {
+        await chrome.action.openPopup();
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
     if (message.type === 'FETCH_IMAGE') {
       const url = message.url as string;
       const pageUrl: string = message.pageUrl as string || '';
@@ -282,6 +292,8 @@ interface SuggestInstructionsBody {
   top_p: number;
   top_k: number;
   reasoning_effort?: string;
+  backup_api_keys?: string[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
 }
 
 async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<{ suggestion?: string; error?: string }> {
