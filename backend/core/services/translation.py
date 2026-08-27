@@ -1,10 +1,11 @@
 import base64
 import json
 import re
+import threading
 import time
 from dataclasses import replace
 from io import BytesIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -741,6 +742,82 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "Rate limited after" in str(exc)
 
 
+# Phrases each provider actually uses for "this account is out of money",
+# as opposed to a plain too-many-requests rate limit — kept specific
+# (no bare "quota exceeded") since several providers reuse "quota" wording
+# for ordinary per-minute rate limiting too, which is already handled by
+# _is_rate_limit_error and shouldn't be double-counted here.
+_INSUFFICIENT_CREDIT_MARKERS = (
+    "insufficient_quota",  # OpenAI/Azure OpenAI error code
+    "exceeded your current quota",  # OpenAI/Azure OpenAI message text
+    "insufficient balance",  # DeepSeek
+    "insufficient credit",
+    "insufficient funds",
+    "credit balance is too low",  # Anthropic
+    "top up your account",
+    "top-up required",
+)
+
+
+def _is_insufficient_credit_error(exc: Exception) -> bool:
+    """True if the provider is reporting an empty/negative account balance
+    rather than a transient rate limit — worth rotating to the next key/
+    provider for (the current one won't recover on its own), same as a
+    rate limit, but a distinct enough failure mode to log clearly."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _INSUFFICIENT_CREDIT_MARKERS)
+
+
+def _candidate_key(candidate: TranslationConfig) -> Optional[str]:
+    """The API key value a candidate config would actually call with."""
+    key_field = _PROVIDER_API_KEY_FIELD.get(candidate.provider)
+    return getattr(candidate, key_field, None) if key_field else None
+
+
+# In-process cooldown tracker: once a (provider, key) pair gets rate-limited
+# or reports no credit, it's benched for a while instead of being retried on
+# the very next request — hammering an account that's already been told to
+# back off just burns more of its rate-limit window and delays recovery.
+# Process-lifetime only (resets on backend restart); deliberately not
+# persisted, this is an operational throttle, not durable state.
+_cooldowns: Dict[Tuple[str, str], float] = {}  # (provider, key) -> expires_at
+_cooldowns_lock = threading.Lock()
+# Backend doesn't parse the provider's actual Retry-After header (not all
+# providers send one, and the ones that do aren't threaded up from
+# utils/endpoints/*.py yet), so this is a deliberately short blind guess —
+# most burst-style rate limits clear within seconds, not a full minute.
+_RATE_LIMIT_COOLDOWN_SECONDS = 15.0
+# An empty/negative account balance doesn't fix itself on a retry timer —
+# it stays broken until the user adds funds, which won't happen in the next
+# few seconds, so re-checking it as often as a rate limit would just waste
+# requests. Long, flat cooldown instead of the short rate-limit one.
+_INSUFFICIENT_CREDIT_COOLDOWN_SECONDS = 900.0  # 15 minutes
+
+
+def _mark_cooldown(provider: str, key: Optional[str], is_credit_error: bool) -> None:
+    if not key:
+        return
+    duration = (
+        _INSUFFICIENT_CREDIT_COOLDOWN_SECONDS
+        if is_credit_error
+        else _RATE_LIMIT_COOLDOWN_SECONDS
+    )
+    with _cooldowns_lock:
+        _cooldowns[(provider, key)] = time.time() + duration
+
+
+def _cooldown_remaining(provider: str, key: Optional[str]) -> float:
+    """Seconds until this (provider, key) is usable again — 0 if it's not
+    currently cooling down (including keys never seen before)."""
+    if not key:
+        return 0.0
+    with _cooldowns_lock:
+        expires_at = _cooldowns.get((provider, key))
+    if not expires_at:
+        return 0.0
+    return max(expires_at - time.time(), 0.0)
+
+
 def _iter_llm_candidates(config: TranslationConfig):
     """Yield TranslationConfig variants to try in order: the config exactly
     as given (so "API key is missing" etc. behave unchanged when no backups/
@@ -807,9 +884,37 @@ def _call_llm_endpoint(
     in Xs" lumps together — and the single choke point for key/provider
     rotation, so OCR and translation calls both benefit automatically.
     """
-    candidates = list(_iter_llm_candidates(config))
-    last_error: Optional[Exception] = None
+    all_candidates = list(_iter_llm_candidates(config))
+
+    # Skip anything still cooling down from a recent rate-limit/credit
+    # failure — retrying it on the very next request just burns more of
+    # its rate-limit window instead of giving it a chance to recover.
+    # Order among the rest is preserved (primary, then backups, then
+    # fallbacks, as _iter_llm_candidates yielded them).
+    candidates = []
+    cooling_remaining = []
+    for candidate in all_candidates:
+        remaining = _cooldown_remaining(candidate.provider, _candidate_key(candidate))
+        if remaining > 0:
+            cooling_remaining.append(remaining)
+            log_message(
+                f"Skipping {candidate.provider} candidate — cooling down for "
+                f"{remaining:.0f}s more after a recent rate limit/credit failure.",
+                always_print=True,
+            )
+        else:
+            candidates.append(candidate)
+
+    if not candidates:
+        soonest = min(cooling_remaining) if cooling_remaining else 0.0
+        raise TranslationError(
+            f"All {len(all_candidates)} configured API key(s)/provider(s) are "
+            f"cooling down after a recent rate limit/credit failure. Try again "
+            f"in about {soonest:.0f}s."
+        )
+
     for idx, candidate in enumerate(candidates):
+        is_last = idx == len(candidates) - 1
         start = time.time()
         try:
             result = _call_llm_endpoint_impl(
@@ -828,18 +933,30 @@ def _call_llm_endpoint(
                 f"failed after {elapsed:.2f}s: {e}",
                 always_print=True,
             )
-            last_error = e
-            if idx < len(candidates) - 1 and _is_rate_limit_error(e):
+            is_credit_error = _is_insufficient_credit_error(e)
+            is_rate_limited = _is_rate_limit_error(e)
+            if is_rate_limited or is_credit_error:
+                _mark_cooldown(candidate.provider, _candidate_key(candidate), is_credit_error)
+            if not is_last and (is_rate_limited or is_credit_error):
+                reason = "is out of credit/quota" if is_credit_error else "was rate limited"
                 log_message(
-                    f"Rate limited on candidate {idx + 1}/{len(candidates)} "
-                    f"({candidate.provider}) — rotating to next key/provider.",
+                    f"Candidate {idx + 1}/{len(candidates)} ({candidate.provider}) "
+                    f"{reason} — rotating to next key/provider.",
                     always_print=True,
                 )
                 continue
+            # Last candidate, and it's a credit issue: give a clear summary
+            # instead of just the final provider's raw error, so the user
+            # isn't left guessing why translation stopped working.
+            if is_credit_error and len(candidates) > 1:
+                raise TranslationError(
+                    f"All {len(candidates)} configured API key(s)/provider(s) are "
+                    f"rate-limited or out of credit. Last error: {e}"
+                ) from e
             raise
-    if last_error:
-        raise last_error
-    return None
+    # Unreachable: candidates is non-empty at this point (checked above),
+    # and every branch in the loop returns or raises.
+    raise TranslationError("LLM call failed: no candidates were configured.")
 
 
 def _call_llm_endpoint_impl(
