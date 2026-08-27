@@ -46,6 +46,7 @@ const EN_MESSAGES = {
   suggesting: 'Analyzing...',
   suggestionSaved: 'Suggestion saved to Story Notes',
   suggestNoImagesReady: 'Selected pages are still loading, wait a moment and try again',
+  retryBadgeTitle: 'Translation failed after several retries — click to try again',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -89,6 +90,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggesting: 'Dang phan tich...',
     suggestionSaved: 'Da luu goi y vao Ghi chu truyen',
     suggestNoImagesReady: 'Trang da chon van dang tai, doi chut roi thu lai',
+    retryBadgeTitle: 'Dich that bai sau nhieu lan thu - bam de thu lai',
   },
   zh: {
     autoMt: '自动 MT',
@@ -127,6 +129,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggesting: '分析中...',
     suggestionSaved: '建议已保存到故事笔记',
     suggestNoImagesReady: '所选页面仍在加载，请稍后重试',
+    retryBadgeTitle: '多次重试后翻译失败——点击重试',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -165,6 +168,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggesting: '分析中...',
     suggestionSaved: '提案をストーリーメモに保存しました',
     suggestNoImagesReady: '選択したページがまだ読み込み中です。しばらくしてから再試行してください',
+    retryBadgeTitle: '数回再試行しましたが翻訳に失敗しました。クリックして再試行',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -203,6 +207,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggesting: '분석 중...',
     suggestionSaved: '제안이 스토리 메모에 저장되었습니다',
     suggestNoImagesReady: '선택한 페이지를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요',
+    retryBadgeTitle: '여러 번 재시도했지만 번역에 실패했습니다 - 클릭하여 다시 시도',
   },
 };
 
@@ -333,6 +338,36 @@ const AUTO_SCAN_LIMIT = 250;
 const LAZY_IMAGE_ATTRS = ['data-src', 'data-lazy-src', 'data-original', 'data-srcset', 'data-lazy', 'data-image'] as const;
 const AUTO_RETRY_MAP = new Map<string, number>(); // url -> retry count
 const AUTO_RETRY_MAX = 3;
+
+// Backend errors that are expected to resolve on their own — the backend's
+// own key/provider rotation and rate-limit/credit cooldown already handles
+// these (see backend/core/services/translation.py:_call_llm_endpoint) — so
+// they shouldn't count as a real failure here. The periodic re-scan will
+// naturally retry once the cooldown clears; there's nothing for the user
+// to fix by clicking a "retry" badge in the meantime.
+function isTransientBackendError(errorMessage: string | undefined): boolean {
+  const text = (errorMessage ?? '').toLowerCase();
+  return (
+    text.includes('rate limited')
+    || text.includes('cooling down')
+    || text.includes('out of credit')
+    || text.includes('insufficient')
+  );
+}
+
+// Records a failed auto-translate attempt. Once retries are exhausted the
+// image would otherwise just sit untranslated forever with nothing but a
+// console.log to show for it (queueAutoTranslateImage refuses to queue it
+// again past AUTO_RETRY_MAX) — so surface it visibly instead, with a badge
+// the user can click to force one more attempt.
+function markAutoTranslateFailure(img: HTMLImageElement, url: string, retries: number, errorMessage?: string): void {
+  if (isTransientBackendError(errorMessage)) return;
+  const nextRetries = retries + 1;
+  AUTO_RETRY_MAP.set(url, nextRetries);
+  if (nextRetries >= AUTO_RETRY_MAX) {
+    addRetryNeededBadge(img, url);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-translate: start / stop
@@ -721,7 +756,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   if (!autoTranslateActive) return;
   if (!imgData) {
     console.log('[MT] image data unavailable:', url);
-    AUTO_RETRY_MAP.set(url, retries + 1);
+    markAutoTranslateFailure(img, url, retries);
     return;
   }
 
@@ -759,7 +794,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 
   if (result.error) {
     console.log('[MT] bgTranslateImage error:', result.error);
-    AUTO_RETRY_MAP.set(url, retries + 1);
+    markAutoTranslateFailure(img, url, retries, result.error);
     return;
   }
 
@@ -799,6 +834,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: string): void {
   // Add translated marker so we don't re-process
   img.setAttribute('data-mt-translated', 'true');
+  removeRetryBadge(img);
 
   const originalUrl = rawUrl ?? resolveMangaUrl(img);
   if (originalUrl) img.setAttribute('data-mt-raw', originalUrl);
@@ -1009,6 +1045,87 @@ function addTranslatedBadge(img: HTMLImageElement): void {
   badge.style.fontFamily = 'Inter, system-ui, sans-serif';
   syncTranslatedBadgeLayout(img, badge);
   scheduleTranslatedDecorationSync(img);
+}
+
+function findRetryBadge(parent: HTMLElement, overlayId: string): HTMLElement | null {
+  for (const child of Array.from(parent.children)) {
+    if (
+      child instanceof HTMLElement
+      && child.classList.contains('mt-retry-badge')
+      && child.getAttribute('data-mt-for') === overlayId
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function removeRetryBadge(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const overlayId = getTranslatedOverlayId(img);
+  findRetryBadge(parent, overlayId)?.remove();
+}
+
+function syncRetryBadgeLayout(img: HTMLImageElement, badge: HTMLElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const pos = getImagePositionWithinParent(img, parent);
+  badge.style.left = `${pos.x + pos.width - 4}px`;
+  badge.style.top = `${pos.y + 4}px`;
+  badge.style.right = 'auto';
+  badge.style.transform = 'translateX(-100%)';
+}
+
+// Shown when auto-translate has given up on an image after AUTO_RETRY_MAX
+// failed attempts (rate limit exhausted across every configured key/
+// provider, network error, etc.) — without this, a permanently failed page
+// just silently stays untranslated with no visible sign anything went
+// wrong (only a console.log). Clicking it resets the retry count and
+// forces one more attempt.
+function addRetryNeededBadge(img: HTMLImageElement, url: string): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') parent.style.position = 'relative';
+
+  const overlayId = getTranslatedOverlayId(img);
+  let badge = findRetryBadge(parent, overlayId);
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'mt-retry-badge';
+    badge.setAttribute('data-mt-for', overlayId);
+    parent.appendChild(badge);
+  }
+
+  badge.textContent = '⟳';
+  badge.title = tr('retryBadgeTitle');
+  badge.style.position = 'absolute';
+  badge.style.background = 'rgba(239,68,68,0.9)';
+  badge.style.color = 'white';
+  badge.style.fontSize = '13px';
+  badge.style.fontWeight = '900';
+  badge.style.padding = '1px 6px';
+  badge.style.borderRadius = '4px';
+  badge.style.cursor = 'pointer';
+  badge.style.pointerEvents = 'auto';
+  badge.style.zIndex = '11';
+  badge.style.fontFamily = 'Inter, system-ui, sans-serif';
+
+  const retryBadge = badge;
+  retryBadge.onclick = (ev) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    AUTO_RETRY_MAP.delete(url);
+    retryBadge.remove();
+    handleAutoTranslateImage(img, true);
+  };
+
+  syncRetryBadgeLayout(img, badge);
+  window.requestAnimationFrame(() => syncRetryBadgeLayout(img, badge!));
+  window.setTimeout(() => syncRetryBadgeLayout(img, badge!), 250);
+  window.setTimeout(() => syncRetryBadgeLayout(img, badge!), 1000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
