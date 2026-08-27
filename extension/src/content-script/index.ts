@@ -402,14 +402,42 @@ let autoTranslateConcurrent = 0;
 let scannerPausedAutoTranslate = false;
 let translatedOverlayCounter = 0;
 let preTranslateEnabled = false;
-// Rolling history of recently-translated pages' OCR transcripts (oldest-to-
-// newest), sent as narrative context so the model keeps character names,
-// pronouns, and tone consistent across pages instead of translating each
-// page in isolation. Best-effort ordering only — with AUTO_MAX_CONCURRENT
-// pages in flight at once, completion order can differ slightly from
-// reading order.
-let autoTranslatePreviousTexts: string[][] = [];
+// Rolling history of recently-translated pages' OCR transcripts, sent as
+// narrative context so the model keeps character names, pronouns, and tone
+// consistent across pages instead of translating each page in isolation.
+// Keyed by the <img> element rather than a flat push-on-completion array —
+// with AUTO_MAX_CONCURRENT pages in flight at once, completion order can
+// differ from reading order (a later page can finish first), so context is
+// resolved per-request from actual DOM document order (see
+// orderedPreviousContextTexts), not insertion order.
+let autoTranslatePreviousPages: Array<{ img: HTMLImageElement; ocrTexts: string[] }> = [];
 const PREVIOUS_CONTEXT_MAX_PAGES = 3;
+// Stored entries are trimmed once they exceed this multiple of what any
+// single request can use — bounds memory on long infinite-scroll sessions
+// without needing a precise "furthest from current page" eviction, since
+// only the closest preceding pages are ever read anyway.
+const PREVIOUS_CONTEXT_STORE_LIMIT = PREVIOUS_CONTEXT_MAX_PAGES * 6;
+
+// Pages that come before `currentImg` in actual document order (i.e. reading
+// order for a standard top-to-bottom manga reader), closest-preceding-first
+// among the stored history, returned oldest-to-newest as the backend expects.
+// Entries whose <img> was detached/replaced by the site (compareDocumentPosition
+// can't place them) or that live in a different document (e.g. a Scanner
+// grid's own <img>) are skipped rather than guessed at.
+function orderedPreviousContextTexts(currentImg: HTMLImageElement): string[][] {
+  const preceding = autoTranslatePreviousPages.filter(({ img }) => {
+    if (img === currentImg || !img.isConnected) return false;
+    const position = img.compareDocumentPosition(currentImg);
+    return Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  preceding.sort((a, b) => {
+    const position = a.img.compareDocumentPosition(b.img);
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    return 0;
+  });
+  return preceding.slice(-PREVIOUS_CONTEXT_MAX_PAGES).map((entry) => entry.ocrTexts);
+}
 const AUTO_MAX_CONCURRENT = 5;
 const SUGGEST_INSTRUCTIONS_MAX_IMAGES = 8;
 
@@ -554,7 +582,7 @@ async function startAutoTranslate(): Promise<void> {
   }
 
   preTranslateEnabled = settings.config.preTranslate ?? false;
-  autoTranslatePreviousTexts = [];
+  autoTranslatePreviousPages = [];
 
   // Load already-translated URLs from cache
   await loadTranslatedCache();
@@ -818,7 +846,7 @@ function collectAutoTranslateImageEntries(root: ParentNode): Array<{ img: HTMLIm
 function stopAutoTranslate(preserveScannerResume = false): void {
   autoTranslateActive = false;
   preTranslateEnabled = false;
-  autoTranslatePreviousTexts = [];
+  autoTranslatePreviousPages = [];
   if (!preserveScannerResume) scannerPausedAutoTranslate = false;
   autoTranslateQueue = [];
   autoTranslateQueuedUrls = new Set();
@@ -962,7 +990,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   const body = buildTranslateRequest(
     imgData,
     settings,
-    settings.config.previousContextEnabled ?? false ? autoTranslatePreviousTexts : undefined,
+    settings.config.previousContextEnabled ?? false ? orderedPreviousContextTexts(img) : undefined,
     contextMemoryText,
   );
 
@@ -994,9 +1022,9 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   await saveTranslatedContentCacheEntry(contentKey, translatedB64);
 
   if (result.ocr_texts?.length) {
-    autoTranslatePreviousTexts.push(result.ocr_texts);
-    if (autoTranslatePreviousTexts.length > PREVIOUS_CONTEXT_MAX_PAGES) {
-      autoTranslatePreviousTexts.shift();
+    autoTranslatePreviousPages.push({ img, ocrTexts: result.ocr_texts });
+    if (autoTranslatePreviousPages.length > PREVIOUS_CONTEXT_STORE_LIMIT) {
+      autoTranslatePreviousPages.shift();
     }
   }
 
