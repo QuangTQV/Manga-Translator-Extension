@@ -743,17 +743,20 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 
 
 # Phrases each provider actually uses for "this account is out of money",
-# as opposed to a plain too-many-requests rate limit — kept specific
-# (no bare "quota exceeded") since several providers reuse "quota" wording
-# for ordinary per-minute rate limiting too, which is already handled by
-# _is_rate_limit_error and shouldn't be double-counted here.
+# as opposed to a plain too-many-requests rate limit — kept to *structured*
+# error codes / exact phrases that only appear on a genuine zero-balance
+# response, not human-readable prose. Google in particular reuses "You
+# exceeded your current quota, please check your plan and billing details"
+# verbatim for its free-tier per-minute RATE limit too (confirmed from a
+# real "RESOURCE_EXHAUSTED ... Please retry in 4s" response), so that
+# sentence is deliberately NOT a marker — it would mislabel an ordinary,
+# seconds-away-from-clearing rate limit as a 15-minute credit outage.
 _INSUFFICIENT_CREDIT_MARKERS = (
-    "insufficient_quota",  # OpenAI/Azure OpenAI error code
-    "exceeded your current quota",  # OpenAI/Azure OpenAI message text
+    "insufficient_quota",  # OpenAI/Azure OpenAI error code (type AND code fields)
     "insufficient balance",  # DeepSeek
     "insufficient credit",
     "insufficient funds",
-    "credit balance is too low",  # Anthropic
+    "credit balance is too low",  # Anthropic's exact wording
     "top up your account",
     "top-up required",
 )
@@ -765,6 +768,13 @@ def _is_insufficient_credit_error(exc: Exception) -> bool:
     provider for (the current one won't recover on its own), same as a
     rate limit, but a distinct enough failure mode to log clearly."""
     text = str(exc).lower()
+    # HTTP 402 Payment Required is the standard status for "add funds" —
+    # every utils/endpoints/*.py module formats a non-429 failure as
+    # "Status <code>: ...", so this catches billing failures (OpenRouter,
+    # DeepSeek, ...) regardless of each provider's own wording, without
+    # having to enumerate every provider's exact error message.
+    if "status 402" in text:
+        return True
     return any(marker in text for marker in _INSUFFICIENT_CREDIT_MARKERS)
 
 
@@ -816,6 +826,23 @@ def _cooldown_remaining(provider: str, key: Optional[str]) -> float:
     if not expires_at:
         return 0.0
     return max(expires_at - time.time(), 0.0)
+
+
+# Round-robin cursor per distinct candidate pool (identified by its exact
+# ordered set of (provider, key) pairs) — spreads load proactively across
+# every configured key/provider instead of always hammering the primary
+# first and only touching backups reactively once it starts failing. Two
+# keys on the same free-tier RPM cap effectively double combined throughput
+# this way, instead of exhausting one before the other is ever used.
+_round_robin_cursors: Dict[Tuple[Tuple[str, str], ...], int] = {}
+_round_robin_lock = threading.Lock()
+
+
+def _next_round_robin_offset(pool_signature: Tuple[Tuple[str, str], ...]) -> int:
+    with _round_robin_lock:
+        offset = _round_robin_cursors.get(pool_signature, 0)
+        _round_robin_cursors[pool_signature] = offset + 1
+        return offset
 
 
 def _iter_llm_candidates(config: TranslationConfig):
@@ -912,6 +939,20 @@ def _call_llm_endpoint(
             f"cooling down after a recent rate limit/credit failure. Try again "
             f"in about {soonest:.0f}s."
         )
+
+    # Proactively spread load across every ready candidate instead of always
+    # starting from the primary — advance a per-pool cursor each call so
+    # consecutive translate requests fan out round-robin. Rotation-on-failure
+    # below still walks the rest of this (now rotated) order if the chosen
+    # starting candidate fails, so nothing here removes the fallback chain —
+    # it only changes which candidate goes first.
+    if len(candidates) > 1:
+        pool_signature = tuple(
+            (c.provider, _candidate_key(c) or "") for c in all_candidates
+        )
+        offset = _next_round_robin_offset(pool_signature) % len(candidates)
+        if offset:
+            candidates = candidates[offset:] + candidates[:offset]
 
     for idx, candidate in enumerate(candidates):
         is_last = idx == len(candidates) - 1
