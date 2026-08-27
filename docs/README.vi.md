@@ -77,6 +77,7 @@ Gói mặc định được giữ nhẹ hơn: bao gồm runtime backend và mode
 | Tự động dịch | Theo dõi trang đọc hiện tại và dịch ảnh khi bạn cuộn. |
 | Dịch bubble | Nhận diện bubble thoại, xóa chữ gốc, dịch và render chữ lại vào ảnh. |
 | Ghi chú truyện | Ghi chú riêng cho từng truyện (glossary, quan hệ nhân vật, văn phong) mà model luôn tuân theo; có nút "Suggest" để tự soạn nháp từ các trang đã quét. Khác với Chỉ dẫn chung cho LLM (áp dụng mọi truyện). |
+| Xưng hô tiếng Việt chính xác | Khi dịch sang tiếng Việt, tự động suy luận quan hệ từng cặp nhân vật (tuổi, giới tính, quan hệ gia đình, honorific như "onii-chan") để chọn đúng xưng hô (anh/em, tao/mày...) và giữ nhất quán suốt trang — không cần cấu hình gì. |
 | Trí nhớ context | Tùy chọn: model tự viết 1 câu tóm tắt mỗi trang và dùng lại ở các trang sau trong cùng truyện, giữ nhân vật/sự kiện nhất quán mà rẻ hơn gửi kèm ảnh/chữ đầy đủ của trang trước. |
 | Chữ ngoài bubble | Xử lý SFX/lời dẫn ngoài bubble bằng cleanup nhẹ mặc định. |
 | Flux tùy chọn | Cho phép người dùng nâng cao tải Flux Klein 4B để inpainting nặng hơn mà không làm nặng release mặc định. |

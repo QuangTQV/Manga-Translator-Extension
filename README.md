@@ -77,6 +77,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Auto-translate | Watches the current reading page and translates images as you scroll. |
 | Bubble translation | Detects speech bubbles, removes original text, translates, and renders text back into the image. |
 | Story Notes | Per-story notes (glossary, character relationships, tone) the model always follows; a "Suggest" button drafts them from your already-scanned pages. Separate from General LLM Instructions, which apply to every story. |
+| Vietnamese pronoun accuracy | For Vietnamese output, automatically reasons about each speaker pair's relationship (age, gender, family ties, honorifics like "onii-chan") to pick the correct pronouns (anh/em, tao/mày, etc.) and keeps them consistent across a page — no configuration needed. |
 | Context Memory | Optional: the model writes a one-sentence summary each page and reuses it on later pages of the same story, keeping characters/events consistent for cheaper than sending prior pages' full text/images. |
 | Outside-bubble text | Handles SFX/narration outside speech bubbles with lightweight cleanup by default. |
 | Optional Flux | Lets advanced users download Flux Klein 4B for heavier inpainting without shipping it in the default release. |
