@@ -1001,13 +1001,43 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   updateAutoTranslateCounter();
 }
 
+// Tracks the most recent overlay id used for each source URL. Some manga
+// readers replace/recreate the <img> element for a page as you scroll (e.g.
+// lazy-load libraries reclaiming memory for off-screen pages) — when that
+// happens the old element's overlay/badge/export-button/fix-hit-layer are
+// still in the DOM but orphaned (nothing points at them for cleanup or
+// future updates), so a later fix-hint or cache update only touches the
+// NEW element's fresh overlay while the orphaned one keeps showing stale
+// content at its last-known position. Depending on paint order that can
+// look like the page flickering between the old and new translation.
+const urlToOverlayId = new Map<string, string>();
+
+function removeOrphanedOverlayFor(url: string, currentOverlayId: string): void {
+  const previousOverlayId = urlToOverlayId.get(url);
+  if (previousOverlayId && previousOverlayId !== currentOverlayId) {
+    document
+      .querySelectorAll(
+        `.mt-page-overlay[data-mt-for="${previousOverlayId}"], `
+        + `.mt-badge[data-mt-for="${previousOverlayId}"], `
+        + `.mt-export-btn[data-mt-for="${previousOverlayId}"], `
+        + `.mt-fix-hit-layer[data-mt-for="${previousOverlayId}"], `
+        + `.mt-retry-badge[data-mt-for="${previousOverlayId}"]`,
+      )
+      .forEach((el) => el.remove());
+  }
+  urlToOverlayId.set(url, currentOverlayId);
+}
+
 function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: string): void {
   // Add translated marker so we don't re-process
   img.setAttribute('data-mt-translated', 'true');
   removeRetryBadge(img);
 
   const originalUrl = rawUrl ?? resolveMangaUrl(img);
-  if (originalUrl) img.setAttribute('data-mt-raw', originalUrl);
+  if (originalUrl) {
+    img.setAttribute('data-mt-raw', originalUrl);
+    removeOrphanedOverlayFor(originalUrl, getTranslatedOverlayId(img));
+  }
 
   applyTranslatedOverlay(img, dataUrl);
 
