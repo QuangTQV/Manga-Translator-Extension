@@ -2,6 +2,15 @@
 
 import type { UiLanguage } from './i18n.js';
 
+// A fallback LLM provider to try if the primary provider (and its backup
+// keys) are all rate-limited — tried in list order.
+export interface FallbackProviderConfig {
+  provider: string;
+  modelName?: string;
+  apiKeys: string[];
+  baseUrl?: string; // Azure endpoint, or OpenAI-Compatible URL
+}
+
 export interface TranslateConfig {
   inputLanguage: string;
   outputLanguage: string;
@@ -18,6 +27,9 @@ export interface TranslateConfig {
   reasoningEffort?: string;
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
+  contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
+  backupApiKeys?: string[]; // extra keys for the same provider/model, tried in order on rate limit
+  fallbackProviders?: FallbackProviderConfig[]; // tried after the primary provider + backup keys are all rate-limited
   fontDir?: string;
   maxFontSize: number;
   minFontSize: number;
@@ -44,6 +56,7 @@ export interface TranslateResponse {
   target_language: string;
   provider: string;
   ocr_texts?: string[]; // this page's OCR transcripts, in reading order
+  memory_note?: string; // this page's one-sentence context-memory summary, if enabled
 }
 
 export interface TranslateBatchItemResponse {
@@ -53,6 +66,7 @@ export interface TranslateBatchItemResponse {
   error?: string;
   processing_time_seconds?: number;
   ocr_texts?: string[];
+  memory_note?: string;
 }
 
 export interface TranslateBatchResponse {
@@ -88,6 +102,10 @@ export interface TranslateRequest {
   reasoning_effort?: string;
   special_instructions?: string;
   llm_instructions?: string;
+  context_memory_enabled?: boolean;
+  context_memory?: string;
+  backup_api_keys?: string[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
   font_dir?: string;
   max_font_size: number;
   min_font_size: number;
@@ -148,6 +166,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     outsideTextEnabled: false,
     preTranslate: false,
     previousContextEnabled: false,
+    contextMemoryEnabled: false,
   },
 };
 

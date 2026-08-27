@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import time
+from dataclasses import replace
 from io import BytesIO
 from typing import Any, Dict, List, Optional
 
@@ -147,6 +148,7 @@ def _build_system_prompt_translation(
     previous_context_image_count: int = 0,
     previous_context_text_count: int = 0,
     input_language: Optional[str] = None,
+    context_memory_enabled: bool = False,
 ) -> str:
     direction = (
         "right-to-left"
@@ -204,12 +206,14 @@ def _build_system_prompt_translation(
     if "vietnamese" in (output_language or "").lower():
         vietnamese_pronoun_rule = """
 - **Vietnamese Pronouns (xưng hô):** Before translating any dialogue, work out for every distinct speaker-listener pair: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship — use art (apparent age/build), honorifics (-san/-chan/-kun/-senpai/etc.), and dialogue tone as evidence. Then pick ONE pronoun pair for that speaker-listener direction, write it down in the required `PRONOUN MAP:` section (see OUTPUT SCHEMA below), and reuse it for every line between them:
+  - **Decisive override — family address terms:** if a line's own source text contains a family address term — "onii-chan"/"onii-san"/"aniki" (older brother), "onee-chan"/"onee-san" (older sister), "otouto" (younger brother), "imouto" (younger sister), or an English equivalent like "bro"/"sis"/"big brother"/"big sis" — that line's speaker-listener pair IS siblings, full stop. This overrides any guess about who the characters are from art or from a different panel's dialogue, even if a same-looking character elsewhere on the page seemed to be a classmate/stranger — a page can have several visually similar characters, and the address term in the line itself is stronger evidence than a cross-panel identity guess. Translate the address term itself as the real Vietnamese family term ("anh"/"chị"/"em"), not left as "onii-chan" untranslated.
   - Close friends, classmates, same apparent age, casual tone → "tớ"/"cậu" or "mình"/"cậu".
   - Very close friends, rivals, or rough/blunt speech → "tao"/"mày".
   - Noticeable age gap, romantic partners, or siblings → "anh"/"em" or "chị"/"em" (the older speaker says "anh"/"chị", the younger says "em").
   - Family members → the real family term ("con", "mẹ", "bố"/"ba", "ông", "bà", "anh", "chị", "em"...) — never "tôi"/"bạn" for family.
   - Genuine strangers, business/formal settings, or relationship truly unclear → "tôi"/"bạn" or "anh/chị"/"em".
-  Treat "tôi"/"bạn" as the last-resort exception, not the safe default — in casual manga dialogue it reads as stiff and impersonal, and is wrong far more often than it's right. If forced to guess between two options, prefer the warmer/more casual one over the formal one, since most manga dialogue is casual."""  # noqa
+  Treat "tôi"/"bạn" as the last-resort exception, not the safe default — in casual manga dialogue it reads as stiff and impersonal, and is wrong far more often than it's right. If forced to guess between two options, prefer the warmer/more casual one over the formal one, since most manga dialogue is casual.
+  - **Applying the pair correctly:** the two terms are not interchangeable decorations — each one replaces a specific grammatical role from the source. The speaker's own term replaces "I"/"me"; the listener's term replaces "you". Map them to what the source sentence actually says, don't mechanically insert both terms into every line. A line that only addresses the listener (no "I" role in the source) — e.g. "What have you been writing?" — takes ONLY the listener's term, as the subject: "Anh đã viết gì vậy?". Adding the speaker's own term as a false subject — "Em đã viết gì vậy, anh?" — reverses who the question is about and is wrong, not just stylistically off."""  # noqa
 
     natural_style_rule = (
         """
@@ -256,12 +260,43 @@ You must use the following markdown-style markers to convey emphasis:
 
     pronoun_map_instruction = (
         """
-- **Before the numbered list**, output a section titled exactly `PRONOUN MAP:` — one short line per distinct speaker-listener pair appearing in this batch, each line starting with `-` (a dash, never a digit — digits are reserved for the list below), format `- <brief descriptor of speaker> -> <brief descriptor of listener>: <chosen pronoun pair>` (e.g. `- girl, short hair -> boy, glasses: tớ-cậu`). Base each line on the reasoning from the Vietnamese Pronouns rule above — actually work through speaker/listener/relationship for each pair here, don't skip straight to a guess. One line per distinct pair (not per dialogue line, not per image). If a line has no clear second party (narration, SFX, monologue), skip it. This section is required whenever any dialogue is present."""
+- **Before the numbered list**, output a section titled exactly `PRONOUN MAP:` — one short line per distinct speaker-listener pair appearing ANYWHERE in this batch, each line starting with `-` (a dash, never a digit — digits are reserved for the list below), format `- <brief descriptor of speaker> -> <brief descriptor of listener>: <chosen pronoun pair>` (e.g. `- girl, short hair -> boy, glasses: tớ-cậu`). Base each line on the reasoning from the Vietnamese Pronouns rule above — actually work through speaker/listener/relationship for each pair here, don't skip straight to a guess. List EVERY distinct pair that exchanges dialogue in this batch, even ones with only one line — do not omit minor pairs or collapse different pairs into one. One line per distinct pair (not per dialogue line, not per image). If a line has no clear second party (narration, SFX, monologue), skip it. This section is required whenever any dialogue is present.
+- **Every numbered line below** that involves a pair from `PRONOUN MAP:` must start with that exact pair in brackets, e.g. `[em-anh]`, before the translated text — see OUTPUT SCHEMA format. This is a hard constraint: once a pair is written in `PRONOUN MAP:`, every later line between those two speakers reuses it verbatim, no matter how many other lines/pairs come in between and no matter what feels more natural in isolation. Do not silently drift back to "mình"/"cậu" or any other default for a pair you already mapped. Lines with no clear second party use `[-]` instead."""
         if is_vietnamese_output
         else ""
     )
-    pronoun_map_exception = (
-        " (except the required `PRONOUN MAP:` section above the list)"
+    memory_note_instruction = (
+        """
+- **After the numbered list**, on a new line, output a section titled exactly `MEMORY NOTE:` followed by ONE short plain-text sentence (no dash, no numbering) summarizing this page for future reference — key characters present, notable events, or relationships revealed. This section is required, even if the sentence is brief."""
+        if context_memory_enabled
+        else ""
+    )
+    schema_exception_labels = []
+    if is_vietnamese_output:
+        schema_exception_labels.append("the required `PRONOUN MAP:` section above the list")
+    if context_memory_enabled:
+        schema_exception_labels.append("the required `MEMORY NOTE:` section after the list")
+    schema_exceptions = (
+        " (except " + " and ".join(schema_exception_labels) + ")"
+        if schema_exception_labels
+        else ""
+    )
+
+    one_step_format = (
+        f"`i: <transcribed text> || [pronoun pair, or - if none] <translated {output_language} text>`"
+        if is_vietnamese_output
+        else f"`i: <transcribed text> || <translated {output_language} text>`"
+    )
+    two_step_format = (
+        f"`i: [pronoun pair, or - if none] <translated {output_language} text>`"
+        if is_vietnamese_output
+        else f"`i: <translated {output_language} text>`"
+    )
+    pronoun_subject_reminder = (
+        """
+- **Right before you write each translated line**, re-check: does the source line contain "I"/"me"? Does it contain "you"? Only insert a pronoun term for a role that's ACTUALLY present in that specific source line — a line with only "you" (no "I") gets only the listener's term, as its subject; do not add the speaker's own term as a second, unwarranted subject.
+  - Source "What have you been writing?" (only "you", no "I") → correct: "Anh đã viết gì vậy?" — WRONG: "Em đã viết gì vậy, anh?" (this makes it sound like a question about what the SPEAKER wrote, reversing the meaning).
+  - Source "I can't lie to you" (has both "I" and "you") → correct uses both terms: "Em không thể nói dối anh.\""""
         if is_vietnamese_output
         else ""
     )
@@ -273,8 +308,9 @@ You must use the following markdown-style markers to convey emphasis:
 - You must return your response as a single numbered list with exactly one line per input image.
 - The numbering must correspond to the input image order (1, 2, 3...).
 - For each item, provide both transcription and translation in the format:
-  `i: <transcribed text> || <translated {output_language} text>` where `i` is the input image number.
-- Do not include section headers, explanations, or formatting outside of this list{pronoun_map_exception}.
+  {one_step_format} where `i` is the input image number.
+{memory_note_instruction}{pronoun_subject_reminder}
+- Do not include section headers, explanations, or formatting outside of this list{schema_exceptions}.
 """
     elif mode == "two-step":
         output_schema = f"""
@@ -282,8 +318,9 @@ You must use the following markdown-style markers to convey emphasis:
 {pronoun_map_instruction}
 - You must return your response as a single numbered list with exactly one line per input text.
 - The numbering must correspond to the input order (1, 2, 3...).
-- The format must be `i: <translated {output_language} text>` where `i` is the input text number.
-- Do not include section headers, explanations, or formatting outside of this list{pronoun_map_exception}.
+- The format must be {two_step_format} where `i` is the input text number.
+{memory_note_instruction}{pronoun_subject_reminder}
+- Do not include section headers, explanations, or formatting outside of this list{schema_exceptions}.
 """  # noqa
     else:
         raise ValueError(
@@ -680,6 +717,80 @@ def _build_generation_config(
         raise TranslationError(f"Unknown provider for generation config: {provider}")
 
 
+# Maps each provider to the TranslationConfig field holding its API key —
+# used to build rotated config variants for backup keys / fallback providers
+# without needing a separate branch per provider.
+_PROVIDER_API_KEY_FIELD = {
+    "Google": "google_api_key",
+    "OpenAI": "openai_api_key",
+    "Azure OpenAI": "azure_openai_api_key",
+    "Anthropic": "anthropic_api_key",
+    "xAI": "xai_api_key",
+    "DeepSeek": "deepseek_api_key",
+    "Z.ai": "zai_api_key",
+    "Moonshot AI": "moonshot_api_key",
+    "OpenRouter": "openrouter_api_key",
+    "OpenAI-Compatible": "openai_compatible_api_key",
+}
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """True if this is a TranslationError raised after a provider endpoint
+    exhausted its own internal 429 retries — every utils/endpoints/*.py
+    module raises with this exact wording on that path."""
+    return "Rate limited after" in str(exc)
+
+
+def _iter_llm_candidates(config: TranslationConfig):
+    """Yield TranslationConfig variants to try in order: the config exactly
+    as given (so "API key is missing" etc. behave unchanged when no backups/
+    fallbacks are configured), then the same provider/model with each backup
+    key, then each fallback provider with each of its keys in turn.
+
+    A (provider, key) pair is only ever yielded once — retrying the exact
+    same account under a different label wastes a rate-limited request
+    instead of actually rotating to fresh quota, so duplicates anywhere in
+    the chain (primary vs. backups, backups vs. each other, vs. a fallback
+    provider reusing the same key) are silently skipped after the first.
+    """
+    yield config
+    seen: set = set()
+
+    key_field = _PROVIDER_API_KEY_FIELD.get(config.provider)
+    primary_key = getattr(config, key_field, None) if key_field else None
+    if key_field and primary_key:
+        seen.add((config.provider, primary_key))
+    if key_field:
+        for backup_key in config.backup_api_keys or []:
+            if not backup_key or (config.provider, backup_key) in seen:
+                continue
+            seen.add((config.provider, backup_key))
+            yield replace(config, **{key_field: backup_key})
+
+    for fb in config.fallback_providers or []:
+        fb_key_field = _PROVIDER_API_KEY_FIELD.get(fb.provider)
+        if fb_key_field is None:
+            continue
+        extra_fields: Dict[str, Any] = {}
+        if fb.provider == "Azure OpenAI":
+            extra_fields["azure_openai_endpoint"] = fb.azure_openai_endpoint
+            extra_fields["azure_openai_api_version"] = fb.azure_openai_api_version
+            extra_fields["azure_openai_is_v1"] = fb.azure_openai_is_v1
+        elif fb.provider == "OpenAI-Compatible":
+            extra_fields["openai_compatible_url"] = fb.openai_compatible_url
+        for fb_key in fb.api_keys or []:
+            if not fb_key or (fb.provider, fb_key) in seen:
+                continue
+            seen.add((fb.provider, fb_key))
+            yield replace(
+                config,
+                provider=fb.provider,
+                model_name=fb.model_name or config.model_name,
+                **{fb_key_field: fb_key},
+                **extra_fields,
+            )
+
+
 def _call_llm_endpoint(
     config: TranslationConfig,
     parts: List[Dict[str, Any]],
@@ -687,22 +798,48 @@ def _call_llm_endpoint(
     debug: bool = False,
     system_prompt: Optional[str] = None,
 ) -> Optional[str]:
-    """Dispatch an LLM API call and log how long it took (for debugging).
+    """Dispatch an LLM API call, rotating through backup keys and fallback
+    providers on rate limit, and log how long each attempt took.
 
-    Wraps _call_llm_endpoint_impl purely to time it — every call site goes
-    through here, so this is the single place that needs to log LLM
-    latency separately from the rest of the pipeline (detection/cleaning/
-    upscaling/rendering), which "Processing completed in Xs" lumps together.
+    Every call site goes through here, so this is the single place that
+    needs to log LLM latency separately from the rest of the pipeline
+    (detection/cleaning/upscaling/rendering), which "Processing completed
+    in Xs" lumps together — and the single choke point for key/provider
+    rotation, so OCR and translation calls both benefit automatically.
     """
-    start = time.time()
-    try:
-        return _call_llm_endpoint_impl(config, parts, prompt_text, debug, system_prompt)
-    finally:
-        elapsed = time.time() - start
-        log_message(
-            f"LLM call ({config.provider} / {config.model_name}) took {elapsed:.2f}s",
-            always_print=True,
-        )
+    candidates = list(_iter_llm_candidates(config))
+    last_error: Optional[Exception] = None
+    for idx, candidate in enumerate(candidates):
+        start = time.time()
+        try:
+            result = _call_llm_endpoint_impl(
+                candidate, parts, prompt_text, debug, system_prompt
+            )
+            elapsed = time.time() - start
+            log_message(
+                f"LLM call ({candidate.provider} / {candidate.model_name}) took {elapsed:.2f}s",
+                always_print=True,
+            )
+            return result
+        except TranslationError as e:
+            elapsed = time.time() - start
+            log_message(
+                f"LLM call ({candidate.provider} / {candidate.model_name}) "
+                f"failed after {elapsed:.2f}s: {e}",
+                always_print=True,
+            )
+            last_error = e
+            if idx < len(candidates) - 1 and _is_rate_limit_error(e):
+                log_message(
+                    f"Rate limited on candidate {idx + 1}/{len(candidates)} "
+                    f"({candidate.provider}) — rotating to next key/provider.",
+                    always_print=True,
+                )
+                continue
+            raise
+    if last_error:
+        raise last_error
+    return None
 
 
 def _call_llm_endpoint_impl(
@@ -964,6 +1101,51 @@ def _parse_llm_response_unified(
             always_print=True,
         )
         return [f"[{provider}: Parse error]"] * total_elements
+
+
+_MEMORY_NOTE_PATTERN = re.compile(
+    r"\n?[ \t]*MEMORY NOTE:[ \t]*(.*?)[ \t]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _extract_memory_note(response_text: Optional[str]) -> tuple[str, str]:
+    """Strip the trailing `MEMORY NOTE:` section out of a raw LLM response.
+
+    Must run before `_parse_llm_response_unified`, whose numbered-item regex
+    otherwise swallows any trailing non-numbered text (like this section)
+    into the last translated line instead of stopping at it.
+
+    Returns: (response_text with the section removed, the note text or "").
+    """
+    if not response_text:
+        return response_text or "", ""
+    match = _MEMORY_NOTE_PATTERN.search(response_text)
+    if not match:
+        return response_text, ""
+    return response_text[: match.start()], match.group(1).strip()
+
+
+_PRONOUN_TAG_PATTERN = re.compile(r"^\s*\[([^\]]{0,40})\]\s*")
+
+
+def _strip_pronoun_tag(text: str) -> str:
+    """Strip a leading `[pronoun pair]` tag the model was told to prefix
+    each Vietnamese translated line with (see PRONOUN MAP in the system
+    prompt) — the tag is a forcing function to stop the model drifting back
+    to a default pronoun mid-batch, not something the user should see.
+
+    Must not touch the `[OCR FAILED]` sentinel, which also looks like a
+    bracket tag.
+    """
+    if not text:
+        return text
+    if text.strip().upper().startswith("[OCR FAILED]"):
+        return text
+    match = _PRONOUN_TAG_PATTERN.match(text)
+    if not match:
+        return text
+    return text[match.end():]
 
 
 def _prepare_images_for_ocr(
@@ -1412,6 +1594,7 @@ def call_translation_api_batch(
     previous_context_images: Optional[List[Dict[str, str]]] = None,
     previous_context_texts: Optional[List[List[str]]] = None,
     ocr_texts_output: Optional[List[str]] = None,
+    memory_note_output: Optional[List[str]] = None,
     debug: bool = False,
 ) -> List[str]:
     """
@@ -1433,6 +1616,9 @@ def call_translation_api_batch(
         ocr_texts_output: Optional mutable list. When provided, OCR transcripts (source-language text) for
             the current page's bubbles are appended in reading order so callers can propagate them as
             previous-page text context for subsequent calls.
+        memory_note_output: Optional mutable list. When config.context_memory_enabled is set, the model's
+            one-sentence MEMORY NOTE summary for this page is appended here so callers can accumulate it
+            as config.context_memory for subsequent pages of the same story.
         debug (bool): Whether to print debugging information.
 
     Returns:
@@ -1560,6 +1746,13 @@ def call_translation_api_batch(
     context_hints = ""
     if hints:
         context_hints = "\nNote: " + " ".join(hints) + " Translate them accordingly."
+
+    context_memory_section = ""
+    if config.context_memory_enabled and (config.context_memory or "").strip():
+        context_memory_section = (
+            "\n## STORY MEMORY (accumulated from earlier pages of this story)\n"
+            f"{config.context_memory.strip()}\n"
+        )
 
     cache = get_cache()
     cache_key = cache.get_translation_cache_key(
@@ -1696,6 +1889,7 @@ Apply your OCR transcription rules to each image provided.{special_instructions_
 You have been provided with a list of {total_elements} transcribed text segments from a manga page. {full_page_context}{previous_page_context}
 {context_hints}
 {previous_text_section}
+{context_memory_section}
 {ocr_input_section}
 
 ## TASK
@@ -1757,6 +1951,7 @@ The target language is {output_language}. Use the appropriate translation approa
                     previous_context_image_count=previous_context_image_count,
                     previous_context_text_count=previous_context_text_count,
                     input_language=input_language,
+                    context_memory_enabled=config.context_memory_enabled,
                 )
             translation_response_text = _call_llm_endpoint(
                 config,
@@ -1765,6 +1960,12 @@ The target language is {output_language}. Use the appropriate translation approa
                 debug,
                 system_prompt=translation_system,
             )
+            if config.context_memory_enabled and translation_response_text:
+                translation_response_text, memory_note = _extract_memory_note(
+                    translation_response_text
+                )
+                if memory_note_output is not None and memory_note:
+                    memory_note_output.append(memory_note)
             if use_rosetta:
                 final_translations = _parse_rosetta_response(
                     translation_response_text,
@@ -1791,6 +1992,9 @@ The target language is {output_language}. Use the appropriate translation approa
                 if ocr_texts_output is not None:
                     ocr_texts_output.extend(extracted_texts)
                 return combined_results
+
+            if "vietnamese" in (output_language or "").lower():
+                final_translations = [_strip_pronoun_tag(t) for t in final_translations]
 
             combined_results = []
             for i in range(total_elements):
@@ -1837,6 +2041,7 @@ The target language is {output_language}. Use the appropriate translation approa
 You have been provided with {total_elements} individual text images from a manga page. {full_page_context}{previous_page_context}
 {context_hints}
 {previous_text_section}
+{context_memory_section}
 ## TASK
 For each image, you must perform two steps:
 1.  **Transcribe:** Extract the original text exactly as it appears.
@@ -1853,6 +2058,7 @@ For each image, you must perform two steps:
                 previous_context_image_count=previous_context_image_count,
                 previous_context_text_count=previous_context_text_count,
                 input_language=input_language,
+                context_memory_enabled=config.context_memory_enabled,
             )
             response_text = _call_llm_endpoint(
                 config,
@@ -1861,19 +2067,27 @@ For each image, you must perform two steps:
                 debug,
                 system_prompt=one_step_system,
             )
+            if config.context_memory_enabled and response_text:
+                response_text, memory_note = _extract_memory_note(response_text)
+                if memory_note_output is not None and memory_note:
+                    memory_note_output.append(memory_note)
 
             # Parse one-step format ("Original || Translated")
             raw_lines = _parse_llm_response_unified(
                 response_text, total_elements, provider, debug
             )
 
+            is_vi_output = "vietnamese" in (output_language or "").lower()
             translations = []
             ocr_texts = []
             for line in raw_lines:
                 if "||" in line:
                     parts = line.split("||", 1)
                     ocr_texts.append(parts[0].strip())
-                    translations.append(parts[1].strip())
+                    translated_part = parts[1].strip()
+                    if is_vi_output:
+                        translated_part = _strip_pronoun_tag(translated_part)
+                    translations.append(translated_part)
                 else:
                     # Model violated the format — keep the line as the translation
                     # and mark OCR as failed so it isn't reused as prior context.

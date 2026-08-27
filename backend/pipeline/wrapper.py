@@ -27,6 +27,7 @@ from config import settings
 from core.config import (
     CleaningConfig,
     DetectionConfig,
+    FallbackProviderConfig,
     MangaTranslatorConfig,
     OutsideTextConfig,
     PreprocessingConfig,
@@ -103,6 +104,57 @@ def _normalize_azure_openai_endpoint(
         api_version = qs["api-version"][0]
 
     return endpoint, deployment, api_version, False
+
+
+def _build_fallback_provider_configs(
+    fallback_providers: list[dict] | None,
+) -> list[FallbackProviderConfig]:
+    """Normalize raw fallback-provider dicts (from the request) into
+    FallbackProviderConfig objects, running the same Azure/OpenAI-Compatible
+    URL normalization the primary provider gets in _build_config()."""
+    if not fallback_providers:
+        return []
+
+    built: list[FallbackProviderConfig] = []
+    for fb in fallback_providers:
+        fb_provider = fb.get("provider") or ""
+        fb_model = fb.get("model_name") or ""
+        fb_keys = [k for k in (fb.get("api_keys") or []) if k]
+        fb_base_url = fb.get("base_url")
+        if not fb_provider or not fb_keys:
+            continue
+
+        azure_endpoint = azure_api_version = ""
+        azure_is_v1 = False
+        openai_compatible_url = ""
+        if fb_provider == "Azure OpenAI":
+            endpoint, deployment, api_version, is_v1 = (
+                _normalize_azure_openai_endpoint(fb_base_url)
+            )
+            if not endpoint:
+                continue  # can't use this fallback without a valid endpoint
+            azure_endpoint = endpoint
+            azure_api_version = api_version or ""
+            azure_is_v1 = is_v1
+            fb_model = fb_model or deployment or ""
+        elif fb_provider == "OpenAI-Compatible":
+            normalized = _normalize_openai_compatible_base_url(fb_base_url)
+            if not normalized:
+                continue
+            openai_compatible_url = normalized
+
+        built.append(
+            FallbackProviderConfig(
+                provider=fb_provider,
+                model_name=fb_model,
+                api_keys=fb_keys,
+                azure_openai_endpoint=azure_endpoint,
+                azure_openai_api_version=azure_api_version,
+                azure_openai_is_v1=azure_is_v1,
+                openai_compatible_url=openai_compatible_url,
+            )
+        )
+    return built
 
 
 def _resolve_font_dir(
@@ -216,6 +268,10 @@ def _build_config(
     fonts_base_dir: Path,
     base_url: str | None = None,
     llm_instructions: str | None = None,
+    context_memory_enabled: bool = False,
+    context_memory: str | None = None,
+    backup_api_keys: list[str] | None = None,
+    fallback_providers: list[dict] | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -280,6 +336,10 @@ def _build_config(
         reasoning_effort=reasoning_effort,
         special_instructions=special_instructions,
         llm_instructions=llm_instructions,
+        context_memory_enabled=context_memory_enabled,
+        context_memory=context_memory,
+        backup_api_keys=[k for k in (backup_api_keys or []) if k],
+        fallback_providers=_build_fallback_provider_configs(fallback_providers),
         ocr_method=ocr_method,
         send_full_page_context=send_full_page_context,
         whiteout_conjoined_bubbles=True,
@@ -453,7 +513,7 @@ def translate_image_base64(
     image_b64: str,
     config: MangaTranslatorConfig,
     previous_context_texts: list[list[str]] | None = None,
-) -> tuple[Image.Image, list[dict[str, Any]], float, list[str]]:
+) -> tuple[Image.Image, list[dict[str, Any]], float, list[str], str | None]:
     """Translate a base64-encoded image using MangaTranslator pipeline.
 
     Args:
@@ -466,7 +526,8 @@ def translate_image_base64(
     Returns:
         Tuple of (translated PIL Image, bubble info list, processing time in
         seconds, this page's OCR transcripts in reading order — pass this back
-        in as part of previous_context_texts on the next page's call)
+        in as part of previous_context_texts on the next page's call, this
+        page's MEMORY NOTE summary or None if context_memory_enabled was off)
     """
     start = time.time()
 
@@ -488,6 +549,7 @@ def translate_image_base64(
     bubbles_info: list[dict[str, Any]] = []
     translated_image: Image.Image = pil_image
     ocr_texts_out: list[str] = []
+    memory_note_out: list[str] = []
 
     if previous_context_texts:
         config.translation.previous_context_text_count = min(
@@ -504,6 +566,7 @@ def translate_image_base64(
             output_path=tmp_output_path,
             previous_context_texts=previous_context_texts,
             ocr_texts_out=ocr_texts_out,
+            memory_note_out=memory_note_out,
         )
 
         if isinstance(result, Image.Image):
@@ -530,4 +593,5 @@ def translate_image_base64(
             pass
 
     elapsed = time.time() - start
-    return translated_image, bubbles_info, elapsed, ocr_texts_out
+    memory_note = memory_note_out[0] if memory_note_out else None
+    return translated_image, bubbles_info, elapsed, ocr_texts_out, memory_note

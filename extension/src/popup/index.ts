@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, SOURCE_LANGUAGES, TARGET_LANGUAGES, type AppSettings } from '../shared/types.js';
+import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, type AppSettings, type FallbackProviderConfig } from '../shared/types.js';
 import { UI_LANGUAGES, languageLabel, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -23,6 +23,7 @@ const targetSelect = qs<HTMLSelectElement>('f-target');
 const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
 const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
+const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
@@ -32,6 +33,10 @@ const clearCacheBtn = qs<HTMLButtonElement>('btn-clear-cache');
 const llmProviderSelect = qs<HTMLSelectElement>('f-llm-provider');
 const baseUrlInput = qs<HTMLInputElement>('f-base-url');
 const llmApiKeyInput = qs<HTMLInputElement>('f-llm-apikey');
+const backupApiKeysInput = qs<HTMLTextAreaElement>('f-backup-api-keys');
+const fallbackProvidersList = qs<HTMLDivElement>('fallback-providers-list');
+const addFallbackProviderBtn = qs<HTMLButtonElement>('btn-add-fallback-provider');
+const duplicateKeyWarning = qs<HTMLDivElement>('duplicate-key-warning');
 const fetchModelsBtn = qs<HTMLButtonElement>('btn-fetch-models');
 const modelPickerWrap = qs<HTMLDivElement>('model-picker-wrap');
 const modelInput = qs<HTMLInputElement>('f-model');
@@ -180,10 +185,14 @@ async function loadAndBind(): Promise<void> {
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
+  contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
 
   llmProviderSelect.value = settings.config.provider;
   baseUrlInput.value = settings.config.baseUrl ?? '';
   llmApiKeyInput.value = settings.config.apiKey ?? '';
+  backupApiKeysInput.value = (settings.config.backupApiKeys ?? []).join('\n');
+  renderFallbackProviders(settings.config.fallbackProviders ?? []);
+  updateDuplicateKeyWarning();
   modelInput.value = settings.config.modelName ?? '';
   updateProviderFieldHints();
   tempSlider.value = String(settings.config.temperature);
@@ -223,7 +232,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle]) {
+  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
 
@@ -247,16 +256,24 @@ function bind(): void {
 
   llmProviderSelect.addEventListener('change', () => {
     updateProviderFieldHints();
+    updateDuplicateKeyWarning();
     void autoSave();
   });
-  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput, llmInstructionsInput]) {
+  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput, llmInstructionsInput, backupApiKeysInput]) {
     el.addEventListener('change', () => { void autoSave(); });
+  }
+  for (const el of [llmApiKeyInput, backupApiKeysInput]) {
+    el.addEventListener('input', () => updateDuplicateKeyWarning());
   }
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
   imageDetailSelect.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
+  addFallbackProviderBtn.addEventListener('click', () => {
+    fallbackProvidersList.appendChild(createFallbackProviderRow());
+    updateDuplicateKeyWarning();
+  });
 
   scanBtn.addEventListener('click', async () => {
     scanBtn.disabled = true;
@@ -473,6 +490,113 @@ async function listModels(baseUrl: string, apiKey: string, provider: string): Pr
   });
 }
 
+function updateDuplicateKeyWarning(): void {
+  const seenByProvider = new Map<string, Set<string>>();
+  const dupCountByProvider = new Map<string, number>();
+
+  function check(provider: string, rawKey: string): void {
+    const key = rawKey.trim();
+    if (!key) return;
+    let seen = seenByProvider.get(provider);
+    if (!seen) { seen = new Set(); seenByProvider.set(provider, seen); }
+    if (seen.has(key)) {
+      dupCountByProvider.set(provider, (dupCountByProvider.get(provider) ?? 0) + 1);
+    } else {
+      seen.add(key);
+    }
+  }
+
+  const primaryProvider = llmProviderSelect.value;
+  check(primaryProvider, llmApiKeyInput.value);
+  for (const line of backupApiKeysInput.value.split('\n')) check(primaryProvider, line);
+  for (const fb of collectFallbackProviders()) {
+    for (const key of fb.apiKeys) check(fb.provider, key);
+  }
+
+  const lines = Array.from(dupCountByProvider.entries())
+    .filter(([, count]) => count > 0)
+    .map(([provider, count]) => t(uiLanguage, 'warningDuplicateKeys', { provider, count }));
+
+  duplicateKeyWarning.style.display = lines.length ? 'block' : 'none';
+  duplicateKeyWarning.textContent = lines.join(' ');
+}
+
+function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'fallback-provider-row';
+
+  const header = document.createElement('div');
+  header.className = 'fallback-provider-row-header';
+  const indexLabel = document.createElement('span');
+  indexLabel.className = 'fallback-provider-index';
+  indexLabel.textContent = t(uiLanguage, 'labelFallbackProvider');
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn-remove-fallback';
+  removeBtn.textContent = `× ${t(uiLanguage, 'btnRemoveFallback')}`;
+  removeBtn.addEventListener('click', () => { row.remove(); updateDuplicateKeyWarning(); void autoSave(); });
+  header.append(indexLabel, removeBtn);
+
+  const providerSelect = document.createElement('select');
+  providerSelect.className = 'select fb-provider';
+  for (const p of PROVIDERS) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    providerSelect.appendChild(opt);
+  }
+  providerSelect.value = data?.provider ?? PROVIDERS[0];
+
+  const modelField = document.createElement('input');
+  modelField.className = 'input fb-model';
+  modelField.type = 'text';
+  modelField.placeholder = t(uiLanguage, 'placeholderModel');
+  modelField.value = data?.modelName ?? '';
+
+  const baseUrlField = document.createElement('input');
+  baseUrlField.className = 'input fb-base-url';
+  baseUrlField.type = 'url';
+  baseUrlField.placeholder = t(uiLanguage, 'labelBaseUrl');
+  baseUrlField.value = data?.baseUrl ?? '';
+
+  const apiKeysField = document.createElement('textarea');
+  apiKeysField.className = 'textarea fb-api-keys';
+  apiKeysField.rows = 2;
+  apiKeysField.placeholder = 'key1\nkey2';
+  apiKeysField.value = (data?.apiKeys ?? []).join('\n');
+
+  for (const el of [providerSelect, modelField, baseUrlField, apiKeysField]) {
+    el.addEventListener('change', () => { updateDuplicateKeyWarning(); void autoSave(); });
+  }
+  for (const el of [providerSelect, apiKeysField]) {
+    el.addEventListener('input', () => updateDuplicateKeyWarning());
+  }
+
+  row.append(header, providerSelect, modelField, baseUrlField, apiKeysField);
+  return row;
+}
+
+function renderFallbackProviders(rows: FallbackProviderConfig[]): void {
+  fallbackProvidersList.innerHTML = '';
+  for (const row of rows) {
+    fallbackProvidersList.appendChild(createFallbackProviderRow(row));
+  }
+}
+
+function collectFallbackProviders(): FallbackProviderConfig[] {
+  const rows: FallbackProviderConfig[] = [];
+  for (const rowEl of Array.from(fallbackProvidersList.querySelectorAll<HTMLDivElement>('.fallback-provider-row'))) {
+    const provider = rowEl.querySelector<HTMLSelectElement>('.fb-provider')?.value ?? '';
+    const modelName = rowEl.querySelector<HTMLInputElement>('.fb-model')?.value.trim() ?? '';
+    const baseUrl = rowEl.querySelector<HTMLInputElement>('.fb-base-url')?.value.trim() ?? '';
+    const apiKeys = (rowEl.querySelector<HTMLTextAreaElement>('.fb-api-keys')?.value ?? '')
+      .split('\n').map((k) => k.trim()).filter(Boolean);
+    if (!provider || apiKeys.length === 0) continue; // skip incomplete rows
+    rows.push({ provider, modelName: modelName || undefined, apiKeys, baseUrl: baseUrl || undefined });
+  }
+  return rows;
+}
+
 async function autoSave(): Promise<boolean> {
   const next = collectAllSettings();
   const saved = await saveSettings(next);
@@ -504,8 +628,11 @@ function collectAllSettings(): AppSettings {
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,
       previousContextEnabled: previousContextToggle.checked,
+      contextMemoryEnabled: contextMemoryToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
+      backupApiKeys: backupApiKeysInput.value.split('\n').map((k) => k.trim()).filter(Boolean),
+      fallbackProviders: collectFallbackProviders(),
     },
   };
 }

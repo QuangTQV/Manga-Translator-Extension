@@ -104,6 +104,25 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .model-error { font-size: 10px; color: #f87171; }
+    .fallback-provider-row {
+      display: flex; flex-direction: column; gap: 8px;
+      border: 1px solid rgba(59,130,246,0.15); border-radius: 8px; padding: 10px;
+      margin-top: 8px; position: relative;
+    }
+    .fallback-provider-row-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .fallback-provider-index { font-size: 10px; font-weight: 700; color: #4a5e80; text-transform: uppercase; letter-spacing: 0.04em; }
+    .btn-remove-fallback {
+      background: rgba(248,113,113,0.12); color: #f87171;
+      border: 1px solid rgba(248,113,113,0.25); border-radius: 6px;
+      font-size: 11px; padding: 2px 8px; cursor: pointer;
+    }
+    .btn-remove-fallback:hover { background: rgba(248,113,113,0.22); }
+    .btn-add-fallback {
+      background: rgba(59,130,246,0.15); color: #60a5fa;
+      border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
+      font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer; width: 100%;
+    }
+    .btn-add-fallback:hover { background: rgba(59,130,246,0.25); }
     .slider-row { display: flex; flex-direction: column; gap: 5px; }
     .slider-label-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .slider-value { font-size: 11px; font-weight: 700; color: #60a5fa; min-width: 28px; text-align: right; }
@@ -243,6 +262,16 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelContextMemory">Context Memory</div>
+            <div class="toggle-hint" data-i18n="hintContextMemory">Have the model write a one-sentence summary each page and reuse it on later pages of the same story, so characters/events stay consistent. Cheaper than Previous-page context — no images or full OCR text sent.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-context-memory" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
 
         <div class="field">
           <div class="model-picker-header">
@@ -305,6 +334,22 @@
             <label class="label" data-i18n="labelApiKey">API Key</label>
             <input id="f-llm-apikey" class="input" type="password" placeholder="sk-..." data-i18n-placeholder="placeholderApiKey" />
           </div>
+
+          <div class="field">
+            <label class="label"><span data-i18n="labelBackupApiKeys">Backup API Keys</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+            <div class="toggle-hint" data-i18n="hintBackupApiKeys">One key per line, same provider/model as above. Tried in order if the primary key gets rate-limited.</div>
+            <textarea id="f-backup-api-keys" class="textarea" rows="2" placeholder="key2&#10;key3"></textarea>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="model-picker-header">
+            <label class="label"><span data-i18n="labelFallbackProviders">Fallback Providers</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+          </div>
+          <div class="toggle-hint" data-i18n="hintFallbackProviders">Tried in order, only after the primary provider and all its backup keys above are rate-limited.</div>
+          <div id="fallback-providers-list"></div>
+          <button id="btn-add-fallback-provider" class="btn-add-fallback" type="button" data-i18n="btnAddFallbackProvider">+ Add fallback provider</button>
+          <div id="duplicate-key-warning" class="model-error" style="display:none"></div>
         </div>
 
         <div class="llm-fields-row">

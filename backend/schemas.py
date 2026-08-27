@@ -11,6 +11,16 @@ class BubbleInfo(BaseModel):
     translated_text: str
 
 
+class FallbackProviderConfig(BaseModel):
+    """A fallback LLM provider to try if the primary provider (and its
+    backup keys) are all rate-limited."""
+
+    provider: str
+    model_name: Optional[str] = None
+    api_keys: List[str] = []
+    base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
+
+
 class TranslateOptions(BaseModel):
     """Fields shared by single and batch translation requests."""
 
@@ -37,6 +47,10 @@ class TranslateOptions(BaseModel):
     image_detail: str = "auto"
     outside_text_enabled: bool = False
     previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
+    context_memory_enabled: bool = False  # ask the model for a MEMORY NOTE summary each page
+    context_memory: Optional[str] = None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted
+    backup_api_keys: Optional[List[str]] = None  # extra keys for the same provider/model, tried on rate limit
+    fallback_providers: Optional[List[FallbackProviderConfig]] = None  # tried after primary + backup keys are rate-limited
 
 
 class TranslateRequest(TranslateOptions):
@@ -51,6 +65,7 @@ class TranslateResponse(BaseModel):
     target_language: str
     provider: str
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
+    memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
 
 
 class TranslateBatchItem(BaseModel):
@@ -69,6 +84,7 @@ class TranslateBatchItemResponse(BaseModel):
     error: Optional[str] = None
     processing_time_seconds: Optional[float] = None
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
+    memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
 
 
 class TranslateBatchResponse(BaseModel):

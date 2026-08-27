@@ -572,6 +572,7 @@ def translate_and_render(
     previous_context_texts: Optional[List[List[str]]] = None,
     previous_context_texts_provider: Optional[Callable[[], List[List[str]]]] = None,
     ocr_texts_out: Optional[List[str]] = None,
+    memory_note_out: Optional[List[str]] = None,
 ):
     """
     Main function to translate manga speech bubbles and render translations using a config object.
@@ -588,6 +589,8 @@ def translate_and_render(
         ocr_texts_out: Optional mutable list. When provided, the current page's OCR transcripts
             (in reading order) are appended so the orchestrator can chain them as previous-page
             text context for subsequent pages.
+        memory_note_out: Optional mutable list. When config.translation.context_memory_enabled is
+            set, the model's one-sentence MEMORY NOTE summary for this page is appended here.
 
     Returns:
         PIL.Image: Final translated image
@@ -1242,6 +1245,7 @@ def translate_and_render(
                                 previous_context_images=previous_context_images,
                                 previous_context_texts=previous_context_texts,
                                 ocr_texts_output=ocr_texts_out,
+                                memory_note_output=memory_note_out,
                                 debug=verbose,
                             )
                         except TranslationError as e:

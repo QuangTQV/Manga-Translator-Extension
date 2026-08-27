@@ -258,6 +258,12 @@ class UnifiedCache:
                 if getattr(config, "llm_instructions", None)
                 else None
             ),
+            "context_memory_enabled": getattr(config, "context_memory_enabled", False),
+            "context_memory": (
+                config.context_memory.strip()
+                if getattr(config, "context_memory", None)
+                else None
+            ),
             "max_tokens": config.max_tokens,
             "reasoning_effort": config.reasoning_effort,
             "effort": config.effort,
