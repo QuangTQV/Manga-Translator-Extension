@@ -65,6 +65,7 @@ const EN_MESSAGES = {
   fixSelectedPlaceholder: 'Describe the correction, e.g. "character name Yuki was mistranslated as Yuuki"',
   fixSelectedNoneTranslated: 'None of the selected pages are translated yet',
   fixSelectedDone: 'Fixed {success}/{total} page(s)',
+  cacheTooLargeToLoad: 'Translated page cache is {mb}MB — too large to load, so previously translated pages won\'t show as translated this session. Use "Clear translated cache" in Config to reset it.',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -126,6 +127,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedPlaceholder: 'Mo ta cach sua, vd "ten nhan vat Yuki bi dich nham thanh Yuuki"',
     fixSelectedNoneTranslated: 'Chua co trang nao trong lua chon duoc dich',
     fixSelectedDone: 'Da sua {success}/{total} trang',
+    cacheTooLargeToLoad: 'Cache trang da dich dang {mb}MB - qua lon de tai, nen cac trang da dich truoc do se khong hien la da dich trong phien nay. Dung "Clear translated cache" trong Config de reset.',
   },
   zh: {
     autoMt: '自动 MT',
@@ -182,6 +184,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedPlaceholder: '描述修正内容，例如"角色名 Yuki 被误译为 Yuuki"',
     fixSelectedNoneTranslated: '所选页面中还没有已翻译的',
     fixSelectedDone: '已修正 {success}/{total} 页',
+    cacheTooLargeToLoad: '已翻译页面缓存为 {mb}MB，太大无法加载，因此本次会话中之前翻译过的页面不会显示为已翻译。请在设置的 Config 中使用"Clear translated cache"重置。',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -238,6 +241,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedPlaceholder: '修正内容を入力（例:「キャラクター名 Yuki が Yuuki と誤訳されている」）',
     fixSelectedNoneTranslated: '選択したページの中に翻訳済みのものがありません',
     fixSelectedDone: '{success}/{total} ページを修正しました',
+    cacheTooLargeToLoad: '翻訳済みページのキャッシュが {mb}MB あり、大きすぎて読み込めません。そのため今回のセッションでは以前翻訳したページが「翻訳済み」と表示されません。Config の「Clear translated cache」でリセットしてください。',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -294,6 +298,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedPlaceholder: '수정 내용을 입력하세요 (예: "캐릭터 이름 Yuki가 Yuuki로 잘못 번역됨")',
     fixSelectedNoneTranslated: '선택한 페이지 중 번역된 것이 없습니다',
     fixSelectedDone: '{success}/{total}개 페이지를 수정했습니다',
+    cacheTooLargeToLoad: '번역된 페이지 캐시가 {mb}MB로 너무 커서 불러올 수 없습니다. 이번 세션에서는 이전에 번역한 페이지가 번역됨으로 표시되지 않습니다. Config의 "Clear translated cache"로 초기화하세요.',
   },
 };
 
@@ -1859,32 +1864,49 @@ let translatedContentCache = new Map<string, string>(); // contentKey -> base64,
 // stay bounded — otherwise a long browsing/auto-translate session (or
 // unlimitedStorage accumulating across many days) can balloon to gigabytes
 // and crash the tab/browser when loadTranslatedCache() reads it all back in.
-const MAX_CACHE_ENTRIES = 80;
+//
+// Budgeted by actual bytes, not entry count — a fixed entry cap doesn't
+// track real size when each entry can be anywhere from under 1MB to several
+// MB, so it either evicts way too early or lets storage balloon well past
+// what's safe to load back in. Each map gets its own budget (evicting the
+// oldest entries once its own total crosses it) so normal use never has to
+// wait for the read-time safety net below.
+const MAX_CACHE_BYTES_PER_MAP = 80 * 1024 * 1024; // ~160MB combined ceiling across both maps
+
+function mapByteSize(map: Map<string, string>): number {
+  let total = 0;
+  for (const value of map.values()) total += value.length;
+  return total;
+}
 
 // Map preserves insertion order, so the oldest entry is always first —
-// evicts down to maxEntries and returns the evicted keys so callers can
-// also drop the matching chrome.storage.local record.
-function evictOldest(map: Map<string, string>, maxEntries: number): string[] {
+// evicts oldest-first until the map's total value size is back under
+// maxBytes, returning the evicted keys so callers can also drop the
+// matching chrome.storage.local record.
+function evictToByteBudget(map: Map<string, string>, maxBytes: number): string[] {
   const evicted: string[] = [];
-  while (map.size > maxEntries) {
+  let total = mapByteSize(map);
+  while (total > maxBytes && map.size > 0) {
     const oldestKey = map.keys().next().value;
     if (oldestKey === undefined) break;
+    const oldestValue = map.get(oldestKey);
     map.delete(oldestKey);
     evicted.push(oldestKey);
+    total -= oldestValue?.length ?? 0;
   }
   return evicted;
 }
 
 function rememberTranslated(url: string, b64: string): void {
   translatedCache.set(url, b64);
-  for (const evictedUrl of evictOldest(translatedCache, MAX_CACHE_ENTRIES)) {
+  for (const evictedUrl of evictToByteBudget(translatedCache, MAX_CACHE_BYTES_PER_MAP)) {
     void chrome.storage.local.remove(cacheStorageKey(evictedUrl)).catch(() => {});
   }
 }
 
 function rememberTranslatedContent(contentKey: string, b64: string): void {
   translatedContentCache.set(contentKey, b64);
-  for (const evictedKey of evictOldest(translatedContentCache, MAX_CACHE_ENTRIES)) {
+  for (const evictedKey of evictToByteBudget(translatedContentCache, MAX_CACHE_BYTES_PER_MAP)) {
     void chrome.storage.local.remove(`${TRANSLATED_CACHE_PREFIX}${evictedKey}`).catch(() => {});
   }
 }
@@ -1910,20 +1932,25 @@ function contentCacheKey(base64: string, outputLanguage: string): string {
 }
 
 // Byte-count-only check (no values pulled into memory) before the eager
-// chrome.storage.local.get(null) load below — if the cache somehow grew
-// past this despite the write-time cap (e.g. legacy data from before the
-// cap existed), skip loading it into memory rather than risk the same
-// out-of-memory crash "Clear translated cache" used to hit.
-const MAX_CACHE_STORAGE_BYTES = 50 * 1024 * 1024;
+// chrome.storage.local.get(null) load below — the write-time budget
+// (MAX_CACHE_BYTES_PER_MAP, evicted on every save) keeps normal usage well
+// under this, so this is really a last-resort guard for legacy data left
+// over from before that budget existed. If it's ever actually hit, skip
+// the risky full load rather than risk the same out-of-memory crash
+// "Clear translated cache" used to cause — set comfortably above the
+// ~160MB combined ceiling the write-time budget already enforces.
+const MAX_CACHE_STORAGE_BYTES = 250 * 1024 * 1024;
 
 async function loadTranslatedCache(): Promise<void> {
   try {
     const bytesInUse = await chrome.storage.local.getBytesInUse(null);
     if (bytesInUse > MAX_CACHE_STORAGE_BYTES) {
+      const mb = Math.round(bytesInUse / 1024 / 1024);
       console.warn(
-        `[MT] Translated cache storage is ${(bytesInUse / 1024 / 1024).toFixed(0)}MB, ` +
+        `[MT] Translated cache storage is ${mb}MB, ` +
         'skipping eager load to avoid memory pressure. Use "Clear translated cache" in the popup.',
       );
+      toast(tr('cacheTooLargeToLoad', { mb }), true);
       return;
     }
 
@@ -1949,13 +1976,14 @@ async function loadTranslatedCache(): Promise<void> {
     }
 
     // A long testing/browsing history (or storage accumulated before this
-    // cap existed) can leave far more than MAX_CACHE_ENTRIES persisted —
-    // trim both the in-memory maps and their storage records back down in
-    // one batched cleanup instead of holding it all in memory forever.
-    for (const evictedUrl of evictOldest(translatedCache, MAX_CACHE_ENTRIES)) {
+    // byte budget existed) can leave far more than MAX_CACHE_BYTES_PER_MAP
+    // persisted — trim both the in-memory maps and their storage records
+    // back down in one batched cleanup instead of holding it all in memory
+    // forever.
+    for (const evictedUrl of evictToByteBudget(translatedCache, MAX_CACHE_BYTES_PER_MAP)) {
       keysToPrune.push(cacheStorageKey(evictedUrl));
     }
-    for (const evictedKey of evictOldest(translatedContentCache, MAX_CACHE_ENTRIES)) {
+    for (const evictedKey of evictToByteBudget(translatedContentCache, MAX_CACHE_BYTES_PER_MAP)) {
       keysToPrune.push(`${TRANSLATED_CACHE_PREFIX}${evictedKey}`);
     }
     if (keysToPrune.length > 0) {
@@ -3219,6 +3247,8 @@ function injectStyles(shadow: ShadowRoot): void {
       border: 1px solid rgba(60,80,160,0.15);
     }
     .mts-btn-toolbar:hover { background: rgba(24,38,80,0.9); color: #a0b8d8; }
+    .mts-btn-toolbar:disabled { opacity: 0.35; cursor: not-allowed; }
+    .mts-btn-toolbar:disabled:hover { background: rgba(14,22,50,0.9); color: #7a90b8; }
     .mts-btn-collect {
       background: rgba(10,40,80,0.9); color: #60a5fa;
       border: 1px solid rgba(60,120,255,0.2);
