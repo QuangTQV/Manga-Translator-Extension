@@ -22,12 +22,15 @@ class FallbackProviderConfig(BaseModel):
 
 
 class FixHintConfig(BaseModel):
-    """A user-supplied correction for one bubble, applied on a re-translate
-    of the whole page. bubble_index/original_text identify the bubble from
-    a prior TranslateResponse.bubbles list; the LLM is instructed to fix
-    just that bubble and leave the rest unaffected."""
+    """A user-supplied correction, applied on a re-translate of the whole
+    page. When bubble_index is set, original_text identifies that bubble
+    from a prior TranslateResponse.bubbles list and the LLM is instructed
+    to fix just that bubble, leaving the rest unaffected. When bubble_index
+    is omitted, the instruction is applied as a general correction across
+    the whole page instead (e.g. a recurring mistake fixed across several
+    pages at once)."""
 
-    bubble_index: int
+    bubble_index: Optional[int] = None
     original_text: Optional[str] = None
     instruction: str
 
