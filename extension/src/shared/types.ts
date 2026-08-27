@@ -2,13 +2,67 @@
 
 import type { UiLanguage } from './i18n.js';
 
+// One entry in a key list (Backup API Keys, or one fallback provider's own
+// keys). enabled lets the user temporarily exclude a specific key from
+// rotation (e.g. it's hitting rate limits hard right now) without
+// losing/retyping it.
+export interface BackupApiKeyEntry {
+  key: string;
+  enabled: boolean;
+}
+
 // A fallback LLM provider to try if the primary provider (and its backup
-// keys) are all rate-limited — tried in list order.
+// keys) are all rate-limited — tried in list order. enabled defaults to
+// true when absent (older saved settings predate this field) — set false
+// to temporarily skip this provider entirely during rotation without
+// deleting it. Each of its own apiKeys can also be individually toggled
+// the same way (e.g. one of this provider's keys is rate-limited but the
+// others still work).
 export interface FallbackProviderConfig {
   provider: string;
   modelName?: string;
-  apiKeys: string[];
+  apiKeys: BackupApiKeyEntry[];
   baseUrl?: string; // Azure endpoint, or OpenAI-Compatible URL
+  enabled?: boolean;
+}
+
+// Backup API Keys (and each fallback provider's own apiKeys) used to be
+// saved as a plain string[]. Accepts either shape and normalizes to the
+// current one, defaulting enabled to true for legacy string entries so
+// nothing that used to be active silently stops being sent.
+export function normalizeBackupApiKeys(raw: unknown): BackupApiKeyEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: BackupApiKeyEntry[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const key = item.trim();
+      if (key) out.push({ key, enabled: true });
+    } else if (item && typeof item === 'object' && typeof (item as { key?: unknown }).key === 'string') {
+      const key = (item as { key: string }).key.trim();
+      if (key) out.push({ key, enabled: (item as { enabled?: unknown }).enabled !== false });
+    }
+  }
+  return out;
+}
+
+// Fallback provider rows used to be saved with apiKeys: string[] and no
+// enabled field. Migrates both to the current shape.
+export function normalizeFallbackProviders(raw: unknown): FallbackProviderConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const out: FallbackProviderConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.provider !== 'string' || !obj.provider) continue;
+    out.push({
+      provider: obj.provider,
+      modelName: typeof obj.modelName === 'string' ? obj.modelName : undefined,
+      apiKeys: normalizeBackupApiKeys(obj.apiKeys),
+      baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : undefined,
+      enabled: obj.enabled !== false,
+    });
+  }
+  return out;
 }
 
 export interface TranslateConfig {
@@ -18,6 +72,7 @@ export interface TranslateConfig {
   baseUrl?: string;     // for OpenAI-Compatible provider, or Azure endpoint for Azure OpenAI
   modelName?: string;   // for Azure OpenAI, this is the deployment name
   apiKey?: string;
+  apiKeyEnabled?: boolean; // false to temporarily skip the primary key (e.g. rate-limited) without deleting it — falls through to backup keys/fallback providers. Defaults to true when absent.
   temperature: number;
   topP: number;
   topK: number;
@@ -28,7 +83,7 @@ export interface TranslateConfig {
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
   contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
-  backupApiKeys?: string[]; // extra keys for the same provider/model, tried in order on rate limit
+  backupApiKeys?: BackupApiKeyEntry[]; // extra keys for the same provider/model, tried in order on rate limit
   fallbackProviders?: FallbackProviderConfig[]; // tried after the primary provider + backup keys are all rate-limited
   fontDir?: string;
   maxFontSize: number;

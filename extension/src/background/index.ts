@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type AppSettings } from '../shared/types.js';
+import { DEFAULT_SETTINGS, normalizeBackupApiKeys, normalizeFallbackProviders, type AppSettings } from '../shared/types.js';
 import type { TranslateRequest, TranslateResponse } from '../shared/types.js';
 import { normalizeUiLanguage } from '../shared/i18n.js';
 
@@ -579,6 +579,8 @@ function normalizeSettings(raw?: Partial<AppSettings>): AppSettings {
     config: {
       ...DEFAULT_SETTINGS.config,
       ...(raw?.config ?? {}),
+      backupApiKeys: normalizeBackupApiKeys(raw?.config?.backupApiKeys),
+      fallbackProviders: normalizeFallbackProviders(raw?.config?.fallbackProviders),
     },
   };
 }

@@ -778,6 +778,20 @@ def _is_insufficient_credit_error(exc: Exception) -> bool:
     return any(marker in text for marker in _INSUFFICIENT_CREDIT_MARKERS)
 
 
+def _is_missing_key_error(exc: Exception) -> bool:
+    """True if this candidate failed because it has no API key/endpoint/URL
+    configured at all — every provider branch in _call_llm_endpoint_impl
+    raises with this exact wording on that path. Distinct from a rate limit/
+    credit failure (nothing to cool down — this candidate will never work on
+    retry), but still worth rotating past rather than aborting the whole
+    request: the primary candidate legitimately has an empty key whenever
+    the extension's "temporarily disable this key" checkbox is unchecked
+    with no enabled backup to promote in its place, and that should fall
+    through to the next candidate (backup key/fallback provider) exactly
+    like a rate limit would, not be treated as a fatal misconfiguration."""
+    return "is missing" in str(exc)
+
+
 def _candidate_key(candidate: TranslationConfig) -> Optional[str]:
     """The API key value a candidate config would actually call with."""
     key_field = _PROVIDER_API_KEY_FIELD.get(candidate.provider)
@@ -976,10 +990,15 @@ def _call_llm_endpoint(
             )
             is_credit_error = _is_insufficient_credit_error(e)
             is_rate_limited = _is_rate_limit_error(e)
+            is_missing_key = _is_missing_key_error(e)
             if is_rate_limited or is_credit_error:
                 _mark_cooldown(candidate.provider, _candidate_key(candidate), is_credit_error)
-            if not is_last and (is_rate_limited or is_credit_error):
-                reason = "is out of credit/quota" if is_credit_error else "was rate limited"
+            if not is_last and (is_rate_limited or is_credit_error or is_missing_key):
+                reason = (
+                    "is out of credit/quota" if is_credit_error
+                    else "has no key/endpoint configured" if is_missing_key
+                    else "was rate limited"
+                )
                 log_message(
                     f"Candidate {idx + 1}/{len(candidates)} ({candidate.provider}) "
                     f"{reason} — rotating to next key/provider.",

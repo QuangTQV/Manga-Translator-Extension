@@ -123,6 +123,13 @@
       font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer; width: 100%;
     }
     .btn-add-fallback:hover { background: rgba(59,130,246,0.25); }
+    .backup-key-row {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 6px;
+    }
+    .backup-key-row input[type="checkbox"] { accent-color: #3b82f6; cursor: pointer; flex-shrink: 0; }
+    .backup-key-row .input { flex: 1; min-width: 0; }
+    .backup-key-row.disabled .input { opacity: 0.45; }
     .slider-row { display: flex; flex-direction: column; gap: 5px; }
     .slider-label-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .slider-value { font-size: 11px; font-weight: 700; color: #60a5fa; min-width: 28px; text-align: right; }
@@ -332,13 +339,17 @@
 
           <div class="field">
             <label class="label" data-i18n="labelApiKey">API Key</label>
-            <input id="f-llm-apikey" class="input" type="password" placeholder="sk-..." data-i18n-placeholder="placeholderApiKey" />
+            <div class="backup-key-row" id="f-llm-apikey-row">
+              <input type="checkbox" id="f-llm-apikey-enabled" checked />
+              <input id="f-llm-apikey" class="input" type="password" placeholder="sk-..." data-i18n-placeholder="placeholderApiKey" />
+            </div>
           </div>
 
           <div class="field">
             <label class="label"><span data-i18n="labelBackupApiKeys">Backup API Keys</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
-            <div class="toggle-hint" data-i18n="hintBackupApiKeys">One key per line, same provider/model as above. Tried in order if the primary key gets rate-limited.</div>
-            <textarea id="f-backup-api-keys" class="textarea" rows="2" placeholder="key2&#10;key3"></textarea>
+            <div class="toggle-hint" data-i18n="hintBackupApiKeys">Same provider/model as above, tried in order if the primary key gets rate-limited. Uncheck a key to skip it temporarily without losing it.</div>
+            <div id="backup-api-keys-list"></div>
+            <button id="btn-add-backup-key" class="btn-add-fallback" type="button" data-i18n="btnAddBackupKey">+ Add key</button>
           </div>
         </div>
 
@@ -346,7 +357,7 @@
           <div class="model-picker-header">
             <label class="label"><span data-i18n="labelFallbackProviders">Fallback Providers</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
           </div>
-          <div class="toggle-hint" data-i18n="hintFallbackProviders">Tried in order, only after the primary provider and all its backup keys above are rate-limited.</div>
+          <div class="toggle-hint" data-i18n="hintFallbackProviders">Tried in order, only after the primary provider and all its backup keys above are rate-limited. Uncheck a provider to skip it temporarily without losing it.</div>
           <div id="fallback-providers-list"></div>
           <button id="btn-add-fallback-provider" class="btn-add-fallback" type="button" data-i18n="btnAddFallbackProvider">+ Add fallback provider</button>
           <div id="duplicate-key-warning" class="model-error" style="display:none"></div>

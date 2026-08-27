@@ -63,12 +63,10 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, 'src/popup/index.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
-        'content-script/index': resolve(__dirname, 'src/content-script/index.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'background') return 'background/index.js';
-          if (chunkInfo.name === 'content-script/index') return 'content-script/index.js';
           if (chunkInfo.name === 'popup') return 'popup/index.js';
           return 'assets/[name]-[hash].js';
         },

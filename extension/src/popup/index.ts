@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, type AppSettings, type FallbackProviderConfig } from '../shared/types.js';
+import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeBackupApiKeys, normalizeFallbackProviders, type AppSettings, type BackupApiKeyEntry, type FallbackProviderConfig } from '../shared/types.js';
 import { UI_LANGUAGES, languageLabel, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -33,7 +33,10 @@ const clearCacheBtn = qs<HTMLButtonElement>('btn-clear-cache');
 const llmProviderSelect = qs<HTMLSelectElement>('f-llm-provider');
 const baseUrlInput = qs<HTMLInputElement>('f-base-url');
 const llmApiKeyInput = qs<HTMLInputElement>('f-llm-apikey');
-const backupApiKeysInput = qs<HTMLTextAreaElement>('f-backup-api-keys');
+const llmApiKeyEnabledInput = qs<HTMLInputElement>('f-llm-apikey-enabled');
+const llmApiKeyRow = qs<HTMLDivElement>('f-llm-apikey-row');
+const backupApiKeysList = qs<HTMLDivElement>('backup-api-keys-list');
+const addBackupKeyBtn = qs<HTMLButtonElement>('btn-add-backup-key');
 const fallbackProvidersList = qs<HTMLDivElement>('fallback-providers-list');
 const addFallbackProviderBtn = qs<HTMLButtonElement>('btn-add-fallback-provider');
 const duplicateKeyWarning = qs<HTMLDivElement>('duplicate-key-warning');
@@ -66,6 +69,12 @@ let settings: AppSettings = normalizeSettings();
 let uiLanguage: UiLanguage = 'en';
 let healthState: HealthState = 'checking';
 let isBound = false;
+// blur/beforeunload trigger autoSave(), which persists whatever is currently
+// in the form fields. Those listeners are registered before the async
+// settings load resolves, so if the popup loses focus (or is closed) in
+// that window, autoSave() would read the still-default/empty form and wipe
+// the real saved settings (API keys included) in storage. Guard against it.
+let settingsLoaded = false;
 
 function normalizeSettings(raw?: StoredSettings): AppSettings {
   return {
@@ -75,6 +84,8 @@ function normalizeSettings(raw?: StoredSettings): AppSettings {
     config: {
       ...DEFAULT_SETTINGS.config,
       ...(raw?.config ?? {}),
+      backupApiKeys: normalizeBackupApiKeys(raw?.config?.backupApiKeys),
+      fallbackProviders: normalizeFallbackProviders(raw?.config?.fallbackProviders),
     },
   };
 }
@@ -190,7 +201,10 @@ async function loadAndBind(): Promise<void> {
   llmProviderSelect.value = settings.config.provider;
   baseUrlInput.value = settings.config.baseUrl ?? '';
   llmApiKeyInput.value = settings.config.apiKey ?? '';
-  backupApiKeysInput.value = (settings.config.backupApiKeys ?? []).join('\n');
+  llmApiKeyEnabledInput.checked = settings.config.apiKeyEnabled !== false;
+  llmApiKeyEnabledInput.title = t(uiLanguage, 'hintBackupKeyEnabled');
+  llmApiKeyRow.classList.toggle('disabled', !llmApiKeyEnabledInput.checked);
+  renderBackupApiKeys(settings.config.backupApiKeys ?? []);
   renderFallbackProviders(settings.config.fallbackProviders ?? []);
   updateDuplicateKeyWarning();
   modelInput.value = settings.config.modelName ?? '';
@@ -207,6 +221,7 @@ async function loadAndBind(): Promise<void> {
   instructionsInput.value = settings.config.specialInstructions ?? '';
   llmInstructionsInput.value = settings.config.llmInstructions ?? '';
 
+  settingsLoaded = true;
   bind();
   await checkHealth(settings.backendUrl);
 }
@@ -259,17 +274,23 @@ function bind(): void {
     updateDuplicateKeyWarning();
     void autoSave();
   });
-  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput, llmInstructionsInput, backupApiKeysInput]) {
+  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput, llmInstructionsInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
-  for (const el of [llmApiKeyInput, backupApiKeysInput]) {
-    el.addEventListener('input', () => updateDuplicateKeyWarning());
-  }
+  llmApiKeyInput.addEventListener('input', () => updateDuplicateKeyWarning());
+  llmApiKeyEnabledInput.addEventListener('change', () => {
+    llmApiKeyRow.classList.toggle('disabled', !llmApiKeyEnabledInput.checked);
+    void autoSave();
+  });
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
   imageDetailSelect.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
+  addBackupKeyBtn.addEventListener('click', () => {
+    backupApiKeysList.appendChild(createBackupKeyRow());
+    updateDuplicateKeyWarning();
+  });
   addFallbackProviderBtn.addEventListener('click', () => {
     fallbackProvidersList.appendChild(createFallbackProviderRow());
     updateDuplicateKeyWarning();
@@ -508,9 +529,9 @@ function updateDuplicateKeyWarning(): void {
 
   const primaryProvider = llmProviderSelect.value;
   check(primaryProvider, llmApiKeyInput.value);
-  for (const line of backupApiKeysInput.value.split('\n')) check(primaryProvider, line);
+  for (const entry of collectBackupApiKeys()) check(primaryProvider, entry.key);
   for (const fb of collectFallbackProviders()) {
-    for (const key of fb.apiKeys) check(fb.provider, key);
+    for (const entry of fb.apiKeys) check(fb.provider, entry.key);
   }
 
   const lines = Array.from(dupCountByProvider.entries())
@@ -527,15 +548,30 @@ function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElemen
 
   const header = document.createElement('div');
   header.className = 'fallback-provider-row-header';
+
+  const enabledLabel = document.createElement('label');
+  enabledLabel.style.display = 'flex';
+  enabledLabel.style.alignItems = 'center';
+  enabledLabel.style.gap = '5px';
+  enabledLabel.style.cursor = 'pointer';
+  const enabledCheckbox = document.createElement('input');
+  enabledCheckbox.type = 'checkbox';
+  enabledCheckbox.className = 'fb-enabled';
+  enabledCheckbox.checked = data?.enabled !== false;
+  enabledCheckbox.style.accentColor = '#3b82f6';
+  enabledCheckbox.style.cursor = 'pointer';
   const indexLabel = document.createElement('span');
   indexLabel.className = 'fallback-provider-index';
   indexLabel.textContent = t(uiLanguage, 'labelFallbackProvider');
+  enabledLabel.append(enabledCheckbox, indexLabel);
+  enabledLabel.title = t(uiLanguage, 'hintFallbackEnabled');
+
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = `× ${t(uiLanguage, 'btnRemoveFallback')}`;
   removeBtn.addEventListener('click', () => { row.remove(); updateDuplicateKeyWarning(); void autoSave(); });
-  header.append(indexLabel, removeBtn);
+  header.append(enabledLabel, removeBtn);
 
   const providerSelect = document.createElement('select');
   providerSelect.className = 'select fb-provider';
@@ -559,20 +595,27 @@ function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElemen
   baseUrlField.placeholder = t(uiLanguage, 'labelBaseUrl');
   baseUrlField.value = data?.baseUrl ?? '';
 
-  const apiKeysField = document.createElement('textarea');
-  apiKeysField.className = 'textarea fb-api-keys';
-  apiKeysField.rows = 2;
-  apiKeysField.placeholder = 'key1\nkey2';
-  apiKeysField.value = (data?.apiKeys ?? []).join('\n');
+  const apiKeysList = document.createElement('div');
+  apiKeysList.className = 'fb-api-keys-list';
+  for (const entry of data?.apiKeys ?? []) {
+    apiKeysList.appendChild(createBackupKeyRow(entry));
+  }
 
-  for (const el of [providerSelect, modelField, baseUrlField, apiKeysField]) {
+  const addKeyBtn = document.createElement('button');
+  addKeyBtn.type = 'button';
+  addKeyBtn.className = 'btn-add-fallback';
+  addKeyBtn.textContent = t(uiLanguage, 'btnAddBackupKey');
+  addKeyBtn.addEventListener('click', () => {
+    apiKeysList.appendChild(createBackupKeyRow());
+    updateDuplicateKeyWarning();
+  });
+
+  for (const el of [providerSelect, modelField, baseUrlField, enabledCheckbox]) {
     el.addEventListener('change', () => { updateDuplicateKeyWarning(); void autoSave(); });
   }
-  for (const el of [providerSelect, apiKeysField]) {
-    el.addEventListener('input', () => updateDuplicateKeyWarning());
-  }
+  providerSelect.addEventListener('input', () => updateDuplicateKeyWarning());
 
-  row.append(header, providerSelect, modelField, baseUrlField, apiKeysField);
+  row.append(header, providerSelect, modelField, baseUrlField, apiKeysList, addKeyBtn);
   return row;
 }
 
@@ -589,15 +632,74 @@ function collectFallbackProviders(): FallbackProviderConfig[] {
     const provider = rowEl.querySelector<HTMLSelectElement>('.fb-provider')?.value ?? '';
     const modelName = rowEl.querySelector<HTMLInputElement>('.fb-model')?.value.trim() ?? '';
     const baseUrl = rowEl.querySelector<HTMLInputElement>('.fb-base-url')?.value.trim() ?? '';
-    const apiKeys = (rowEl.querySelector<HTMLTextAreaElement>('.fb-api-keys')?.value ?? '')
-      .split('\n').map((k) => k.trim()).filter(Boolean);
+    const enabled = rowEl.querySelector<HTMLInputElement>('.fb-enabled')?.checked ?? true;
+    const apiKeys: BackupApiKeyEntry[] = [];
+    for (const keyRowEl of Array.from(rowEl.querySelectorAll<HTMLDivElement>('.fb-api-keys-list .backup-key-row'))) {
+      const key = keyRowEl.querySelector<HTMLInputElement>('.bk-key')?.value.trim() ?? '';
+      const keyEnabled = keyRowEl.querySelector<HTMLInputElement>('.bk-enabled')?.checked ?? true;
+      if (!key) continue;
+      apiKeys.push({ key, enabled: keyEnabled });
+    }
     if (!provider || apiKeys.length === 0) continue; // skip incomplete rows
-    rows.push({ provider, modelName: modelName || undefined, apiKeys, baseUrl: baseUrl || undefined });
+    rows.push({ provider, modelName: modelName || undefined, apiKeys, baseUrl: baseUrl || undefined, enabled });
+  }
+  return rows;
+}
+
+function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'backup-key-row';
+
+  const enabledCheckbox = document.createElement('input');
+  enabledCheckbox.type = 'checkbox';
+  enabledCheckbox.className = 'bk-enabled';
+  enabledCheckbox.checked = data?.enabled !== false;
+  enabledCheckbox.title = t(uiLanguage, 'hintBackupKeyEnabled');
+
+  const keyField = document.createElement('input');
+  keyField.className = 'input bk-key';
+  keyField.type = 'password';
+  keyField.placeholder = t(uiLanguage, 'placeholderApiKey');
+  keyField.value = data?.key ?? '';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn-remove-fallback';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => { row.remove(); updateDuplicateKeyWarning(); void autoSave(); });
+
+  const syncDisabledStyle = () => row.classList.toggle('disabled', !enabledCheckbox.checked);
+  syncDisabledStyle();
+
+  for (const el of [enabledCheckbox, keyField]) {
+    el.addEventListener('change', () => { syncDisabledStyle(); updateDuplicateKeyWarning(); void autoSave(); });
+  }
+  keyField.addEventListener('input', () => updateDuplicateKeyWarning());
+
+  row.append(enabledCheckbox, keyField, removeBtn);
+  return row;
+}
+
+function renderBackupApiKeys(rows: BackupApiKeyEntry[]): void {
+  backupApiKeysList.innerHTML = '';
+  for (const row of rows) {
+    backupApiKeysList.appendChild(createBackupKeyRow(row));
+  }
+}
+
+function collectBackupApiKeys(): BackupApiKeyEntry[] {
+  const rows: BackupApiKeyEntry[] = [];
+  for (const rowEl of Array.from(backupApiKeysList.querySelectorAll<HTMLDivElement>('.backup-key-row'))) {
+    const key = rowEl.querySelector<HTMLInputElement>('.bk-key')?.value.trim() ?? '';
+    const enabled = rowEl.querySelector<HTMLInputElement>('.bk-enabled')?.checked ?? true;
+    if (!key) continue; // skip empty rows
+    rows.push({ key, enabled });
   }
   return rows;
 }
 
 async function autoSave(): Promise<boolean> {
+  if (!settingsLoaded) return false;
   const next = collectAllSettings();
   const saved = await saveSettings(next);
   if (saved) settings = next;
@@ -619,6 +721,7 @@ function collectAllSettings(): AppSettings {
       baseUrl: baseUrlInput.value.trim() || undefined,
       modelName: model || undefined,
       apiKey: llmApiKeyInput.value.trim() || undefined,
+      apiKeyEnabled: llmApiKeyEnabledInput.checked,
       temperature: parseFloat(tempSlider.value),
       topP: parseFloat(topPSlider.value),
       topK: parseInt(topKSlider.value, 10),
@@ -631,7 +734,7 @@ function collectAllSettings(): AppSettings {
       contextMemoryEnabled: contextMemoryToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
-      backupApiKeys: backupApiKeysInput.value.split('\n').map((k) => k.trim()).filter(Boolean),
+      backupApiKeys: collectBackupApiKeys(),
       fallbackProviders: collectFallbackProviders(),
     },
   };

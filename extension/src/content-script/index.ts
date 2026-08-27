@@ -1,4 +1,5 @@
 import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
+import { normalizeBackupApiKeys, normalizeFallbackProviders } from '../shared/types.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -2276,6 +2277,7 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
 function bgSuggestInstructions(images: string[], outputLanguage: string, settings: AppSettings): Promise<{ suggestion?: string; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 2 minutes' }), 120_000);
+    const { apiKey, backupKeys } = effectiveApiKeys(settings);
     chrome.runtime.sendMessage(
       {
         type: 'SUGGEST_INSTRUCTIONS',
@@ -2285,20 +2287,13 @@ function bgSuggestInstructions(images: string[], outputLanguage: string, setting
           provider: settings.config.provider,
           base_url: settings.config.baseUrl,
           model_name: settings.config.modelName,
-          api_key: settings.config.apiKey,
+          api_key: apiKey,
           temperature: settings.config.temperature,
           top_p: settings.config.topP,
           top_k: settings.config.topK,
           reasoning_effort: settings.config.reasoningEffort || undefined,
-          backup_api_keys: settings.config.backupApiKeys?.length ? settings.config.backupApiKeys : undefined,
-          fallback_providers: settings.config.fallbackProviders?.length
-            ? settings.config.fallbackProviders.map((fb) => ({
-                provider: fb.provider,
-                model_name: fb.modelName,
-                api_keys: fb.apiKeys,
-                base_url: fb.baseUrl,
-              }))
-            : undefined,
+          backup_api_keys: backupKeys,
+          fallback_providers: enabledFallbackProviders(settings),
         },
       },
       (resp: unknown) => {
@@ -2856,6 +2851,38 @@ async function autoCollect(onProgress: (status: string) => void): Promise<void> 
   reRenderGrid();
 }
 
+// Only keys/providers the user hasn't temporarily disabled are ever sent —
+// a disabled entry stays saved in settings (so it can be re-enabled later)
+// but is excluded from rotation entirely, same as if it weren't configured.
+//
+// The backend has no concept of "disabled" for the primary api_key field —
+// it always tries whatever's sent there first. So when the primary key is
+// disabled, promote the first enabled backup key into that slot and send
+// the rest as backups, leaving the disabled primary out of the request.
+function effectiveApiKeys(settings: AppSettings): { apiKey?: string; backupKeys?: string[] } {
+  const enabledBackups = (settings.config.backupApiKeys ?? []).filter((k) => k.enabled).map((k) => k.key);
+  if (settings.config.apiKeyEnabled === false) {
+    const [promoted, ...rest] = enabledBackups;
+    return { apiKey: promoted, backupKeys: rest.length ? rest : undefined };
+  }
+  return { apiKey: settings.config.apiKey, backupKeys: enabledBackups.length ? enabledBackups : undefined };
+}
+
+function enabledFallbackProviders(
+  settings: AppSettings,
+): { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[] | undefined {
+  const providers = (settings.config.fallbackProviders ?? [])
+    .filter((fb) => fb.enabled !== false)
+    .map((fb) => ({
+      provider: fb.provider,
+      model_name: fb.modelName,
+      api_keys: fb.apiKeys.filter((k) => k.enabled).map((k) => k.key),
+      base_url: fb.baseUrl,
+    }))
+    .filter((fb) => fb.api_keys.length > 0);
+  return providers.length ? providers : undefined;
+}
+
 function buildTranslateRequest(
   image: string,
   settings: AppSettings,
@@ -2863,6 +2890,7 @@ function buildTranslateRequest(
   contextMemoryText?: string,
 ): TranslateRequest {
   const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
+  const { apiKey, backupKeys } = effectiveApiKeys(settings);
   return {
     image,
     input_language: settings.config.inputLanguage,
@@ -2870,7 +2898,7 @@ function buildTranslateRequest(
     provider: settings.config.provider,
     base_url: settings.config.baseUrl,
     model_name: settings.config.modelName,
-    api_key: settings.config.apiKey,
+    api_key: apiKey,
     temperature: settings.config.temperature,
     top_p: settings.config.topP,
     top_k: settings.config.topK,
@@ -2890,15 +2918,8 @@ function buildTranslateRequest(
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
     context_memory_enabled: contextMemoryEnabled,
     context_memory: contextMemoryEnabled && contextMemoryText ? contextMemoryText : undefined,
-    backup_api_keys: settings.config.backupApiKeys?.length ? settings.config.backupApiKeys : undefined,
-    fallback_providers: settings.config.fallbackProviders?.length
-      ? settings.config.fallbackProviders.map((fb) => ({
-          provider: fb.provider,
-          model_name: fb.modelName,
-          api_keys: fb.apiKeys,
-          base_url: fb.baseUrl,
-        }))
-      : undefined,
+    backup_api_keys: backupKeys,
+    fallback_providers: enabledFallbackProviders(settings),
   };
 }
 
@@ -3090,6 +3111,8 @@ function normalizeSettings(raw?: Partial<AppSettings>): AppSettings {
     config: {
       ...getDefaultSettings().config,
       ...(raw?.config ?? {}),
+      backupApiKeys: normalizeBackupApiKeys(raw?.config?.backupApiKeys),
+      fallbackProviders: normalizeFallbackProviders(raw?.config?.fallbackProviders),
     },
   };
 }
