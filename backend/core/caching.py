@@ -264,6 +264,9 @@ class UnifiedCache:
                 if getattr(config, "context_memory", None)
                 else None
             ),
+            "fix_hint_bubble_index": getattr(config, "fix_hint_bubble_index", None),
+            "fix_hint_original_text": getattr(config, "fix_hint_original_text", None),
+            "fix_hint_instruction": getattr(config, "fix_hint_instruction", None),
             "max_tokens": config.max_tokens,
             "reasoning_effort": config.reasoning_effort,
             "effort": config.effort,

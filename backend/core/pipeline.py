@@ -573,6 +573,7 @@ def translate_and_render(
     previous_context_texts_provider: Optional[Callable[[], List[List[str]]]] = None,
     ocr_texts_out: Optional[List[str]] = None,
     memory_note_out: Optional[List[str]] = None,
+    bubbles_out: Optional[List[Dict[str, Any]]] = None,
 ):
     """
     Main function to translate manga speech bubbles and render translations using a config object.
@@ -591,6 +592,9 @@ def translate_and_render(
             text context for subsequent pages.
         memory_note_out: Optional mutable list. When config.translation.context_memory_enabled is
             set, the model's one-sentence MEMORY NOTE summary for this page is appended here.
+        bubbles_out: Optional mutable list. When provided, one dict per bubble is appended
+            (bbox, confidence, ocr_text, translation), in reading order, so the caller can
+            expose per-bubble data (e.g. for a "fix this bubble" UI) without re-running detection.
 
     Returns:
         PIL.Image: Final translated image
@@ -1179,6 +1183,12 @@ def translate_and_render(
                 ]
                 translated_texts = []
                 _provider_tag = f"[{config.translation.provider}:"
+                # Always captured (independent of whether the caller passed
+                # ocr_texts_out) so bubbles_out below can attach each bubble's
+                # original_text regardless of the caller's own needs.
+                _bubble_ocr_texts: List[str] = (
+                    ocr_texts_out if ocr_texts_out is not None else []
+                )
                 if not bubble_images_b64:
                     log_message("No valid bubbles after sorting", always_print=True)
                 else:
@@ -1244,7 +1254,7 @@ def translate_and_render(
                                 bubble_metadata=sorted_bubble_data,
                                 previous_context_images=previous_context_images,
                                 previous_context_texts=previous_context_texts,
-                                ocr_texts_output=ocr_texts_out,
+                                ocr_texts_output=_bubble_ocr_texts,
                                 memory_note_output=memory_note_out,
                                 debug=verbose,
                             )
@@ -1324,7 +1334,7 @@ def translate_and_render(
                             text = text.upper()
                             bubble["translation"] = text
 
-                        if (
+                        is_invalid_translation = (
                             not text
                             or text.startswith("API Error")
                             or text.startswith("[Translation Error]")
@@ -1335,7 +1345,23 @@ def translate_and_render(
                                 "[OCR FAILED]",
                                 "[Empty response / no content]",
                             }
-                        ):
+                        )
+
+                        if bubbles_out is not None and not is_invalid_translation:
+                            bubbles_out.append(
+                                {
+                                    "bbox": list(bbox),
+                                    "confidence": float(bubble.get("confidence", 0.0)),
+                                    "ocr_text": (
+                                        _bubble_ocr_texts[i]
+                                        if i < len(_bubble_ocr_texts)
+                                        else None
+                                    ),
+                                    "translation": text,
+                                }
+                            )
+
+                        if is_invalid_translation:
                             entry_type = "outside text" if is_outside_text else "bubble"
                             log_message(
                                 f"Skipping {entry_type} {bbox} - invalid translation",

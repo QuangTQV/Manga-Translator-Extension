@@ -48,6 +48,15 @@ export interface BubbleInfo {
   translatedText: string;
 }
 
+// A user-supplied correction for one bubble, applied on a re-translate of
+// the whole page. bubbleIndex/originalText identify the bubble from a
+// prior TranslateResponse.bubbles list.
+export interface FixHint {
+  bubbleIndex: number;
+  originalText?: string;
+  instruction: string;
+}
+
 export interface TranslateResponse {
   translated_image: string; // raw base64
   bubbles: BubbleInfo[];
@@ -106,6 +115,7 @@ export interface TranslateRequest {
   context_memory?: string;
   backup_api_keys?: string[];
   fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
+  fix_hint?: { bubble_index: number; original_text?: string; instruction: string };
   font_dir?: string;
   max_font_size: number;
   min_font_size: number;

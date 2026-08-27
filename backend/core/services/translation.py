@@ -1446,6 +1446,31 @@ def _format_special_instructions(config: TranslationConfig) -> str:
     return "\n\n" + "\n\n".join(sections) + "\n"
 
 
+def _format_fix_hint(config: TranslationConfig) -> str:
+    """Format a one-off targeted correction for a single bubble, requested
+    by the user after seeing a bad translation (a full-page re-translate
+    with this note attached). Item numbering matches the 1-indexed
+    ordering used elsewhere in the prompt (`Items [N]`, `## INPUT DATA`),
+    so bubble_index (0-based, from the prior response's `bubbles` list)
+    is offset by one. original_text is included as a visual/textual
+    anchor since bubble order/count can shift slightly between calls.
+    """
+    instruction = (config.fix_hint_instruction or "").strip()
+    if not instruction:
+        return ""
+    bubble_index = config.fix_hint_bubble_index
+    item_ref = f"item #{bubble_index + 1}" if bubble_index is not None else "the bubble described below"
+    anchor = (config.fix_hint_original_text or "").strip()
+    anchor_note = f' (original text: "{anchor}")' if anchor else ""
+    return (
+        "\n\n## TARGETED CORRECTION\n"
+        f"The previous translation of {item_ref}{anchor_note} was wrong. "
+        f"Apply this correction to that item: {instruction}\n"
+        "If item numbering has shifted, use the original text quoted above to find the right one. "
+        "Translate every other item normally, unaffected by this note.\n"
+    )
+
+
 def _build_rosetta_instruction(
     output_language: str,
     special_instructions: Optional[str] = None,
@@ -2040,7 +2065,7 @@ Apply your OCR transcription rules to each image provided.{special_instructions_
                 ),
             )
 
-            special_instructions_section = _format_special_instructions(config)
+            special_instructions_section = _format_special_instructions(config) + _format_fix_hint(config)
 
             translation_prompt = f"""
 ## CONTEXT
@@ -2051,7 +2076,7 @@ You have been provided with a list of {total_elements} transcribed text segments
 {ocr_input_section}
 
 ## TASK
-Apply your translation and styling rules to the text in the `## INPUT DATA` section. 
+Apply your translation and styling rules to the text in the `## INPUT DATA` section.
 The target language is {output_language}. Use the appropriate translation approach for each text type.{special_instructions_section}
 """  # noqa
 
@@ -2192,7 +2217,7 @@ The target language is {output_language}. Use the appropriate translation approa
                 ),
             )
 
-            special_instructions_section = _format_special_instructions(config)
+            special_instructions_section = _format_special_instructions(config) + _format_fix_hint(config)
 
             one_step_prompt = f"""
 ## CONTEXT

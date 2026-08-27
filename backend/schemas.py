@@ -21,6 +21,17 @@ class FallbackProviderConfig(BaseModel):
     base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
 
 
+class FixHintConfig(BaseModel):
+    """A user-supplied correction for one bubble, applied on a re-translate
+    of the whole page. bubble_index/original_text identify the bubble from
+    a prior TranslateResponse.bubbles list; the LLM is instructed to fix
+    just that bubble and leave the rest unaffected."""
+
+    bubble_index: int
+    original_text: Optional[str] = None
+    instruction: str
+
+
 class TranslateOptions(BaseModel):
     """Fields shared by single and batch translation requests."""
 
@@ -51,6 +62,7 @@ class TranslateOptions(BaseModel):
     context_memory: Optional[str] = None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted
     backup_api_keys: Optional[List[str]] = None  # extra keys for the same provider/model, tried on rate limit
     fallback_providers: Optional[List[FallbackProviderConfig]] = None  # tried after primary + backup keys are rate-limited
+    fix_hint: Optional[FixHintConfig] = None  # re-translate this page with a targeted correction for one bubble
 
 
 class TranslateRequest(TranslateOptions):

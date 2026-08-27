@@ -89,6 +89,9 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
             if req.fallback_providers
             else None
         ),
+        fix_hint_bubble_index=req.fix_hint.bubble_index if req.fix_hint else None,
+        fix_hint_original_text=req.fix_hint.original_text if req.fix_hint else None,
+        fix_hint_instruction=req.fix_hint.instruction if req.fix_hint else None,
         font_dir=req.font_dir,
         max_font_size=req.max_font_size,
         min_font_size=req.min_font_size,
@@ -157,6 +160,9 @@ def _translate_single_item(
                 if req.fallback_providers
                 else None
             ),
+            fix_hint_bubble_index=req.fix_hint.bubble_index if req.fix_hint else None,
+            fix_hint_original_text=req.fix_hint.original_text if req.fix_hint else None,
+            fix_hint_instruction=req.fix_hint.instruction if req.fix_hint else None,
             font_dir=req.font_dir,
             max_font_size=req.max_font_size,
             min_font_size=req.min_font_size,

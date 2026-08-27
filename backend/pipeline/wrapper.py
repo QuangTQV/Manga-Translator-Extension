@@ -272,6 +272,9 @@ def _build_config(
     context_memory: str | None = None,
     backup_api_keys: list[str] | None = None,
     fallback_providers: list[dict] | None = None,
+    fix_hint_bubble_index: int | None = None,
+    fix_hint_original_text: str | None = None,
+    fix_hint_instruction: str | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -340,6 +343,9 @@ def _build_config(
         context_memory=context_memory,
         backup_api_keys=[k for k in (backup_api_keys or []) if k],
         fallback_providers=_build_fallback_provider_configs(fallback_providers),
+        fix_hint_bubble_index=fix_hint_bubble_index,
+        fix_hint_original_text=fix_hint_original_text,
+        fix_hint_instruction=fix_hint_instruction,
         ocr_method=ocr_method,
         send_full_page_context=send_full_page_context,
         whiteout_conjoined_bubbles=True,
@@ -567,16 +573,13 @@ def translate_image_base64(
             previous_context_texts=previous_context_texts,
             ocr_texts_out=ocr_texts_out,
             memory_note_out=memory_note_out,
+            bubbles_out=bubbles_info,
         )
 
         if isinstance(result, Image.Image):
             translated_image = result
         else:
             translated_image = pil_image  # fallback
-
-        # bubbles_info (per-bubble bbox/confidence/translation) isn't captured
-        # from translate_and_render — only the flat OCR transcript list is,
-        # via ocr_texts_out above.
 
     except Exception as e:
         log_message(f"Translation pipeline error: {e}", always_print=True)

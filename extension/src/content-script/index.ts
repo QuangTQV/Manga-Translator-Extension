@@ -1,4 +1,4 @@
-import type { AppSettings, TranslateRequest } from '../shared/types.js';
+import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
 
 const ROOT_ID  = 'mt-scanner-root';
 const STYLE_ID = 'mt-scanner-style';
@@ -47,6 +47,13 @@ const EN_MESSAGES = {
   suggestionSaved: 'Suggestion saved to Story Notes',
   suggestNoImagesReady: 'Selected pages are still loading, wait a moment and try again',
   retryBadgeTitle: 'Translation failed after several retries — click to try again',
+  fixHintTooltip: "Click to fix this bubble's translation",
+  fixHintCurrentLabel: 'Current:',
+  fixHintPlaceholder: 'Describe the correction, e.g. "wrong pronoun, should be anh/em" or "should be formal tone"',
+  fixHintApply: 'Apply',
+  fixHintApplying: 'Re-translating...',
+  fixHintEmpty: 'Enter a correction first',
+  fixHintError: 'Fix failed — try again',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -91,6 +98,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestionSaved: 'Da luu goi y vao Ghi chu truyen',
     suggestNoImagesReady: 'Trang da chon van dang tai, doi chut roi thu lai',
     retryBadgeTitle: 'Dich that bai sau nhieu lan thu - bam de thu lai',
+    fixHintTooltip: 'Bam de sua ban dich o bubble nay',
+    fixHintCurrentLabel: 'Hien tai:',
+    fixHintPlaceholder: 'Mo ta cach sua, vd "phai dung xung anh/em" hoac "giong dieu trang trong hon"',
+    fixHintApply: 'Ap dung',
+    fixHintApplying: 'Dang dich lai...',
+    fixHintEmpty: 'Nhap noi dung can sua truoc',
+    fixHintError: 'Sua that bai - thu lai',
   },
   zh: {
     autoMt: '自动 MT',
@@ -130,6 +144,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestionSaved: '建议已保存到故事笔记',
     suggestNoImagesReady: '所选页面仍在加载，请稍后重试',
     retryBadgeTitle: '多次重试后翻译失败——点击重试',
+    fixHintTooltip: '点击修正这个气泡的翻译',
+    fixHintCurrentLabel: '当前:',
+    fixHintPlaceholder: '描述修正内容，例如"应该用敬语"或"人称代词错了"',
+    fixHintApply: '应用',
+    fixHintApplying: '重新翻译中...',
+    fixHintEmpty: '请先输入修正内容',
+    fixHintError: '修正失败 - 请重试',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -169,6 +190,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestionSaved: '提案をストーリーメモに保存しました',
     suggestNoImagesReady: '選択したページがまだ読み込み中です。しばらくしてから再試行してください',
     retryBadgeTitle: '数回再試行しましたが翻訳に失敗しました。クリックして再試行',
+    fixHintTooltip: 'クリックしてこの吹き出しの翻訳を修正',
+    fixHintCurrentLabel: '現在の訳:',
+    fixHintPlaceholder: '修正内容を入力（例:「敬語にして」「代名詞が違う」など）',
+    fixHintApply: '適用',
+    fixHintApplying: '再翻訳中...',
+    fixHintEmpty: '修正内容を入力してください',
+    fixHintError: '修正に失敗しました - 再試行してください',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -208,6 +236,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestionSaved: '제안이 스토리 메모에 저장되었습니다',
     suggestNoImagesReady: '선택한 페이지를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요',
     retryBadgeTitle: '여러 번 재시도했지만 번역에 실패했습니다 - 클릭하여 다시 시도',
+    fixHintTooltip: '클릭하여 이 말풍선의 번역 수정',
+    fixHintCurrentLabel: '현재:',
+    fixHintPlaceholder: '수정 내용을 입력하세요 (예: "존댓말로", "대명사가 틀림")',
+    fixHintApply: '적용',
+    fixHintApplying: '다시 번역 중...',
+    fixHintEmpty: '수정 내용을 먼저 입력하세요',
+    fixHintError: '수정 실패 - 다시 시도하세요',
   },
 };
 
@@ -338,6 +373,19 @@ const AUTO_SCAN_LIMIT = 250;
 const LAZY_IMAGE_ATTRS = ['data-src', 'data-lazy-src', 'data-original', 'data-srcset', 'data-lazy', 'data-image'] as const;
 const AUTO_RETRY_MAP = new Map<string, number>(); // url -> retry count
 const AUTO_RETRY_MAX = 3;
+
+// Per-image bubble/request context from the most recent successful translate
+// in this session — powers the "click a bubble to fix its translation"
+// affordance. Cache-hit paths don't repopulate this (no bubbles data comes
+// back from a cache hit), so the affordance is only available for pages
+// translated fresh in this session.
+const lastTranslateInfo = new WeakMap<HTMLImageElement, { bubbles: BubbleInfo[]; body: TranslateRequest; url: string }>();
+let activeFixPopover: HTMLElement | null = null;
+// While a fix-hint re-translate is in flight, don't let auto-translate start
+// new pages — they'd compete for the same backend/GPU capacity and make the
+// fix the user is actively waiting on feel stuck behind background work.
+// Already in-flight auto-translate calls are left alone (not cancelled).
+let fixHintPending = 0;
 
 // Backend errors that are expected to resolve on their own — the backend's
 // own key/provider rotation and rate-limit/credit cooldown already handles
@@ -546,7 +594,21 @@ function resolveLazyAttributeSrc(img: HTMLImageElement): string | null {
 }
 
 function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
-  if (img.getAttribute('data-mt-translated') === 'true' && (img.currentSrc || img.src).startsWith('data:image/')) {
+  // The translated overlay is a separate <img> stacked on top (see
+  // applyTranslatedOverlay) — the original element's own src/currentSrc is
+  // never rewritten to a data: URL, so a check requiring that was dead code
+  // that never matched. Without this early return, every already-translated
+  // image got fully re-applied — overlay src reset, badge element recreated —
+  // on every periodic auto-translate scan (~4s) and every scroll/resize event,
+  // for as long as auto-translate stayed on. That's harmless in isolation
+  // (same src re-assigned) but caused visible flicker/jank whenever other
+  // pages were translating concurrently and the main thread was already busy
+  // decoding/painting their large base64 overlays.
+  // Position still needs to stay in sync as the page reflows (infinite-scroll
+  // readers shift layout as more images load below), so keep that part —
+  // just skip the src/badge recreation.
+  if (img.getAttribute('data-mt-translated') === 'true') {
+    syncTranslatedDecorations(img);
     return;
   }
 
@@ -703,7 +765,7 @@ async function processAutoTranslateQueue(): Promise<void> {
   if (autoTranslateProcessing) return;
   autoTranslateProcessing = true;
 
-  while (autoTranslateQueue.length > 0) {
+  while (autoTranslateQueue.length > 0 && fixHintPending === 0) {
     // Reserve at least one concurrency slot for priority (near-viewport)
     // work — pre-translate lookahead must never fill every slot, or the
     // page the reader is actually looking at can get stuck queued behind
@@ -805,6 +867,8 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 
   const translatedB64 = result.translated_image;
   const dataUrl = `data:image/png;base64,${translatedB64}`;
+  const bubbles = (result.bubbles as BubbleInfo[] | undefined) ?? [];
+  lastTranslateInfo.set(img, { bubbles, body, url });
 
   // Cache it (both the fast within-session URL lookup and the persisted
   // content-addressed lookup that survives reloads/URL changes)
@@ -826,6 +890,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 
   // Apply to the image element on page
   applyTranslatedImage(img, dataUrl, url);
+  renderBubbleFixTargets(img, bubbles);
   if (isNearViewport(img)) queueAutoTranslateLookahead(img);
   console.log('[MT] applied:', url);
   updateAutoTranslateCounter();
@@ -962,6 +1027,7 @@ function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | 
 function syncTranslatedDecorations(img: HTMLImageElement): void {
   syncTranslatedOverlayLayout(img);
   syncTranslatedBadgeLayout(img);
+  syncFixHitLayerLayout(img);
 }
 
 function scheduleTranslatedDecorationSync(img: HTMLImageElement): void {
@@ -1126,6 +1192,294 @@ function addRetryNeededBadge(img: HTMLImageElement, url: string): void {
   window.requestAnimationFrame(() => syncRetryBadgeLayout(img, badge!));
   window.setTimeout(() => syncRetryBadgeLayout(img, badge!), 250);
   window.setTimeout(() => syncRetryBadgeLayout(img, badge!), 1000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fix-hint: click a bubble to send the LLM a targeted correction and
+// re-translate just that page with it. Cheap/easy version — re-runs the
+// whole-page pipeline (same as any other translate call) rather than
+// patching only the clicked bubble's pixels, since the backend has no
+// per-bubble render cache to patch against.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function findFixHitLayer(parent: HTMLElement, overlayId: string): HTMLElement | null {
+  for (const child of Array.from(parent.children)) {
+    if (
+      child instanceof HTMLElement
+      && child.classList.contains('mt-fix-hit-layer')
+      && child.getAttribute('data-mt-for') === overlayId
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const overlayId = getTranslatedOverlayId(img);
+  const targetLayer = layer ?? findFixHitLayer(parent, overlayId);
+  if (!targetLayer) return;
+  const pos = getImagePositionWithinParent(img, parent);
+  targetLayer.style.left = `${pos.x}px`;
+  targetLayer.style.top = `${pos.y}px`;
+  targetLayer.style.width = `${pos.width}px`;
+  targetLayer.style.height = `${pos.height}px`;
+}
+
+// Renders one invisible, hoverable hit-target per bubble over the overlay
+// image, positioned by percentage of the bubble's bbox (pixel coords in the
+// source image) so it tracks the displayed size without recomputing pixel
+// offsets on resize. bbox is [x1, y1, x2, y2].
+function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') parent.style.position = 'relative';
+
+  const overlayId = getTranslatedOverlayId(img);
+  let layer = findFixHitLayer(parent, overlayId);
+
+  if (!bubbles.length) {
+    layer?.remove();
+    return;
+  }
+
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'mt-fix-hit-layer';
+    layer.setAttribute('data-mt-for', overlayId);
+    parent.appendChild(layer);
+  }
+  layer.style.position = 'absolute';
+  layer.style.pointerEvents = 'none';
+  layer.style.zIndex = '12';
+  layer.innerHTML = '';
+
+  const naturalWidth = img.naturalWidth || 1;
+  const naturalHeight = img.naturalHeight || 1;
+  const activeLayer = layer;
+
+  bubbles.forEach((bubble, index) => {
+    const [x1, y1, x2, y2] = bubble.bbox ?? [0, 0, 0, 0];
+    if (x2 <= x1 || y2 <= y1) return;
+
+    const hit = document.createElement('div');
+    hit.className = 'mt-fix-hit';
+    hit.style.position = 'absolute';
+    hit.style.left = `${(x1 / naturalWidth) * 100}%`;
+    hit.style.top = `${(y1 / naturalHeight) * 100}%`;
+    hit.style.width = `${((x2 - x1) / naturalWidth) * 100}%`;
+    hit.style.height = `${((y2 - y1) / naturalHeight) * 100}%`;
+    hit.style.pointerEvents = 'auto';
+    hit.style.cursor = 'pointer';
+    hit.style.borderRadius = '4px';
+    hit.style.transition = 'background 0.1s ease, outline 0.1s ease';
+    hit.style.boxSizing = 'border-box';
+    hit.title = tr('fixHintTooltip');
+
+    hit.onmouseenter = () => {
+      hit.style.background = 'rgba(59,130,246,0.18)';
+      hit.style.outline = '2px solid rgba(59,130,246,0.7)';
+    };
+    hit.onmouseleave = () => {
+      hit.style.background = 'transparent';
+      hit.style.outline = 'none';
+    };
+    hit.onclick = (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      openFixHintPopover(img, index, bubble, hit);
+    };
+
+    activeLayer.appendChild(hit);
+  });
+
+  syncFixHitLayerLayout(img, layer);
+  window.requestAnimationFrame(() => syncFixHitLayerLayout(img, activeLayer));
+  window.setTimeout(() => syncFixHitLayerLayout(img, activeLayer), 250);
+  window.setTimeout(() => syncFixHitLayerLayout(img, activeLayer), 1000);
+}
+
+function styleFixPopoverButton(btn: HTMLButtonElement, primary: boolean): void {
+  btn.style.fontSize = '11px';
+  btn.style.padding = '4px 10px';
+  btn.style.borderRadius = '5px';
+  btn.style.border = primary ? 'none' : '1px solid rgba(255,255,255,0.25)';
+  btn.style.background = primary ? '#3b82f6' : 'transparent';
+  btn.style.color = '#f9fafb';
+  btn.style.cursor = 'pointer';
+  btn.style.fontFamily = 'inherit';
+}
+
+function handleFixPopoverKeydown(ev: KeyboardEvent): void {
+  if (ev.key === 'Escape') closeFixHintPopover();
+}
+
+function handleFixPopoverOutsideClick(ev: MouseEvent): void {
+  if (!activeFixPopover) return;
+  if (ev.target instanceof Node && activeFixPopover.contains(ev.target)) return;
+  closeFixHintPopover();
+}
+
+function closeFixHintPopover(): void {
+  activeFixPopover?.remove();
+  activeFixPopover = null;
+  document.removeEventListener('keydown', handleFixPopoverKeydown, true);
+  document.removeEventListener('click', handleFixPopoverOutsideClick, true);
+}
+
+function openFixHintPopover(img: HTMLImageElement, bubbleIndex: number, bubble: BubbleInfo, anchor: HTMLElement): void {
+  closeFixHintPopover();
+
+  const rect = anchor.getBoundingClientRect();
+  const popover = document.createElement('div');
+  popover.className = 'mt-fix-popover';
+  popover.style.position = 'fixed';
+  popover.style.zIndex = '2147483647';
+  popover.style.background = '#1f2937';
+  popover.style.color = '#f9fafb';
+  popover.style.border = '1px solid rgba(255,255,255,0.15)';
+  popover.style.borderRadius = '8px';
+  popover.style.padding = '10px';
+  popover.style.width = '260px';
+  popover.style.boxShadow = '0 8px 24px rgba(0,0,0,0.35)';
+  popover.style.fontFamily = 'Inter, system-ui, sans-serif';
+  popover.style.fontSize = '12px';
+  popover.style.lineHeight = '1.4';
+
+  const top = Math.min(Math.max(8, window.innerHeight - 220), Math.max(8, rect.top));
+  const left = Math.min(Math.max(8, window.innerWidth - 276), Math.max(8, rect.right + 8));
+  popover.style.top = `${top}px`;
+  popover.style.left = `${left}px`;
+
+  if (bubble.translatedText) {
+    const currentLabel = document.createElement('div');
+    currentLabel.style.opacity = '0.75';
+    currentLabel.style.marginBottom = '6px';
+    currentLabel.style.wordBreak = 'break-word';
+    currentLabel.textContent = `${tr('fixHintCurrentLabel')} ${bubble.translatedText}`;
+    popover.appendChild(currentLabel);
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.placeholder = tr('fixHintPlaceholder');
+  textarea.rows = 3;
+  textarea.style.width = '100%';
+  textarea.style.boxSizing = 'border-box';
+  textarea.style.resize = 'vertical';
+  textarea.style.borderRadius = '6px';
+  textarea.style.border = '1px solid rgba(255,255,255,0.2)';
+  textarea.style.background = '#111827';
+  textarea.style.color = '#f9fafb';
+  textarea.style.padding = '6px';
+  textarea.style.fontFamily = 'inherit';
+  textarea.style.fontSize = '12px';
+  popover.appendChild(textarea);
+
+  const statusLine = document.createElement('div');
+  statusLine.style.minHeight = '14px';
+  statusLine.style.marginTop = '4px';
+  statusLine.style.fontSize = '11px';
+  popover.appendChild(statusLine);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.display = 'flex';
+  btnRow.style.justifyContent = 'flex-end';
+  btnRow.style.gap = '6px';
+  btnRow.style.marginTop = '6px';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = tr('cancel');
+  styleFixPopoverButton(cancelBtn, false);
+  cancelBtn.onclick = (ev) => { ev.stopPropagation(); closeFixHintPopover(); };
+
+  const applyBtn = document.createElement('button');
+  applyBtn.textContent = tr('fixHintApply');
+  styleFixPopoverButton(applyBtn, true);
+  applyBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    const instruction = textarea.value.trim();
+    if (!instruction) {
+      statusLine.style.color = '#fca5a5';
+      statusLine.textContent = tr('fixHintEmpty');
+      return;
+    }
+    applyBtn.disabled = true;
+    cancelBtn.disabled = true;
+    textarea.disabled = true;
+    applyBtn.textContent = tr('fixHintApplying');
+    applyBtn.style.background = '#1e3a5f';
+    applyBtn.style.cursor = 'wait';
+    applyBtn.style.opacity = '0.8';
+    statusLine.style.color = '#93c5fd';
+    statusLine.textContent = tr('fixHintApplying');
+    void submitFixHint(img, bubbleIndex, bubble, instruction).then((ok) => {
+      if (ok) {
+        closeFixHintPopover();
+        return;
+      }
+      applyBtn.disabled = false;
+      cancelBtn.disabled = false;
+      textarea.disabled = false;
+      applyBtn.textContent = tr('fixHintApply');
+      styleFixPopoverButton(applyBtn, true);
+      statusLine.style.color = '#fca5a5';
+      statusLine.textContent = tr('fixHintError');
+    });
+  };
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(applyBtn);
+  popover.appendChild(btnRow);
+
+  document.body.appendChild(popover);
+  activeFixPopover = popover;
+  textarea.focus();
+
+  document.addEventListener('keydown', handleFixPopoverKeydown, true);
+  window.setTimeout(() => document.addEventListener('click', handleFixPopoverOutsideClick, true), 0);
+}
+
+async function submitFixHint(img: HTMLImageElement, bubbleIndex: number, bubble: BubbleInfo, instruction: string): Promise<boolean> {
+  const info = lastTranslateInfo.get(img);
+  if (!info) return false;
+
+  fixHintPending++;
+  try {
+    const body: TranslateRequest = {
+      ...info.body,
+      fix_hint: {
+        bubble_index: bubbleIndex,
+        original_text: bubble.originalText,
+        instruction,
+      },
+    };
+
+    const result = await bgTranslateImageWithBody(info.url, window.location.href, body);
+    if (result.error || !result.translated_image) return false;
+
+    const translatedB64 = result.translated_image;
+    const dataUrl = `data:image/png;base64,${translatedB64}`;
+    const newBubbles = (result.bubbles as BubbleInfo[] | undefined) ?? info.bubbles;
+
+    const settings = await loadSettings();
+    const contentKey = contentCacheKey(info.body.image, settings.config.outputLanguage);
+    rememberTranslated(info.url, translatedB64);
+    rememberTranslatedContent(contentKey, translatedB64);
+    await saveTranslatedCacheEntry(info.url, translatedB64);
+    await saveTranslatedContentCacheEntry(contentKey, translatedB64);
+
+    lastTranslateInfo.set(img, { bubbles: newBubbles, body: info.body, url: info.url });
+    applyTranslatedOverlay(img, dataUrl);
+    renderBubbleFixTargets(img, newBubbles);
+    return true;
+  } finally {
+    fixHintPending--;
+    if (fixHintPending === 0) void processAutoTranslateQueue();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

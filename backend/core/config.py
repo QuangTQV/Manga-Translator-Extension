@@ -118,6 +118,9 @@ class TranslationConfig:
     llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
     context_memory_enabled: bool = False  # require a MEMORY NOTE summary each page, for the caller to accumulate
     context_memory: Optional[str] = None  # caller-accumulated MEMORY NOTE summaries from earlier pages of this story
+    fix_hint_bubble_index: Optional[int] = None  # 0-based index into the previous response's bubbles list
+    fix_hint_original_text: Optional[str] = None  # that bubble's original_text, as an anchor for the model
+    fix_hint_instruction: Optional[str] = None  # the user's correction note for that one bubble
     ocr_method: str = "LLM"  # "LLM", "manga-ocr", or "paddleocr-vl"
     backup_api_keys: List[str] = field(default_factory=list)  # extra keys for the same provider/model, tried on rate limit
     fallback_providers: List[FallbackProviderConfig] = field(
