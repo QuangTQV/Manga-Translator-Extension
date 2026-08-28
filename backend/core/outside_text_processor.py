@@ -22,6 +22,35 @@ from utils.logging import log_message
 # OSB Expansion Parameters
 OSB_EXPANSION_PIXEL_BUFFER = 5  # for bubbles, nearby OSB regions, panels
 
+# Below this summed-channel RGB distance, two colors are close enough that
+# text painted in one over a fill of the other would be effectively
+# invisible (not just low-contrast) — see _text_color_would_be_invisible.
+INVISIBLE_TEXT_COLOR_DISTANCE_THRESHOLD = 90
+
+
+def _text_color_would_be_invisible(
+    text_color_rgb: Tuple[int, int, int],
+    fill_color_rgb: Optional[Tuple[int, int, int]],
+) -> bool:
+    """True if painting text in `text_color_rgb` over a region filled with
+    `fill_color_rgb` would render effectively invisible.
+
+    The contrast-based text-color extraction this guards samples a small
+    border ring around an OCR'd text box to guess the box's background,
+    then treats whatever's most different from that guess as "the text
+    color". When the border ring bleeds into nearby dark artwork (e.g. a
+    caption box sitting close to a character's dark hair), that guess can
+    invert entirely: the box's own white background gets reported as the
+    text color instead of its black text. The bug this produces isn't a
+    rendering failure — render_text_skia draws the glyphs successfully —
+    it's white-on-white (or black-on-black) text that's silently invisible
+    in the output.
+    """
+    if fill_color_rgb is None:
+        return False
+    distance = sum(abs(a - b) for a, b in zip(text_color_rgb, fill_color_rgb))
+    return distance < INVISIBLE_TEXT_COLOR_DISTANCE_THRESHOLD
+
 
 def process_outside_text(
     pil_image: Image.Image,
@@ -713,9 +742,21 @@ def process_outside_text(
                                                 if hsv[2] < 128
                                                 else (255, 255, 255)
                                             )
-                                        extracted_text_colors[composite_clip_bbox] = (
-                                            text_color_rgb
-                                        )
+                                        if _text_color_would_be_invisible(
+                                            text_color_rgb, fallback_fill_color
+                                        ):
+                                            log_message(
+                                                f"OSB Region {i + 1}: discarding extracted "
+                                                f"text color {text_color_rgb} — too close to "
+                                                f"fill color {fallback_fill_color} "
+                                                "(would render invisibly); using default contrast instead",
+                                                verbose=verbose,
+                                            )
+                                            text_color_rgb = None
+                                        if text_color_rgb is not None:
+                                            extracted_text_colors[composite_clip_bbox] = (
+                                                text_color_rgb
+                                            )
 
                                     white_thresh = 250
                                     black_thresh = 5
