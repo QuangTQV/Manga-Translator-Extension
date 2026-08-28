@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # Backend-specific settings
     max_image_size_mb: int = 50
     request_timeout_seconds: int = 300
+    # Caps how many translation pipeline runs (single + batch combined) may
+    # execute concurrently, regardless of how many requests are in flight —
+    # the ML pipeline is GPU/VRAM-bound, so unbounded concurrency across
+    # requests can OOM the process.
+    max_concurrent_translations: int = 8
 
     # CORS
     cors_origins: list[str] = [

@@ -4,6 +4,7 @@ import base64
 import io
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException
 from PIL import Image
@@ -36,6 +37,45 @@ router = APIRouter(prefix="", tags=["translate"])
 
 # Thread pool for batch processing
 _executor = ThreadPoolExecutor(max_workers=4)
+
+# Shared across /translate and /translate/batch: the two endpoints used to
+# have independent, uncoordinated concurrency caps (asyncio.to_thread's
+# default executor for single, _executor above for batch), so a single
+# request plus a batch running at the same time could push far more than
+# max_concurrent_translations ML pipeline runs onto the GPU at once. This
+# semaphore is the one hard ceiling on how many run concurrently, across
+# both endpoints combined.
+_pipeline_semaphore = asyncio.Semaphore(settings.max_concurrent_translations)
+
+# fix_hint requests ("re-translate this bubble/page with a correction") are
+# a single action the popup/scanner UI is synchronously spinner-blocked on
+# — unlike auto-translate/batch throughput, which the user isn't watching
+# page-by-page. Reserve a slice of the total capacity for them so a fix
+# never has to queue behind a full auto-translate/batch backlog it has
+# nothing to do with; regular (non-fix) work is capped to leave that slice
+# free. Mirrors the client's own "reserve one concurrency slot for
+# priority work" pattern in the auto-translate queue (content-script
+# index.ts, effectiveLimit).
+_FIX_HINT_RESERVED_SLOTS = min(2, max(0, settings.max_concurrent_translations - 1))
+_regular_pipeline_gate = asyncio.Semaphore(
+    max(1, settings.max_concurrent_translations - _FIX_HINT_RESERVED_SLOTS)
+)
+
+
+@asynccontextmanager
+async def _pipeline_slot(is_priority: bool):
+    """Acquire one of _pipeline_semaphore's permits — the hard ceiling
+    every pipeline run obeys. Non-priority callers must also fit within
+    _regular_pipeline_gate's smaller cap first, which is what keeps
+    _FIX_HINT_RESERVED_SLOTS permits free for priority callers even while
+    regular traffic is saturated."""
+    if is_priority:
+        async with _pipeline_semaphore:
+            yield
+    else:
+        async with _regular_pipeline_gate:
+            async with _pipeline_semaphore:
+                yield
 
 
 def _build_bubble_info(bubbles: list[dict]) -> list:
@@ -109,9 +149,10 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
 
     start = time.time()
     try:
-        result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
-            translate_image_base64, req.image, config, req.previous_context_texts
-        )
+        async with _pipeline_slot(req.fix_hint is not None):
+            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
+                translate_image_base64, req.image, config, req.previous_context_texts
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
@@ -204,6 +245,18 @@ def _translate_single_item(
         )
 
 
+async def _run_batch_item(
+    item: TranslateBatchItem, req: TranslateBatchRequest
+) -> TranslateBatchItemResponse:
+    """Await one batch item without blocking the event loop, gated by the
+    same slot accounting /translate uses so batch + single-page requests
+    share one real concurrency ceiling (and fix_hint batch corrections get
+    the same priority reservation as a single-page fix)."""
+    loop = asyncio.get_running_loop()
+    async with _pipeline_slot(req.fix_hint is not None):
+        return await loop.run_in_executor(_executor, _translate_single_item, item, req)
+
+
 @router.post("/translate/batch", response_model=TranslateBatchResponse)
 async def translate_batch(req: TranslateBatchRequest) -> TranslateBatchResponse:
     """Translate multiple images concurrently.
@@ -217,11 +270,7 @@ async def translate_batch(req: TranslateBatchRequest) -> TranslateBatchResponse:
         )
 
     start = time.time()
-    futures = [
-        _executor.submit(_translate_single_item, item, req)
-        for item in req.images
-    ]
-    results = [f.result() for f in futures]
+    results = await asyncio.gather(*(_run_batch_item(item, req) for item in req.images))
 
     success_count = sum(1 for r in results if r.error is None)
     error_count = len(results) - success_count
