@@ -811,11 +811,18 @@ def _candidate_key(candidate: TranslationConfig) -> Optional[str]:
 # not durable state.
 _cooldowns: Dict[Tuple[str, str, str], float] = {}  # (provider, key, model) -> expires_at
 _cooldowns_lock = threading.Lock()
-# Backend doesn't parse the provider's actual Retry-After header (not all
-# providers send one, and the ones that do aren't threaded up from
-# utils/endpoints/*.py yet), so this is a deliberately short blind guess —
-# most burst-style rate limits clear within seconds, not a full minute.
+# Fallback when the provider didn't send a `Retry-After` header on its 429
+# (not all of them do) — a deliberately short blind guess, since most
+# burst-style rate limits clear within seconds, not a full minute. When a
+# header IS present, _call_llm_endpoint uses that instead (clamped by
+# _MAX_RATE_LIMIT_COOLDOWN_SECONDS below) — see utils/rate_limit.py.
 _RATE_LIMIT_COOLDOWN_SECONDS = 15.0
+# Ceiling on a provider-supplied Retry-After, matching the credit-exhaustion
+# cooldown below — a provider reporting a multi-hour quota reset shouldn't
+# bench a key for the rest of the process's life; the user's own configured
+# cooldown_seconds is still respected as-is (it's a deliberate user choice,
+# not a provider-reported value) and isn't clamped by this.
+_MAX_RATE_LIMIT_COOLDOWN_SECONDS = 900.0  # 15 minutes
 # An empty/negative account balance doesn't fix itself on a retry timer —
 # it stays broken until the user adds funds, which won't happen in the next
 # few seconds, so re-checking it as often as a rate limit would just waste
@@ -1043,12 +1050,22 @@ def _call_llm_endpoint(
             is_rate_limited = _is_rate_limit_error(e)
             is_missing_key = _is_missing_key_error(e)
             if is_rate_limited or is_credit_error:
+                # Prefer the provider's own Retry-After value over the
+                # user-configured blind guess, when it sent one — clamped
+                # so a provider reporting an hours-away quota reset doesn't
+                # bench a key for the rest of the process's lifetime.
+                retry_after = getattr(e, "retry_after_seconds", None)
+                rate_limit_cooldown = (
+                    min(max(retry_after, 1.0), _MAX_RATE_LIMIT_COOLDOWN_SECONDS)
+                    if retry_after is not None
+                    else config.cooldown_seconds
+                )
                 _mark_cooldown(
                     candidate.provider,
                     _candidate_key(candidate),
                     candidate.model_name,
                     is_credit_error,
-                    config.cooldown_seconds,
+                    rate_limit_cooldown,
                 )
             if not is_last and (is_rate_limited or is_credit_error or is_missing_key):
                 reason = (

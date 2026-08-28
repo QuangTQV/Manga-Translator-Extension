@@ -7,6 +7,7 @@ import requests
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
 from utils.model_metadata import get_gpt5_generation, is_gpt5_series
+from utils.rate_limit import extract_retry_after_seconds
 
 
 def call_openai_endpoint(
@@ -209,6 +210,7 @@ def call_openai_endpoint(
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code
             error_text = e.response.text[:500]
+            retry_after = extract_retry_after_seconds(e.response) if status_code == 429 else None
 
             if status_code == 429 and attempt < max_retries:
                 log_message(
@@ -225,7 +227,10 @@ def call_openai_endpoint(
                 elif status_code == 400:
                     error_reason += " (Check payload)"
 
-                raise TranslationError(f"OpenAI API HTTP Error: {error_reason}") from e
+                raise TranslationError(
+                    f"OpenAI API HTTP Error: {error_reason}",
+                    retry_after_seconds=retry_after,
+                ) from e
 
         except requests.exceptions.RequestException as e:
             if attempt < max_retries:

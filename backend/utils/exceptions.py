@@ -31,7 +31,14 @@ class ImageProcessingError(Exception):
 class TranslationError(RuntimeError):
     """Custom exception for translation API and processing failures."""
 
-    pass
+    def __init__(self, message: str, retry_after_seconds: float | None = None):
+        super().__init__(message)
+        # The provider's own `Retry-After` response header, when it sent
+        # one on a 429 — lets the caller cool down that key/model for
+        # exactly as long as the provider says, instead of a blind guess.
+        # None whenever the provider didn't send one, or the failure isn't
+        # rate-limit related at all.
+        self.retry_after_seconds = retry_after_seconds
 
 
 class DetectionError(RuntimeError):

@@ -7,6 +7,7 @@ import requests
 from core.config import calculate_reasoning_budget
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
+from utils.rate_limit import extract_retry_after_seconds
 
 
 def call_anthropic_endpoint(
@@ -242,6 +243,7 @@ def call_anthropic_endpoint(
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code
             error_text = e.response.text[:500]
+            retry_after = extract_retry_after_seconds(e.response) if status_code == 429 else None
 
             if status_code == 429 and attempt < max_retries:
                 log_message(
@@ -265,7 +267,8 @@ def call_anthropic_endpoint(
                     f"Anthropic API HTTP Error: {error_reason}", always_print=True
                 )
                 raise TranslationError(
-                    f"Anthropic API HTTP Error: {error_reason}"
+                    f"Anthropic API HTTP Error: {error_reason}",
+                    retry_after_seconds=retry_after,
                 ) from e
 
         except requests.exceptions.RequestException as e:

@@ -72,7 +72,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Area | What it does |
 | --- | --- |
 | Bring-your-own LLM | Uses the LLM provider, API key, model, and Base URL configured by the user. |
-| Provider/key rotation | On rate limit, automatically retries with backup API keys for the same provider, then falls back to other configured providers, in order. Rotation order is configurable (round-robin/random/sequential); under Random, each key can be given its own weight to bias how often it's picked. |
+| Provider/key rotation | On rate limit, automatically retries with backup API keys for the same provider, then falls back to other configured providers, in order. Rotation order is configurable (round-robin/random/sequential); under Random, each key can be given its own weight to bias how often it's picked. A rate-limited key's cooldown uses the provider's own `Retry-After` response header when it sends one, instead of a blind fixed guess, so it's retried at the right time. |
 | Prompt caching | The translation system prompt (identical across every page of the same batch/auto-translate run) is cached server-side on Anthropic via `cache_control`, cutting repeat-page input cost by up to ~90%. OpenAI-compatible and Gemini providers already cache eligible prompts automatically, no configuration needed. |
 | Page scanner | Finds manga/comic images on the active page and lets you choose which pages to translate. |
 | Auto-translate | Watches the current reading page and translates images as you scroll. |

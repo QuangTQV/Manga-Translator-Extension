@@ -7,6 +7,7 @@ import requests
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
 from utils.model_metadata import is_gpt5_series
+from utils.rate_limit import extract_retry_after_seconds
 
 # Azure OpenAI API version to use when the endpoint URL doesn't specify one.
 # Override with the AZURE_OPENAI_API_VERSION env var for newer model support.
@@ -192,6 +193,7 @@ def call_azure_openai_endpoint(
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code
             error_text = e.response.text[:500]
+            retry_after = extract_retry_after_seconds(e.response) if status_code == 429 else None
 
             if status_code == 429 and attempt < max_retries:
                 log_message(
@@ -213,7 +215,8 @@ def call_azure_openai_endpoint(
                     error_reason += " (Check endpoint and deployment name)"
 
                 raise TranslationError(
-                    f"Azure OpenAI API HTTP Error: {error_reason}"
+                    f"Azure OpenAI API HTTP Error: {error_reason}",
+                    retry_after_seconds=retry_after,
                 ) from e
 
         except requests.exceptions.RequestException as e:
