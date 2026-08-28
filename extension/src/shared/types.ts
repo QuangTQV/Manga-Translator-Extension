@@ -150,6 +150,7 @@ export interface TranslateConfig {
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
   contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
+  contextMemorySequential?: boolean; // translate one page at a time instead of in parallel while Context Memory is on, so a later page always sees the immediately preceding page's note (parallel workers would otherwise often start before it's written) — default true
   providerGroups: ProviderGroupConfig[]; // every provider tried in rotation, in list order — no entry is distinguished as "primary"; the backend round-robins the starting candidate across all of them (and all their keys) equally
   rotationStrategy?: 'round_robin' | 'random' | 'sequential'; // which key/provider a request tries first — round_robin (default) spreads load evenly, random picks any ready one, sequential always starts at the first configured entry
   cooldownSeconds?: number; // how long a rate-limited key/provider is skipped before being retried (default 15s)
@@ -306,6 +307,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     preTranslate: false,
     previousContextEnabled: false,
     contextMemoryEnabled: false,
+    contextMemorySequential: true,
     rotationStrategy: 'round_robin',
     cooldownSeconds: 15,
   },

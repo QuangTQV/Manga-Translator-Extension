@@ -270,6 +270,16 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="toggle-row" id="context-memory-sequential-row">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelContextMemorySequential">Translate pages one at a time</div>
+            <div class="toggle-hint" data-i18n="hintContextMemorySequential">With Auto-translate/batch running several pages in parallel, a page can start before an earlier page has written its Context Memory summary, so it never sees it. Keep this on to translate strictly in order — slower, but later pages reliably see what earlier pages established (e.g. who's family/siblings). Turn off to keep parallel speed and accept that some pages may miss recent context.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-context-memory-sequential" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
 
         <div class="field">
           <div class="model-picker-header">

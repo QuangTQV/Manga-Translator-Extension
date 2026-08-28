@@ -26,6 +26,7 @@ const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
 const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
 const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
+const contextMemorySequentialToggle = qs<HTMLInputElement>('f-context-memory-sequential');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
@@ -218,6 +219,7 @@ async function loadAndBind(): Promise<void> {
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
+  contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? true;
 
   renderProviderGroups(settings.config.providerGroups ?? []);
   updateDuplicateKeyWarning();
@@ -262,7 +264,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -692,6 +694,7 @@ function collectAllSettings(): AppSettings {
       preTranslate: preTranslateToggle.checked,
       previousContextEnabled: previousContextToggle.checked,
       contextMemoryEnabled: contextMemoryToggle.checked,
+      contextMemorySequential: contextMemorySequentialToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
       providerGroups: collectProviderGroups(),

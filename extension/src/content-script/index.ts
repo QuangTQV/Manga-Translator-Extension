@@ -407,6 +407,12 @@ let autoTranslateConcurrent = 0;
 let scannerPausedAutoTranslate = false;
 let translatedOverlayCounter = 0;
 let preTranslateEnabled = false;
+// When Context Memory is on and the user hasn't opted out of the sequential
+// mode, cap auto-translate to 1 page in flight at a time — with several
+// pages running in parallel (the normal case), a page routinely starts
+// before an earlier one has written its Context Memory note, so it never
+// sees it at all. See startAutoTranslate().
+let autoTranslateSequentialForContextMemory = false;
 // Rolling history of recently-translated pages' OCR transcripts, sent as
 // narrative context so the model keeps character names, pronouns, and tone
 // consistent across pages instead of translating each page in isolation.
@@ -587,6 +593,8 @@ async function startAutoTranslate(): Promise<void> {
   }
 
   preTranslateEnabled = settings.config.preTranslate ?? false;
+  autoTranslateSequentialForContextMemory =
+    (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
   autoTranslatePreviousPages = [];
 
   // Load already-translated URLs from cache
@@ -851,6 +859,7 @@ function collectAutoTranslateImageEntries(root: ParentNode): Array<{ img: HTMLIm
 function stopAutoTranslate(preserveScannerResume = false): void {
   autoTranslateActive = false;
   preTranslateEnabled = false;
+  autoTranslateSequentialForContextMemory = false;
   autoTranslatePreviousPages = [];
   if (!preserveScannerResume) scannerPausedAutoTranslate = false;
   autoTranslateQueue = [];
@@ -920,9 +929,11 @@ async function processAutoTranslateQueue(): Promise<void> {
     // page the reader is actually looking at can get stuck queued behind
     // several 45-85s speculative translations with no slot to run in.
     const nextIsPriority = autoTranslateQueue[0].priority;
-    const effectiveLimit = nextIsPriority
-      ? AUTO_MAX_CONCURRENT
-      : Math.max(1, AUTO_MAX_CONCURRENT - 1);
+    const effectiveLimit = autoTranslateSequentialForContextMemory
+      ? 1
+      : nextIsPriority
+        ? AUTO_MAX_CONCURRENT
+        : Math.max(1, AUTO_MAX_CONCURRENT - 1);
     if (autoTranslateConcurrent >= effectiveLimit) break;
 
     const item = autoTranslateQueue.shift();
@@ -1903,7 +1914,10 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
           statusLine.textContent = `${completed} / ${pages.length}`;
         }
       }
-      const workerCount = Math.min(AUTO_MAX_CONCURRENT, pages.length);
+      const settings = await loadSettings();
+      const sequentialForContextMemory =
+        (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+      const workerCount = sequentialForContextMemory ? 1 : Math.min(AUTO_MAX_CONCURRENT, pages.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
       closeFixHintPopover();
       toast(tr('fixSelectedDone', { success, total: pages.length }));
@@ -2901,7 +2915,9 @@ function bindScanner(shadow: ShadowRoot): void {
         await runOne(page);
       }
     }
-    const workerCount = Math.min(AUTO_MAX_CONCURRENT, chosen.length);
+    const sequentialForContextMemory =
+      (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+    const workerCount = sequentialForContextMemory ? 1 : Math.min(AUTO_MAX_CONCURRENT, chosen.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     if (abortTranslate) {
