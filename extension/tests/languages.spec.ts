@@ -24,6 +24,28 @@ test.describe('popup — Translate tab language pickers', () => {
     await expect(popup.locator('#lang-target-list option[value="Auto"]')).toHaveCount(0);
   });
 
+  test('the "Auto" suggestion carries a distinguishing label but submits exactly "Auto"', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    // <datalist> gives no way to color an individual suggestion (a hard
+    // cross-browser platform limitation), so a `label` marker is the only
+    // way to make "Auto" stand out in the native suggestion popup — but
+    // `value` must stay the literal string "Auto", since the backend
+    // string-matches it verbatim (input_language.strip().lower() ==
+    // "auto"). Changing the label must never change what gets submitted.
+    const autoOption = await popup.locator('#lang-source-list option[value="Auto"]').evaluate(
+      (el) => ({ value: (el as HTMLOptionElement).value, label: (el as HTMLOptionElement).label }),
+    );
+    expect(autoOption.value).toBe('Auto');
+    expect(autoOption.label).not.toBe('Auto');
+    expect(autoOption.label.toLowerCase()).toContain('auto');
+  });
+
   test('the project\'s core languages stay frontloaded, not buried alphabetically among ~58 suggestions', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });

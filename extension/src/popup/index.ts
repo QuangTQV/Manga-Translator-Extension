@@ -92,6 +92,14 @@ function populateLanguageDatalist(el: HTMLDataListElement, options: readonly str
   for (const optionValue of options) {
     const option = document.createElement('option');
     option.value = optionValue;
+    // "Auto" behaves differently from every other entry (auto-detect, not
+    // a fixed source language) and should stand out in the native
+    // suggestion popup — <datalist> gives no way to color individual
+    // entries (a hard cross-browser limitation), so a label prefix is the
+    // only lever available here. `value` must stay exactly "Auto": the
+    // backend matches it verbatim (input_language.strip().lower() ==
+    // "auto"), so only the display label carries the marker.
+    if (optionValue === 'Auto') option.label = '✦ Auto (auto-detect)';
     el.appendChild(option);
   }
 }
