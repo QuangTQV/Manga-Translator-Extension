@@ -87,7 +87,7 @@ Gói mặc định được giữ nhẹ hơn: bao gồm runtime backend và mode
 | Flux tùy chọn | Cho phép người dùng nâng cao tải Flux Klein 4B để inpainting nặng hơn mà không làm nặng release mặc định. |
 | Provider | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter và endpoint OpenAI-compatible. |
 | Ngôn ngữ UI | Tiếng Anh mặc định, kèm tiếng Việt, tiếng Trung, tiếng Nhật và tiếng Hàn. |
-| Ngôn ngữ dịch | Các lựa chọn chính gồm tiếng Nhật, tiếng Hàn, tiếng Anh và tiếng Việt. |
+| Ngôn ngữ dịch | Ô nguồn/đích gợi ý sẵn khoảng 58 ngôn ngữ (Nhật, Hàn, Trung, Tây Ban Nha, Pháp, Ả Rập...) qua autocomplete, hoặc gõ tự do bất kỳ ngôn ngữ nào — backend không giới hạn danh sách. |
 | Backend portable | Dùng `start-backend.bat`, `backend/main.py` và runtime `backend/runtime/python.exe` nếu có. |
 
 ## Tải Xuống

@@ -325,8 +325,12 @@ export const LANGUAGES = [
   'Ukrainian', 'Urdu', 'Uzbek', 'Vietnamese', 'Welsh',
 ] as const;
 
-export const SOURCE_LANGUAGES = ['Auto', 'Japanese', 'Korean', 'English', 'Vietnamese'] as const;
-export const TARGET_LANGUAGES = ['Japanese', 'Korean', 'English', 'Vietnamese'] as const;
+// The backend takes input_language/output_language as free-form strings —
+// no allowlist, no validation — so these two lists are only UI suggestion
+// sets (used to populate <datalist> options a user can pick from or type
+// past; see popup/index.ts). "Auto" (source-only) means auto-detect.
+export const SOURCE_LANGUAGES = ['Auto', ...LANGUAGES] as const;
+export const TARGET_LANGUAGES = [...LANGUAGES] as const;
 
 export const PROVIDERS = [
   'Google', 'OpenAI', 'Azure OpenAI', 'Anthropic', 'xAI', 'DeepSeek',

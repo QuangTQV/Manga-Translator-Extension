@@ -218,11 +218,13 @@
         <div class="config-row">
           <div class="field">
             <label class="label" data-i18n="labelSource">Source</label>
-            <select id="f-source" class="select"></select>
+            <input id="f-source" class="input" type="text" list="lang-source-list" autocomplete="off" data-i18n-placeholder="placeholderLanguage" />
+            <datalist id="lang-source-list"></datalist>
           </div>
           <div class="field">
             <label class="label" data-i18n="labelTarget">Target</label>
-            <select id="f-target" class="select"></select>
+            <input id="f-target" class="input" type="text" list="lang-target-list" autocomplete="off" data-i18n-placeholder="placeholderLanguage" />
+            <datalist id="lang-target-list"></datalist>
           </div>
         </div>
         <div class="toggle-row">

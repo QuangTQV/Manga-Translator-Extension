@@ -87,7 +87,7 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | 可选 Flux | 高级用户可下载 Flux Klein 4B 获得更重的 inpainting，而不增加默认 release 体积。 |
 | Provider 支持 | Google、OpenAI、Anthropic、xAI、DeepSeek、Z.ai、Moonshot AI、OpenRouter 和 OpenAI-compatible endpoint。 |
 | UI 语言 | 默认英语，另有越南语、中文、日语和韩语。 |
-| 翻译语言 | 主要源语言/目标语言包括日语、韩语、英语和越南语。 |
+| 翻译语言 | 源/目标语言输入框通过自动完成提供约 58 种建议语言（日语、韩语、中文、西班牙语、法语、阿拉伯语……），也可直接输入任意语言名称——后端没有语言限制列表。 |
 | Portable 后端 | 使用 `start-backend.bat`、`backend/main.py` 和可选的 `backend/runtime/python.exe`。 |
 
 ## 下载

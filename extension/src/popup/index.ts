@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig } from '../shared/types.js';
-import { UI_LANGUAGES, languageLabel, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
+import { UI_LANGUAGES, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
 
@@ -18,8 +18,10 @@ function qs<T extends HTMLElement>(id: string): T {
 const extensionEnabledToggle = qs<HTMLInputElement>('f-extension-enabled');
 const masterToggleRow = qs<HTMLDivElement>('master-toggle-row');
 const backendInput = qs<HTMLInputElement>('f-backend');
-const sourceSelect = qs<HTMLSelectElement>('f-source');
-const targetSelect = qs<HTMLSelectElement>('f-target');
+const sourceInput = qs<HTMLInputElement>('f-source');
+const targetInput = qs<HTMLInputElement>('f-target');
+const sourceLanguageList = qs<HTMLDataListElement>('lang-source-list');
+const targetLanguageList = qs<HTMLDataListElement>('lang-target-list');
 const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
 const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
@@ -78,13 +80,18 @@ function normalizeSettings(raw?: StoredSettings): AppSettings {
   };
 }
 
-function populateSelect(el: HTMLSelectElement, options: readonly string[], selected: string): void {
+// Language names aren't run through per-UI-language translation here (unlike
+// every other label in the popup) — the value picked/typed is sent to the
+// backend verbatim as input_language/output_language, and some backend
+// logic string-matches it in English (e.g. the Vietnamese-pronoun rules
+// check for "vietnamese" in output_language). Translating the suggestion
+// text would desync it from the value actually submitted, so the <datalist>
+// suggestions are intentionally left in English across every UI language.
+function populateLanguageDatalist(el: HTMLDataListElement, options: readonly string[]): void {
   el.replaceChildren();
   for (const optionValue of options) {
     const option = document.createElement('option');
     option.value = optionValue;
-    option.textContent = languageLabel(uiLanguage, optionValue);
-    option.selected = optionValue === selected;
     el.appendChild(option);
   }
 }
@@ -101,8 +108,10 @@ function populateUiLanguageSelect(selected: UiLanguage): void {
 }
 
 function renderLanguageSelects(): void {
-  populateSelect(sourceSelect, SOURCE_LANGUAGES, settings.config.inputLanguage);
-  populateSelect(targetSelect, TARGET_LANGUAGES, settings.config.outputLanguage);
+  populateLanguageDatalist(sourceLanguageList, SOURCE_LANGUAGES);
+  populateLanguageDatalist(targetLanguageList, TARGET_LANGUAGES);
+  sourceInput.value = settings.config.inputLanguage;
+  targetInput.value = settings.config.outputLanguage;
 }
 
 function applyI18n(): void {
@@ -236,7 +245,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceSelect, targetSelect, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
 
@@ -394,7 +403,7 @@ function updateDuplicateKeyWarning(): void {
   function check(provider: string, model: string | undefined, rawKey: string): void {
     const key = rawKey.trim();
     if (!key) return;
-    const bucket = `${provider} ${model ?? ''}`;
+    const bucket = `${provider} ${model ?? ''}`;
     let seen = seenByBucket.get(bucket);
     if (!seen) { seen = new Set(); seenByBucket.set(bucket, seen); }
     if (seen.has(key)) {
@@ -651,8 +660,8 @@ function collectAllSettings(): AppSettings {
     uiLanguage: normalizeUiLanguage(uiLanguageSelect.value),
     config: {
       ...settings.config,
-      inputLanguage: sourceSelect.value,
-      outputLanguage: targetSelect.value,
+      inputLanguage: sourceInput.value.trim() || DEFAULT_SETTINGS.config.inputLanguage,
+      outputLanguage: targetInput.value.trim() || DEFAULT_SETTINGS.config.outputLanguage,
       temperature: parseFloat(tempSlider.value),
       topP: parseFloat(topPSlider.value),
       topK: parseInt(topKSlider.value, 10),

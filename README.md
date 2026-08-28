@@ -87,7 +87,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Optional Flux | Lets advanced users download Flux Klein 4B for heavier inpainting without shipping it in the default release. |
 | Provider support | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter, and OpenAI-compatible endpoints. |
 | UI languages | English by default, plus Vietnamese, Chinese, Japanese, and Korean. |
-| Translation languages | Main source/target options include Japanese, Korean, English, and Vietnamese. |
+| Translation languages | Source/target fields accept ~58 suggested languages (Japanese, Korean, Chinese, Spanish, French, Arabic, ...) via autocomplete, or any language name you type — the backend has no allowlist. |
 | Portable backend | Uses `start-backend.bat`, `backend/main.py`, and optional bundled `backend/runtime/python.exe`. |
 
 ## Download

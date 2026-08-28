@@ -39,6 +39,7 @@ const EN = {
   labelBaseUrl: 'Base URL',
   placeholderModel: 'model id, e.g. gpt-4o-mini',
   placeholderApiKey: 'sk-...',
+  placeholderLanguage: 'Type or pick a language',
   labelTemperature: 'Temperature',
   labelTopP: 'Top P',
   labelTopK: 'Top K',
@@ -163,6 +164,7 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     labelBaseUrl: 'Base URL',
     placeholderModel: 'model id, ví dụ gpt-4o-mini',
     placeholderApiKey: 'sk-...',
+    placeholderLanguage: 'Gõ hoặc chọn 1 ngôn ngữ',
     labelTemperature: 'Temperature',
     labelTopP: 'Top P',
     labelTopK: 'Top K',
@@ -282,6 +284,7 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     labelBaseUrl: 'Base URL',
     placeholderModel: '模型 id，例如 gpt-4o-mini',
     placeholderApiKey: 'sk-...',
+    placeholderLanguage: '输入或选择一种语言',
     labelTemperature: 'Temperature',
     labelTopP: 'Top P',
     labelTopK: 'Top K',
@@ -401,6 +404,7 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     labelBaseUrl: 'Base URL',
     placeholderModel: 'model id 例: gpt-4o-mini',
     placeholderApiKey: 'sk-...',
+    placeholderLanguage: '言語を入力または選択',
     labelTemperature: 'Temperature',
     labelTopP: 'Top P',
     labelTopK: 'Top K',
@@ -520,6 +524,7 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     labelBaseUrl: 'Base URL',
     placeholderModel: 'model id, 예: gpt-4o-mini',
     placeholderApiKey: 'sk-...',
+    placeholderLanguage: '언어를 입력하거나 선택하세요',
     labelTemperature: 'Temperature',
     labelTopP: 'Top P',
     labelTopK: 'Top K',
@@ -610,54 +615,6 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
   },
 };
 
-const LANGUAGE_LABELS: Record<UiLanguage, Record<string, string>> = {
-  en: {
-    Auto: 'Auto-detect',
-    Japanese: 'Japanese',
-    Korean: 'Korean',
-    English: 'English',
-    Vietnamese: 'Vietnamese',
-    'Chinese (Simplified)': 'Chinese (Simplified)',
-    'Chinese (Traditional)': 'Chinese (Traditional)',
-  },
-  vi: {
-    Auto: 'Tự động nhận diện',
-    Japanese: 'Tiếng Nhật',
-    Korean: 'Tiếng Hàn',
-    English: 'Tiếng Anh',
-    Vietnamese: 'Tiếng Việt',
-    'Chinese (Simplified)': 'Tiếng Trung (Giản thể)',
-    'Chinese (Traditional)': 'Tiếng Trung (Phồn thể)',
-  },
-  zh: {
-    Auto: '自动检测',
-    Japanese: '日语',
-    Korean: '韩语',
-    English: '英语',
-    Vietnamese: '越南语',
-    'Chinese (Simplified)': '中文（简体）',
-    'Chinese (Traditional)': '中文（繁体）',
-  },
-  ja: {
-    Auto: '自動検出',
-    Japanese: '日本語',
-    Korean: '韓国語',
-    English: '英語',
-    Vietnamese: 'ベトナム語',
-    'Chinese (Simplified)': '中国語（簡体字）',
-    'Chinese (Traditional)': '中国語（繁体字）',
-  },
-  ko: {
-    Auto: '자동 감지',
-    Japanese: '일본어',
-    Korean: '한국어',
-    English: '영어',
-    Vietnamese: '베트남어',
-    'Chinese (Simplified)': '중국어 간체',
-    'Chinese (Traditional)': '중국어 번체',
-  },
-};
-
 export type I18nKey = MessageKey;
 
 export function isUiLanguage(value: unknown): value is UiLanguage {
@@ -675,9 +632,4 @@ export function t(lang: UiLanguage | undefined, key: I18nKey, vars: Record<strin
     const value = vars[name];
     return value === undefined ? match : String(value);
   });
-}
-
-export function languageLabel(lang: UiLanguage | undefined, language: string): string {
-  const safeLang = normalizeUiLanguage(lang);
-  return LANGUAGE_LABELS[safeLang][language] ?? LANGUAGE_LABELS.en[language] ?? language;
 }
