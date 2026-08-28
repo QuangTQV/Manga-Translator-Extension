@@ -70,6 +70,19 @@ def _natural_path_sort_key(path: Path):
     return tuple(_natural_text_sort_key(part) for part in path.parts)
 
 
+def _bbox_key(bbox) -> Tuple[int, ...]:
+    """Normalizes a bbox into a hashable dict key robust to float-precision
+    drift between pipeline stages (e.g. numpy float32 vs. Python float, or
+    a value re-serialized through JSON/list conversion) — cleaning-stage
+    and render-stage bboxes describe the exact same detected bubble, but an
+    exact tuple(bbox) equality check can miss a match on sub-pixel
+    differences, silently losing the cleaned-bubble render info (mask,
+    original crop for fallback, etc.) for that bubble. Rounds to whole
+    pixels, matching the same bbox-matching pattern already used elsewhere
+    in this file (e.g. the SAM-mask lookup above)."""
+    return tuple(int(round(float(v))) for v in bbox)
+
+
 def _debug_mask_bbox(mask):
     """Return full-image bbox for a debug mask, or None when empty/invalid."""
     normalized = (
@@ -1307,7 +1320,7 @@ def translate_and_render(
 
                 # Render Translations
                 bubble_render_info_map = {
-                    tuple(info["bbox"]): {
+                    _bbox_key(info["bbox"]): {
                         "color": info["color"],
                         "mask": info.get("mask"),
                         "base_mask": info.get("base_mask"),
@@ -1423,7 +1436,7 @@ def translate_and_render(
                             max_font = main_max_font
                             line_spacing = config.rendering.line_spacing_mult
                             use_ligs = config.rendering.use_ligatures
-                            render_info = bubble_render_info_map.get(tuple(bbox))
+                            render_info = bubble_render_info_map.get(_bbox_key(bbox))
                             bubble_color_bgr = (255, 255, 255)
                             cleaned_mask = None
                             base_mask = None

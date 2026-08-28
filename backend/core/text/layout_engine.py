@@ -136,6 +136,7 @@ def check_fit(
     word_width_cache: Optional[Dict[Tuple[str, int], float]] = None,
     verbose: bool = False,
     detach_trailing_ellipsis: bool = True,
+    ignore_height_limit: bool = False,
 ) -> Optional[Dict]:
     """Check if text fits within the given dimensions at the specified font size.
 
@@ -155,6 +156,10 @@ def check_fit(
         badness_exponent: Exponent for line breaking badness calculation
         word_width_cache: Optional cache for word widths
         verbose: Whether to print detailed logs
+        ignore_height_limit: Skip the max_render_height check (width still
+            enforced) — used as a last-resort fallback so a bubble never
+            renders fully blank just because the text needs more vertical
+            space than the box has; see find_optimal_layout's fallback.
 
     Returns:
         Dict containing fit data if successful, None if doesn't fit
@@ -201,9 +206,8 @@ def check_fit(
                 len(explicit_lines) - 1
             ) * single_line_height
 
-            if (
-                current_max_line_width <= max_render_width
-                and total_block_height <= max_render_height
+            if current_max_line_width <= max_render_width and (
+                ignore_height_limit or total_block_height <= max_render_height
             ):
                 return {
                     "lines": lines_data_at_size,
@@ -356,9 +360,8 @@ def check_fit(
                 verbose=verbose,
             )
 
-        if (
-            current_max_line_width <= max_render_width
-            and total_block_height <= max_render_height
+        if current_max_line_width <= max_render_width and (
+            ignore_height_limit or total_block_height <= max_render_height
         ):
             if verbose:
                 log_message(f"Size {font_size} fits", verbose=verbose)
@@ -573,6 +576,48 @@ def find_optimal_layout(
             high = mid - 1
 
     if best_fit_size == -1:
+        # Nothing fit within the bubble's height even at min_font_size — as
+        # a last resort, lay the text out at min_font_size anyway, ignoring
+        # the height limit (width is still respected, so lines still wrap
+        # correctly; the block just runs taller than the bubble). Rendering
+        # text that slightly overflows a small/oddly-shaped bubble is far
+        # better for the reader than the bubble coming out completely
+        # blank, which is what happens upstream if this raises.
+        fallback_fit = check_fit(
+            min_font_size,
+            clean_text,
+            max_render_width,
+            max_render_height,
+            regular_hb_face,
+            regular_typeface,
+            loaded_hb_faces,
+            features_to_enable,
+            line_spacing_mult,
+            hyphenate_before_scaling,
+            hyphen_penalty,
+            hyphenation_min_word_length,
+            badness_exponent,
+            word_width_cache,
+            verbose,
+            detach_trailing_ellipsis,
+            ignore_height_limit=True,
+        )
+        if fallback_fit is not None:
+            bubble_desc = f"bubble {bubble_id}" if bubble_id else "bubble"
+            log_message(
+                f"Text overflows {bubble_desc} at min size {min_font_size} "
+                f"(no font size fits the height) — rendering anyway rather "
+                f"than leaving it blank: '{clean_text[:30]}'",
+                always_print=True,
+            )
+            return {
+                "font_size": min_font_size,
+                "lines": fallback_fit["lines"],
+                "metrics": fallback_fit["metrics"],
+                "max_line_width": fallback_fit["max_line_width"],
+                "line_height": fallback_fit["line_height"],
+            }
+
         log_message(
             f"Text too large for bubble at min size {min_font_size}: '{clean_text[:30]}'",
             always_print=True,
