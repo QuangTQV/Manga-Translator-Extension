@@ -65,7 +65,7 @@ MangaTranslator Extension là bộ extension + backend portable để dịch tra
 
 Extension sử dụng LLM, API key, model và Base URL do bạn cung cấp. Bạn có thể kết nối Google, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, Z.ai, Moonshot AI hoặc bất kỳ endpoint OpenAI-compatible nào, sau đó giữ toàn bộ workflow dịch ngay trong trình duyệt.
 
-Gói mặc định được giữ nhẹ hơn: bao gồm runtime backend và model không có Flux, còn Flux Klein 4B là tùy chọn và có thể cài sau bằng `setup.bat`.
+Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) trong lần dùng đầu tiên, còn Flux Klein 4B là tùy chọn, chỉ cài bằng `setup.bat` khi bạn cần inpainting nặng hơn cho chữ ngoài bubble.
 
 ## Tính Năng
 
@@ -98,27 +98,18 @@ Release mới nhất:
 https://github.com/QuangTQV/Manga-Translator-Extension/releases/latest
 ```
 
-Các asset nên tải:
+Các asset của release:
 
 | Asset | Mục đích |
 | --- | --- |
 | `manga-translator-extension-dist-*.zip` | Extension đã build. Giải nén và load thư mục `dist/` trong Chrome/Edge. |
-| `manga-translator-models-no-flux-*.zip` | Model backend không bao gồm Flux. Giải nén vào root project để khôi phục `backend/models/`. |
-| `manga-translator-runtime-*.tar.gz.part01`, `part02`, ... | Runtime Python backend đã chia part. Cần ghép lại trước khi giải nén. |
+| `manga-translator-models-no-flux-*.zip` | Tùy chọn. Model backend tải sẵn (không Flux) để khỏi chờ tải khi dùng lần đầu — giải nén vào root project để khôi phục `backend/models/`. Bỏ qua bước này thì backend vẫn tự tải đúng model đó khi bạn dịch trang đầu tiên. |
+| Source code (zip / tar.gz) | Toàn bộ repo tại tag của release đó, giống hệt clone. |
 
-Ghép runtime đã chia part trên Windows PowerShell:
-
-```powershell
-Get-Content .\manga-translator-runtime-v1.0.1.tar.gz.part* -Encoding Byte -ReadCount 0 |
-  Set-Content .\manga-translator-runtime-v1.0.1.tar.gz -Encoding Byte
-
-tar -xzf .\manga-translator-runtime-v1.0.1.tar.gz
-```
-
-Giải nén model:
+Giải nén model (tùy chọn — thay đúng tên file của release bạn đã tải):
 
 ```powershell
-Expand-Archive .\manga-translator-models-no-flux-v1.0.1.zip -DestinationPath .
+Expand-Archive .\manga-translator-models-no-flux-*.zip -DestinationPath .
 ```
 
 ## Bắt Đầu Nhanh
@@ -130,7 +121,16 @@ git clone https://github.com/QuangTQV/Manga-Translator-Extension.git
 cd Manga-Translator-Extension
 ```
 
-2. Tải release assets và khôi phục `backend/runtime/` cùng `backend/models/`.
+2. Cài đặt backend (chỉ cần làm 1 lần).
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\pip install -e .
+cd ..
+```
+
+Tùy chọn: tải `manga-translator-models-no-flux-*.zip` từ [release mới nhất](#tải-xuống) rồi giải nén vào root project để khôi phục `backend/models/` trước — nếu bỏ qua, backend sẽ tự tải đúng model đó khi bạn dịch trang đầu tiên.
 
 3. Khởi động backend.
 
@@ -302,7 +302,7 @@ A: Hãy chờ trang reader load xong rồi chạy Scan & Translate Page lại. N
 | Không tìm thấy ảnh | Chờ trang manga load xong rồi chạy Scan & Translate Page lại. |
 | Lỗi model/provider | Kiểm tra API key, Base URL, model name và provider đã chọn. |
 | Tải Flux thất bại | Chạy lại `setup.bat`, kiểm tra dung lượng ổ đĩa và kết nối mạng. |
-| Runtime release có file `.part01` | Ghép các part trước, rồi giải nén file `.tar.gz`. |
+| `pip install -e .` lỗi trong `backend/` | Kiểm tra Python 3.10+ và đã kích hoạt virtual environment trước khi cài. |
 
 ## Bảo Mật
 

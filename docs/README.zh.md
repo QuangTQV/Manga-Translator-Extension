@@ -65,7 +65,7 @@ MangaTranslator Extension 是一个 portable 的浏览器扩展 + 后端栈，�
 
 Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连接 Google、OpenAI、Anthropic、OpenRouter、DeepSeek、xAI、Z.ai、Moonshot AI 或任何 OpenAI-compatible endpoint，然后把漫画翻译流程保留在浏览器中。
 
-默认包会尽量保持轻量：包含常规 backend runtime 和非 Flux 模型，而 Flux Klein 4B 是可选组件，可以之后通过 `setup.bat` 安装。
+默认安装保持轻量：backend 会在首次使用时自动下载（非 Flux）模型，Flux Klein 4B 是可选组件，只有在需要更强的气泡外文字 inpainting 时才通过 `setup.bat` 安装。
 
 ## 功能
 
@@ -98,27 +98,18 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 https://github.com/QuangTQV/Manga-Translator-Extension/releases/latest
 ```
 
-推荐下载的 release assets：
+Release assets：
 
 | Asset | 用途 |
 | --- | --- |
 | `manga-translator-extension-dist-*.zip` | 已构建的浏览器扩展。解压后在 Chrome/Edge 中加载 `dist/`。 |
-| `manga-translator-models-no-flux-*.zip` | 不包含 Flux 的 backend 模型。解压到项目根目录以恢复 `backend/models/`。 |
-| `manga-translator-runtime-*.tar.gz.part01`, `part02`, ... | 分卷的 backend Python runtime。需要先合并再解压。 |
+| `manga-translator-models-no-flux-*.zip` | 可选。预先下载好的 backend 模型（不含 Flux），省去首次使用时的等待——解压到项目根目录以恢复 `backend/models/`。跳过此步骤，backend 会在你翻译第一页时自动下载相同的模型。 |
+| Source code (zip / tar.gz) | 该 release tag 对应的完整仓库，等同于直接 clone。 |
 
-在 Windows PowerShell 中合并 runtime 分卷：
-
-```powershell
-Get-Content .\manga-translator-runtime-v1.0.1.tar.gz.part* -Encoding Byte -ReadCount 0 |
-  Set-Content .\manga-translator-runtime-v1.0.1.tar.gz -Encoding Byte
-
-tar -xzf .\manga-translator-runtime-v1.0.1.tar.gz
-```
-
-解压模型：
+解压模型（可选——请替换成你下载的 release 实际文件名）：
 
 ```powershell
-Expand-Archive .\manga-translator-models-no-flux-v1.0.1.zip -DestinationPath .
+Expand-Archive .\manga-translator-models-no-flux-*.zip -DestinationPath .
 ```
 
 ## 快速开始
@@ -130,7 +121,16 @@ git clone https://github.com/QuangTQV/Manga-Translator-Extension.git
 cd Manga-Translator-Extension
 ```
 
-2. 下载 release assets，并恢复 `backend/runtime/` 和 `backend/models/`。
+2. 设置 backend（只需一次）。
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\pip install -e .
+cd ..
+```
+
+可选：从[最新 release](#下载)下载 `manga-translator-models-no-flux-*.zip` 并解压到项目根目录，提前恢复 `backend/models/`——跳过此步骤，backend 会在你翻译第一页时自动下载相同的模型。
 
 3. 启动后端。
 
@@ -302,7 +302,7 @@ A: 等 reader 页面完全加载后，再运行 Scan & Translate Page。如果�
 | 找不到图片 | 等漫画页面完全加载后，再运行 Scan & Translate Page。 |
 | 模型/provider 错误 | 检查 API key、Base URL、model name 和 provider 选择。 |
 | Flux 下载失败 | 重新运行 `setup.bat`，检查磁盘空间和网络连接。 |
-| Release runtime 有 `.part01` 文件 | 先合并分卷，再解压 `.tar.gz`。 |
+| `backend/` 目录下 `pip install -e .` 失败 | 确认 Python 版本为 3.10+，且已在安装前激活虚拟环境。 |
 
 ## 安全
 

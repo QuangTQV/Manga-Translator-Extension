@@ -44,7 +44,7 @@ MangaTranslator Extension is a portable browser-extension stack for translating 
 
 The extension uses the LLM, API key, model, and Base URL that you provide. You can connect it to Google, OpenAI, Anthropic, OpenRouter, DeepSeek, xAI, Z.ai, Moonshot AI, or any OpenAI-compatible endpoint, then keep the translation workflow inside the browser.
 
-The default package is intentionally lighter: it includes the normal backend runtime and non-Flux models, while Flux Klein 4B is optional and can be installed later with `setup.bat`.
+The default install stays lightweight: the backend downloads its (non-Flux) models automatically the first time you use it, and Flux Klein 4B is optional, installed later with `setup.bat` only if you need heavier outside-bubble inpainting.
 
 ## Showcase
 
@@ -98,27 +98,18 @@ Latest release:
 https://github.com/QuangTQV/Manga-Translator-Extension/releases/latest
 ```
 
-Recommended release assets:
+Release assets:
 
 | Asset | Purpose |
 | --- | --- |
 | `manga-translator-extension-dist-*.zip` | Built browser extension. Load the extracted `dist/` folder in Chrome/Edge. |
-| `manga-translator-models-no-flux-*.zip` | Backend model files without Flux. Extract into the project root so it restores `backend/models/`. |
-| `manga-translator-runtime-*.tar.gz.part01`, `part02`, ... | Split backend Python runtime. Recombine before extracting. |
+| `manga-translator-models-no-flux-*.zip` | Optional. Pre-downloaded backend models (no Flux) so you don't have to wait for them on first use — extract into the project root to restore `backend/models/`. Skip this and the backend downloads the same models automatically the first time you translate a page. |
+| Source code (zip / tar.gz) | The repository at that release's tag, same as cloning it. |
 
-Recombine split runtime parts on Windows PowerShell:
-
-```powershell
-Get-Content .\manga-translator-runtime-v1.0.1.tar.gz.part* -Encoding Byte -ReadCount 0 |
-  Set-Content .\manga-translator-runtime-v1.0.1.tar.gz -Encoding Byte
-
-tar -xzf .\manga-translator-runtime-v1.0.1.tar.gz
-```
-
-Extract models:
+Extract models (optional — pick the actual filename from the release you downloaded):
 
 ```powershell
-Expand-Archive .\manga-translator-models-no-flux-v1.0.1.zip -DestinationPath .
+Expand-Archive .\manga-translator-models-no-flux-*.zip -DestinationPath .
 ```
 
 ## Quick Start
@@ -130,7 +121,16 @@ git clone https://github.com/QuangTQV/Manga-Translator-Extension.git
 cd Manga-Translator-Extension
 ```
 
-2. Download release assets and restore `backend/runtime/` and `backend/models/`.
+2. Set up the backend (one time).
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\pip install -e .
+cd ..
+```
+
+Optional: download `manga-translator-models-no-flux-*.zip` from the [latest release](#download) and extract it into the project root to restore `backend/models/` ahead of time — otherwise the backend downloads the same models automatically the first time you translate a page.
 
 3. Start the backend.
 
@@ -302,7 +302,7 @@ A: Wait for the reader page to finish lazy-loading, then run Scan & Translate Pa
 | No images found | Let the manga page finish loading, then run Scan & Translate Page again. |
 | Model/provider error | Check API key, Base URL, model name, and provider selection. |
 | Flux download fails | Re-run `setup.bat`, check disk space and internet connection. |
-| Release runtime has `.part01` files | Recombine parts first, then extract the `.tar.gz`. |
+| `pip install -e .` fails in `backend/` | Confirm Python 3.10+ and that the virtual environment is activated before installing. |
 
 ## Security
 
