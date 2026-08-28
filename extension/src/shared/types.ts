@@ -311,9 +311,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
 };
 
+// The first 6 are frontloaded on purpose — the extension's own core
+// features (Vietnamese pronoun accuracy, the 4 languages that used to be
+// the entire hardcoded list) center on this project's actual most-used
+// languages, so they need to stay easy to spot in the datalist suggestions
+// instead of sorting alphabetically into the other ~50 like everything
+// else here. Keep any language you add for the same reason in this block,
+// not the alphabetical one below it.
 export const LANGUAGES = [
-  'Japanese', 'Korean', 'Chinese (Simplified)', 'Chinese (Traditional)',
-  'English', 'Afrikaans', 'Albanian', 'Arabic', 'Armenian', 'Bengali',
+  'Japanese', 'Korean', 'Vietnamese', 'English',
+  'Chinese (Simplified)', 'Chinese (Traditional)',
+  'Afrikaans', 'Albanian', 'Arabic', 'Armenian', 'Bengali',
   'Bosnian', 'Bulgarian', 'Catalan', 'Croatian', 'Czech', 'Danish',
   'Dutch', 'Estonian', 'Persian (Farsi)', 'Finnish', 'French', 'Galician',
   'Georgian', 'German', 'Greek', 'Gujarati', 'Hebrew', 'Hindi',
@@ -322,7 +330,7 @@ export const LANGUAGES = [
   'Portuguese', 'Punjabi', 'Romanian', 'Russian', 'Serbian (Cyrillic)',
   'Serbian (Latin)', 'Slovak', 'Slovenian', 'Spanish', 'Swahili',
   'Swedish', 'Tamil', 'Telugu', 'Filipino (Tagalog)', 'Turkish',
-  'Ukrainian', 'Urdu', 'Uzbek', 'Vietnamese', 'Welsh',
+  'Ukrainian', 'Urdu', 'Uzbek', 'Welsh',
 ] as const;
 
 // The backend takes input_language/output_language as free-form strings —

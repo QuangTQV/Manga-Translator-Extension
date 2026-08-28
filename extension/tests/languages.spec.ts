@@ -24,6 +24,26 @@ test.describe('popup — Translate tab language pickers', () => {
     await expect(popup.locator('#lang-target-list option[value="Auto"]')).toHaveCount(0);
   });
 
+  test('the project\'s core languages stay frontloaded, not buried alphabetically among ~58 suggestions', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    const targetValues = await popup.locator('#lang-target-list option').evaluateAll(
+      (options) => options.map((o) => (o as HTMLOptionElement).value),
+    );
+    // Vietnamese in particular used to sort alphabetically to the very end
+    // (between "Uzbek" and "Welsh") once the list grew to ~58 entries —
+    // it has to stay grouped with the other core languages up front.
+    expect(targetValues.slice(0, 6)).toEqual([
+      'Japanese', 'Korean', 'Vietnamese', 'English',
+      'Chinese (Simplified)', 'Chinese (Traditional)',
+    ]);
+  });
+
   test('typing an arbitrary language not in the suggestion list is accepted and persists', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
