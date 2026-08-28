@@ -73,6 +73,7 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | --- | --- |
 | 自带 LLM | 使用用户配置的 provider、API key、model 和 Base URL。 |
 | Provider/密钥轮换 | 遇到限流时自动依次尝试同一 provider 的备用密钥，再切换到已配置的备用 provider。 |
+| Prompt 缓存 | 翻译用的 system prompt 在同一批次/自动翻译过程中每页完全相同，通过 `cache_control` 在 Anthropic 端缓存，可将后续每页的输入成本降低约 90%。OpenAI 兼容和 Gemini provider 已自动缓存符合条件的 prompt，无需配置。 |
 | 页面扫描器 | 在当前页面查找 manga/comic 图片，并让你选择要翻译的页面。 |
 | 自动翻译 | 监听当前阅读页，在滚动时自动翻译图片。 |
 | 气泡翻译 | 检测对话气泡，清除原文，翻译并把文字重新渲染回图片。 |
@@ -85,7 +86,6 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | 气泡外文字 | 默认使用轻量 cleanup 处理 SFX/旁白等气泡外文字。 |
 | 可选 Flux | 高级用户可下载 Flux Klein 4B 获得更重的 inpainting，而不增加默认 release 体积。 |
 | Provider 支持 | Google、OpenAI、Anthropic、xAI、DeepSeek、Z.ai、Moonshot AI、OpenRouter 和 OpenAI-compatible endpoint。 |
-| 模型选择器 | 从你配置的 Base URL 获取可用 OpenAI-compatible 模型。 |
 | UI 语言 | 默认英语，另有越南语、中文、日语和韩语。 |
 | 翻译语言 | 主要源语言/目标语言包括日语、韩语、英语和越南语。 |
 | Portable 后端 | 使用 `start-backend.bat`、`backend/main.py` 和可选的 `backend/runtime/python.exe`。 |
