@@ -106,6 +106,25 @@ def _normalize_azure_openai_endpoint(
     return endpoint, deployment, api_version, False
 
 
+def _filter_keys_with_weights(
+    raw_keys: list[str], raw_weights: list | None
+) -> tuple[list[str], list[float]]:
+    """Drops blank keys while keeping each surviving key's weight matched by
+    its ORIGINAL (pre-filter) index — filtering first would shift later
+    weights onto the wrong key. A missing/non-positive weight defaults to
+    1.0 (equal chance), so an unset weight never silently excludes a key
+    from "random" rotation."""
+    keys: list[str] = []
+    weights: list[float] = []
+    for i, k in enumerate(raw_keys):
+        if not k:
+            continue
+        keys.append(k)
+        w = raw_weights[i] if raw_weights and i < len(raw_weights) else None
+        weights.append(float(w) if isinstance(w, (int, float)) and w > 0 else 1.0)
+    return keys, weights
+
+
 def _build_fallback_provider_configs(
     fallback_providers: list[dict] | None,
 ) -> list[FallbackProviderConfig]:
@@ -119,7 +138,9 @@ def _build_fallback_provider_configs(
     for fb in fallback_providers:
         fb_provider = fb.get("provider") or ""
         fb_model = fb.get("model_name") or ""
-        fb_keys = [k for k in (fb.get("api_keys") or []) if k]
+        fb_keys, fb_weights = _filter_keys_with_weights(
+            fb.get("api_keys") or [], fb.get("api_key_weights")
+        )
         fb_base_url = fb.get("base_url")
         if not fb_provider or not fb_keys:
             continue
@@ -148,6 +169,7 @@ def _build_fallback_provider_configs(
                 provider=fb_provider,
                 model_name=fb_model,
                 api_keys=fb_keys,
+                api_key_weights=fb_weights,
                 azure_openai_endpoint=azure_endpoint,
                 azure_openai_api_version=azure_api_version,
                 azure_openai_is_v1=azure_is_v1,
@@ -277,6 +299,8 @@ def _build_config(
     fix_hint_instruction: str | None = None,
     rotation_strategy: str | None = None,
     cooldown_seconds: float | None = None,
+    api_key_weight: float | None = None,
+    backup_api_key_weights: list[float] | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -314,6 +338,14 @@ def _build_config(
     )
     resolved_cooldown_seconds = (
         max(0.0, cooldown_seconds) if cooldown_seconds is not None else 15.0
+    )
+    resolved_api_key_weight = (
+        api_key_weight
+        if isinstance(api_key_weight, (int, float)) and api_key_weight > 0
+        else 1.0
+    )
+    resolved_backup_api_keys, resolved_backup_api_key_weights = _filter_keys_with_weights(
+        backup_api_keys or [], backup_api_key_weights
     )
 
     detection = DetectionConfig(
@@ -353,13 +385,15 @@ def _build_config(
         llm_instructions=llm_instructions,
         context_memory_enabled=context_memory_enabled,
         context_memory=context_memory,
-        backup_api_keys=[k for k in (backup_api_keys or []) if k],
+        backup_api_keys=resolved_backup_api_keys,
+        backup_api_key_weights=resolved_backup_api_key_weights,
         fallback_providers=_build_fallback_provider_configs(fallback_providers),
         fix_hint_bubble_index=fix_hint_bubble_index,
         fix_hint_original_text=fix_hint_original_text,
         fix_hint_instruction=fix_hint_instruction,
         rotation_strategy=resolved_rotation_strategy,
         cooldown_seconds=resolved_cooldown_seconds,
+        api_key_weight=resolved_api_key_weight,
         ocr_method=ocr_method,
         send_full_page_context=send_full_page_context,
         whiteout_conjoined_bubbles=True,

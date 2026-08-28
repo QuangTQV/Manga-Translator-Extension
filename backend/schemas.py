@@ -18,6 +18,7 @@ class FallbackProviderConfig(BaseModel):
     provider: str
     model_name: Optional[str] = None
     api_keys: List[str] = []
+    api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as api_keys), used only when rotation_strategy is "random"
     base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
 
 
@@ -68,6 +69,8 @@ class TranslateOptions(BaseModel):
     fix_hint: Optional[FixHintConfig] = None  # re-translate this page with a targeted correction for one bubble
     rotation_strategy: Optional[str] = None  # "round_robin" (default), "random", or "sequential" — which candidate to try first
     cooldown_seconds: Optional[float] = None  # how long a rate-limited key/provider is skipped before being retried (default 15s)
+    api_key_weight: Optional[float] = None  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
+    backup_api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
 
 
 class TranslateRequest(TranslateOptions):
@@ -130,6 +133,8 @@ class SuggestInstructionsRequest(BaseModel):
     fallback_providers: Optional[List[FallbackProviderConfig]] = None
     rotation_strategy: Optional[str] = None
     cooldown_seconds: Optional[float] = None
+    api_key_weight: Optional[float] = None
+    backup_api_key_weights: Optional[List[float]] = None
 
 
 class SuggestInstructionsResponse(BaseModel):

@@ -9,6 +9,7 @@ import type { UiLanguage } from './i18n.js';
 export interface BackupApiKeyEntry {
   key: string;
   enabled: boolean;
+  weight?: number; // relative pick chance among ready candidates when rotationStrategy is "random" (default 1 = equal chance for every key)
 }
 
 // One provider in the rotation list — tried in list order, no entry is
@@ -38,7 +39,11 @@ export function normalizeBackupApiKeys(raw: unknown): BackupApiKeyEntry[] {
       if (key) out.push({ key, enabled: true });
     } else if (item && typeof item === 'object' && typeof (item as { key?: unknown }).key === 'string') {
       const key = (item as { key: string }).key.trim();
-      if (key) out.push({ key, enabled: (item as { enabled?: unknown }).enabled !== false });
+      if (key) {
+        const rawWeight = (item as { weight?: unknown }).weight;
+        const weight = typeof rawWeight === 'number' && rawWeight > 0 ? rawWeight : undefined;
+        out.push({ key, enabled: (item as { enabled?: unknown }).enabled !== false, ...(weight !== undefined ? { weight } : {}) });
+      }
     }
   }
   return out;
@@ -222,6 +227,7 @@ export interface TranslateRequest {
   base_url?: string;   // for OpenAI-Compatible provider, or Azure endpoint for Azure OpenAI
   model_name?: string; // for Azure OpenAI, this is the deployment name
   api_key?: string;
+  api_key_weight?: number; // relative pick chance for `api_key`, used only when rotation_strategy is "random"
   temperature: number;
   top_p: number;
   top_k: number;
@@ -234,7 +240,8 @@ export interface TranslateRequest {
   context_memory_enabled?: boolean;
   context_memory?: string;
   backup_api_keys?: string[];
-  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
+  backup_api_key_weights?: number[]; // same order as backup_api_keys
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string }[];
   fix_hint?: { bubble_index?: number; original_text?: string; instruction: string };
   rotation_strategy?: string;
   cooldown_seconds?: number;

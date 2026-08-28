@@ -872,17 +872,22 @@ def _next_round_robin_offset(pool_signature: Tuple[Tuple[str, str, str], ...]) -
 
 
 def _starting_offset(
-    strategy: str, pool_signature: Tuple[Tuple[str, str, str], ...], pool_size: int
+    strategy: str,
+    pool_signature: Tuple[Tuple[str, str, str], ...],
+    pool_size: int,
+    weights: Optional[List[float]] = None,
 ) -> int:
     """Which candidate a request tries first, before rotation-on-failure
     walks the rest in order. "sequential" always starts at the first
     configured key/provider (simplest, but concentrates load there);
-    "random" picks uniformly at random each call; "round_robin" (default)
-    advances a per-pool cursor so consecutive requests fan out evenly."""
+    "random" picks by `weights` if given (each candidate's configured
+    relative pick weight — equal weights behave the same as a uniform pick),
+    otherwise uniformly at random; "round_robin" (default) advances a
+    per-pool cursor so consecutive requests fan out evenly."""
     if strategy == "sequential":
         return 0
     if strategy == "random":
-        return random.randrange(pool_size)
+        return random.choices(range(pool_size), weights=weights or None, k=1)[0]
     return _next_round_robin_offset(pool_signature) % pool_size
 
 
@@ -901,8 +906,16 @@ def _iter_llm_candidates(config: TranslationConfig):
     NOT a duplicate — many providers (Gemini's free tier in particular)
     meter rate limits per model, so the same account can legitimately be
     configured twice with two different models to try.
+
+    Each yielded candidate's `candidate_weight` carries its own configured
+    relative pick weight (default 1.0), used only by "random" rotation to
+    bias which ready candidate is tried first — every other rotation
+    strategy ignores it.
     """
-    yield config
+    primary_weight = (
+        config.api_key_weight if config.api_key_weight and config.api_key_weight > 0 else 1.0
+    )
+    yield replace(config, candidate_weight=primary_weight)
     seen: set = set()
 
     key_field = _PROVIDER_API_KEY_FIELD.get(config.provider)
@@ -910,11 +923,13 @@ def _iter_llm_candidates(config: TranslationConfig):
     if key_field and primary_key:
         seen.add((config.provider, primary_key, config.model_name))
     if key_field:
-        for backup_key in config.backup_api_keys or []:
+        for i, backup_key in enumerate(config.backup_api_keys or []):
             if not backup_key or (config.provider, backup_key, config.model_name) in seen:
                 continue
             seen.add((config.provider, backup_key, config.model_name))
-            yield replace(config, **{key_field: backup_key})
+            weights = config.backup_api_key_weights or []
+            weight = weights[i] if i < len(weights) and weights[i] > 0 else 1.0
+            yield replace(config, **{key_field: backup_key}, candidate_weight=weight)
 
     for fb in config.fallback_providers or []:
         fb_key_field = _PROVIDER_API_KEY_FIELD.get(fb.provider)
@@ -928,16 +943,19 @@ def _iter_llm_candidates(config: TranslationConfig):
         elif fb.provider == "OpenAI-Compatible":
             extra_fields["openai_compatible_url"] = fb.openai_compatible_url
         fb_model = fb.model_name or config.model_name
-        for fb_key in fb.api_keys or []:
+        for i, fb_key in enumerate(fb.api_keys or []):
             if not fb_key or (fb.provider, fb_key, fb_model) in seen:
                 continue
             seen.add((fb.provider, fb_key, fb_model))
+            fb_weights = fb.api_key_weights or []
+            fb_weight = fb_weights[i] if i < len(fb_weights) and fb_weights[i] > 0 else 1.0
             yield replace(
                 config,
                 provider=fb.provider,
                 model_name=fb_model,
                 **{fb_key_field: fb_key},
                 **extra_fields,
+                candidate_weight=fb_weight,
             )
 
 
@@ -996,7 +1014,8 @@ def _call_llm_endpoint(
         pool_signature = tuple(
             (c.provider, _candidate_key(c) or "", c.model_name or "") for c in all_candidates
         )
-        offset = _starting_offset(config.rotation_strategy, pool_signature, len(candidates))
+        weights = [max(c.candidate_weight, 0.0001) for c in candidates]
+        offset = _starting_offset(config.rotation_strategy, pool_signature, len(candidates), weights)
         if offset:
             candidates = candidates[offset:] + candidates[:offset]
 

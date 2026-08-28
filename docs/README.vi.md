@@ -72,7 +72,7 @@ Gói mặc định được giữ nhẹ hơn: bao gồm runtime backend và mode
 | Khu vực | Chức năng |
 | --- | --- |
 | LLM của bạn | Sử dụng provider, API key, model và Base URL do người dùng cấu hình. |
-| Xoay tua provider/key | Khi bị rate limit, tự động thử lần lượt các API key dự phòng cùng provider, rồi chuyển sang các provider dự phòng đã cấu hình. |
+| Xoay tua provider/key | Khi bị rate limit, tự động thử lần lượt các API key dự phòng cùng provider, rồi chuyển sang các provider dự phòng đã cấu hình. Kiểu xoay tua có thể cấu hình (tuần tự/ngẫu nhiên/round-robin); ở chế độ Ngẫu nhiên, mỗi key có thể đặt trọng số riêng để tăng tỉ lệ được chọn. |
 | Cache prompt | Phần system prompt dịch (giống hệt nhau ở mọi trang trong cùng 1 lượt quét/auto-translate) được cache phía server trên Anthropic qua `cache_control`, giảm tới ~90% chi phí input cho các trang sau. Provider tương thích OpenAI và Gemini đã tự động cache prompt đủ điều kiện, không cần cấu hình. |
 | Trình quét trang | Tìm ảnh manga/comic trên trang hiện tại và cho phép chọn trang cần dịch. |
 | Tự động dịch | Theo dõi trang đọc hiện tại và dịch ảnh khi bạn cuộn. |

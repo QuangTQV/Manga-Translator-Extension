@@ -136,6 +136,13 @@ function setHealthState(state: HealthState): void {
   healthBadge.textContent = t(uiLanguage, key);
 }
 
+// The per-key weight input only matters for "random" rotation (round_robin
+// and sequential ignore it entirely) — hidden otherwise so it doesn't read
+// as a control that's always in effect.
+function updateRotationWeightVisibility(): void {
+  providerGroupsList.classList.toggle('rotation-random', rotationStrategySelect.value === 'random');
+}
+
 function setAutoButtonState(active: boolean): void {
   autoBtn.classList.toggle('active', active);
   autoBtn.textContent = t(uiLanguage, active ? 'btnAutoOn' : 'btnAuto');
@@ -194,6 +201,7 @@ async function loadAndBind(): Promise<void> {
   reasoningEffortSelect.value = settings.config.reasoningEffort ?? '';
   imageDetailSelect.value = settings.config.imageDetail || 'auto';
   rotationStrategySelect.value = settings.config.rotationStrategy || 'round_robin';
+  updateRotationWeightVisibility();
   cooldownSecondsInput.value = String(settings.config.cooldownSeconds ?? 15);
   tempVal.textContent = Number(settings.config.temperature).toFixed(2);
   topPVal.textContent = Number(settings.config.topP).toFixed(2);
@@ -245,7 +253,7 @@ function bind(): void {
   }
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
   imageDetailSelect.addEventListener('change', () => { void autoSave(); });
-  rotationStrategySelect.addEventListener('change', () => { void autoSave(); });
+  rotationStrategySelect.addEventListener('change', () => { updateRotationWeightVisibility(); void autoSave(); });
   cooldownSecondsInput.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
@@ -567,7 +575,9 @@ function collectProviderGroups(): ProviderGroupConfig[] {
       const key = keyRowEl.querySelector<HTMLInputElement>('.bk-key')?.value.trim() ?? '';
       const keyEnabled = keyRowEl.querySelector<HTMLInputElement>('.bk-enabled')?.checked ?? true;
       if (!key) continue;
-      apiKeys.push({ key, enabled: keyEnabled });
+      const weightRaw = parseFloat(keyRowEl.querySelector<HTMLInputElement>('.bk-weight')?.value ?? '1');
+      const weight = Number.isFinite(weightRaw) && weightRaw > 0 ? weightRaw : undefined;
+      apiKeys.push({ key, enabled: keyEnabled, ...(weight !== undefined ? { weight } : {}) });
     }
     if (!provider || apiKeys.length === 0) continue; // skip incomplete rows
     rows.push({ provider, modelName: modelName || undefined, apiKeys, baseUrl: baseUrl || undefined, enabled });
@@ -591,6 +601,14 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   keyField.placeholder = t(uiLanguage, 'placeholderApiKey');
   keyField.value = data?.key ?? '';
 
+  const weightField = document.createElement('input');
+  weightField.className = 'input bk-weight';
+  weightField.type = 'number';
+  weightField.min = '0';
+  weightField.step = '0.1';
+  weightField.title = t(uiLanguage, 'hintKeyWeight');
+  weightField.value = String(data?.weight ?? 1);
+
   const [upBtn, downBtn] = createMoveButtons(row, 'backup-key-row');
 
   const removeBtn = document.createElement('button');
@@ -608,12 +626,12 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   const syncDisabledStyle = () => row.classList.toggle('disabled', !enabledCheckbox.checked);
   syncDisabledStyle();
 
-  for (const el of [enabledCheckbox, keyField]) {
+  for (const el of [enabledCheckbox, keyField, weightField]) {
     el.addEventListener('change', () => { syncDisabledStyle(); updateDuplicateKeyWarning(); void autoSave(); });
   }
   keyField.addEventListener('input', () => updateDuplicateKeyWarning());
 
-  row.append(enabledCheckbox, keyField, upBtn, downBtn, removeBtn);
+  row.append(enabledCheckbox, keyField, weightField, upBtn, downBtn, removeBtn);
   return row;
 }
 

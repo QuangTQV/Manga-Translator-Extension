@@ -112,6 +112,10 @@
     .backup-key-row input[type="checkbox"] { accent-color: #3b82f6; cursor: pointer; flex-shrink: 0; }
     .backup-key-row .input { flex: 1; min-width: 0; }
     .backup-key-row.disabled .input { opacity: 0.45; }
+    .backup-key-row input.bk-weight {
+      display: none; flex: 0 0 44px; min-width: 0; text-align: center; padding: 4px 2px;
+    }
+    #provider-groups-list.rotation-random .backup-key-row input.bk-weight { display: block; }
     .slider-row { display: flex; flex-direction: column; gap: 5px; }
     .slider-label-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .slider-value { font-size: 11px; font-weight: 700; color: #60a5fa; min-width: 28px; text-align: right; }

@@ -2325,7 +2325,9 @@ function bgSuggestInstructions(images: string[], outputLanguage: string, setting
           top_p: settings.config.topP,
           top_k: settings.config.topK,
           reasoning_effort: settings.config.reasoningEffort || undefined,
+          api_key_weight: rotation.api_key_weight,
           backup_api_keys: rotation.backup_api_keys,
+          backup_api_key_weights: rotation.backup_api_key_weights,
           fallback_providers: rotation.fallback_providers,
           rotation_strategy: settings.config.rotationStrategy,
           cooldown_seconds: settings.config.cooldownSeconds,
@@ -2977,25 +2979,33 @@ function buildProviderRotation(settings: AppSettings): {
   base_url?: string;
   model_name?: string;
   api_key?: string;
+  api_key_weight?: number;
   backup_api_keys?: string[];
-  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
+  backup_api_key_weights?: number[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string }[];
 } {
   const groups = (settings.config.providerGroups ?? []).filter((g) => g.enabled !== false);
   const [first, ...rest] = groups;
   if (!first) return { provider: 'Google' };
-  const [apiKey, ...backupKeys] = first.apiKeys.filter((k) => k.enabled).map((k) => k.key);
-  const fallbackProviders = rest.map((g) => ({
-    provider: g.provider,
-    model_name: g.modelName,
-    base_url: g.baseUrl,
-    api_keys: g.apiKeys.filter((k) => k.enabled).map((k) => k.key),
-  }));
+  const [primary, ...backups] = first.apiKeys.filter((k) => k.enabled);
+  const fallbackProviders = rest.map((g) => {
+    const keys = g.apiKeys.filter((k) => k.enabled);
+    return {
+      provider: g.provider,
+      model_name: g.modelName,
+      base_url: g.baseUrl,
+      api_keys: keys.map((k) => k.key),
+      api_key_weights: keys.map((k) => k.weight ?? 1),
+    };
+  });
   return {
     provider: first.provider,
     base_url: first.baseUrl,
     model_name: first.modelName,
-    api_key: apiKey,
-    backup_api_keys: backupKeys.length ? backupKeys : undefined,
+    api_key: primary?.key,
+    api_key_weight: primary?.weight ?? 1,
+    backup_api_keys: backups.length ? backups.map((k) => k.key) : undefined,
+    backup_api_key_weights: backups.length ? backups.map((k) => k.weight ?? 1) : undefined,
     fallback_providers: fallbackProviders.length ? fallbackProviders : undefined,
   };
 }
@@ -3035,7 +3045,9 @@ function buildTranslateRequest(
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
     context_memory_enabled: contextMemoryEnabled,
     context_memory: contextMemoryEnabled && contextMemoryText ? contextMemoryText : undefined,
+    api_key_weight: rotation.api_key_weight,
     backup_api_keys: rotation.backup_api_keys,
+    backup_api_key_weights: rotation.backup_api_key_weights,
     fallback_providers: rotation.fallback_providers,
     rotation_strategy: settings.config.rotationStrategy,
     cooldown_seconds: settings.config.cooldownSeconds,

@@ -18,6 +18,9 @@ class FallbackProviderConfig:
     provider: str
     model_name: str = ""
     api_keys: List[str] = field(default_factory=list)
+    api_key_weights: List[float] = field(
+        default_factory=list
+    )  # relative pick weight per key (same order as api_keys), used only when rotation_strategy is "random"
     azure_openai_endpoint: str = ""
     azure_openai_api_version: str = ""
     azure_openai_is_v1: bool = False
@@ -128,6 +131,13 @@ class TranslationConfig:
     )  # tried in order after the primary provider and its backup keys are all rate-limited
     rotation_strategy: str = "round_robin"  # "round_robin" (default), "random", or "sequential" — which candidate a request tries first
     cooldown_seconds: float = 15.0  # how long a rate-limited key/provider is skipped before being retried
+    api_key_weight: float = 1.0  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
+    backup_api_key_weights: List[float] = field(
+        default_factory=list
+    )  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
+    candidate_weight: float = (
+        1.0  # internal: this specific candidate's own weight, stamped by _iter_llm_candidates — not user-facing
+    )
 
 
 @dataclass
