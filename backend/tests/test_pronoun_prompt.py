@@ -77,6 +77,24 @@ def test_xung_ho_echo_requires_both_context_memory_and_vietnamese():
     assert "XƯNG HÔ:" not in non_vietnamese
 
 
+def test_identify_pairs_by_name_rule_present_for_vietnamese():
+    # Failure mode #4: a physical descriptor ("girl, short hair") isn't a
+    # stable identity across pages — a name is, so the model should prefer
+    # names whenever one is known instead of re-describing appearance.
+    prompt = _build_system_prompt_translation(
+        output_language="Vietnamese", mode="one-step", reading_direction="rtl"
+    )
+    assert "Identify pairs by name, not appearance" in prompt
+    assert "stays the same across the whole story" in prompt
+
+
+def test_identify_pairs_by_name_rule_absent_for_non_vietnamese():
+    prompt = _build_system_prompt_translation(
+        output_language="English", mode="one-step", reading_direction="rtl"
+    )
+    assert "Identify pairs by name" not in prompt
+
+
 def test_memory_note_extraction_captures_embedded_xung_ho_line():
     # What the model is now instructed to emit: a MEMORY NOTE sentence
     # immediately followed by an XƯNG HÔ sub-line on its own line.
