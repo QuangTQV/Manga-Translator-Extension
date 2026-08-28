@@ -207,15 +207,18 @@ def _build_system_prompt_translation(
     vietnamese_pronoun_rule = ""
     if "vietnamese" in (output_language or "").lower():
         vietnamese_pronoun_rule = """
-- **Vietnamese Pronouns (xưng hô):** Before translating any dialogue, work out for every distinct speaker-listener pair: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship — use art (apparent age/build), honorifics (-san/-chan/-kun/-senpai/etc.), and dialogue tone as evidence. Then pick ONE pronoun pair for that speaker-listener direction, write it down in the required `PRONOUN MAP:` section (see OUTPUT SCHEMA below), and reuse it for every line between them:
+- **Vietnamese Pronouns (xưng hô):** Before translating any dialogue, work out for every distinct speaker-listener pair: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship. Then pick ONE pronoun pair for that speaker-listener direction, write it down in the required `PRONOUN MAP:` section (see OUTPUT SCHEMA below), and reuse it for every line between them:
+  - **Evidence priority — text over art:** manga art is unreliable for judging age/relationship — character designs routinely draw people who are actually years apart (senpai/kohai, siblings, teacher/student) as visually the same age, and a "young-looking" style can make every character look like a peer regardless of their real age. Rank evidence in this order and let a higher-ranked signal override a lower one when they conflict: (1) explicit address terms/honorifics used in the dialogue itself (-san/-chan/-kun/-senpai, name suffixes, family terms — see the override below), (2) source-language register — self-referential pronouns (e.g. Japanese ore/boku/watashi/atashi), sentence-final particles, keigo/politeness level, blunt vs. formal phrasing, (3) narrative/story context (established roles like teacher, senior, sibling), (4) apparent age/build from the art, used only as a tiebreaker when the above give no signal.
   - **Decisive override — family address terms:** if a line's own source text contains a family address term — "onii-chan"/"onii-san"/"aniki" (older brother), "onee-chan"/"onee-san" (older sister), "otouto" (younger brother), "imouto" (younger sister), or an English equivalent like "bro"/"sis"/"big brother"/"big sis" — that line's speaker-listener pair IS siblings, full stop. This overrides any guess about who the characters are from art or from a different panel's dialogue, even if a same-looking character elsewhere on the page seemed to be a classmate/stranger — a page can have several visually similar characters, and the address term in the line itself is stronger evidence than a cross-panel identity guess. Translate the address term itself as the real Vietnamese family term ("anh"/"chị"/"em"), not left as "onii-chan" untranslated.
   - Close friends, classmates, same apparent age, casual tone → "tớ"/"cậu" or "mình"/"cậu".
   - Very close friends, rivals, or rough/blunt speech → "tao"/"mày".
   - Noticeable age gap, romantic partners, or siblings → "anh"/"em" or "chị"/"em" (the older speaker says "anh"/"chị", the younger says "em").
   - Family members → the real family term ("con", "mẹ", "bố"/"ba", "ông", "bà", "anh", "chị", "em"...) — never "tôi"/"bạn" for family.
-  - Genuine strangers, business/formal settings, or relationship truly unclear → "tôi"/"bạn" or "anh/chị"/"em".
-  Treat "tôi"/"bạn" as the last-resort exception, not the safe default — in casual manga dialogue it reads as stiff and impersonal, and is wrong far more often than it's right. If forced to guess between two options, prefer the warmer/more casual one over the formal one, since most manga dialogue is casual.
-  - **Applying the pair correctly:** the two terms are not interchangeable decorations — each one replaces a specific grammatical role from the source. The speaker's own term replaces "I"/"me"; the listener's term replaces "you". Map them to what the source sentence actually says, don't mechanically insert both terms into every line. A line that only addresses the listener (no "I" role in the source) — e.g. "What have you been writing?" — takes ONLY the listener's term, as the subject: "Anh đã viết gì vậy?". Adding the speaker's own term as a false subject — "Em đã viết gì vậy, anh?" — reverses who the question is about and is wrong, not just stylistically off."""  # noqa
+  - Genuine strangers *and* explicitly formal/business settings (job interviews, customer service, addressing a superior at work) → "tôi"/"bạn" or "anh/chị"/"em".
+  - Relationship genuinely cannot be determined from any of the evidence above → default to "cậu"/"tớ", NOT "tôi"/"bạn". "tôi"/"bạn" is not a safe default for "unclear" — it reads as two adults who have never met, which is rarely what an unclear-but-clearly-young-and-casual scene actually is.
+  Treat "tôi"/"bạn" as reserved for the two named cases above (genuine strangers, explicit formal/business register) — never as a fallback for "not sure". It is wrong far more often than it's right in casual manga dialogue. If forced to guess between two options, prefer the warmer/more casual one over the formal one, since most manga dialogue is casual.
+  - **Applying the pair correctly:** the two terms are not interchangeable decorations — each one replaces a specific grammatical role from the source. The speaker's own term replaces "I"/"me"; the listener's term replaces "you". Map them to what the source sentence actually says, don't mechanically insert both terms into every line. A line that only addresses the listener (no "I" role in the source) — e.g. "What have you been writing?" — takes ONLY the listener's term, as the subject: "Anh đã viết gì vậy?". Adding the speaker's own term as a false subject — "Em đã viết gì vậy, anh?" — reverses who the question is about and is wrong, not just stylistically off.
+  - **Before finalizing your answer**, re-scan every `[pair]`-tagged line against the `PRONOUN MAP:` entry for that same speaker-listener direction and fix any line where the actual pronoun words used don't match the mapped pair — a tag can be technically present while the sentence itself drifted to a different pair's wording; the words must match the tag, not just the bracket."""  # noqa
 
     natural_style_rule = (
         """
@@ -267,9 +270,14 @@ You must use the following markdown-style markers to convey emphasis:
         if is_vietnamese_output
         else ""
     )
+    pronoun_map_echo_instruction = (
+        """ Immediately after that sentence, on its own line, add `XƯNG HÔ:` followed by every pair from this page's `PRONOUN MAP:` restated verbatim in the same `- <speaker> -> <listener>: <pair>` format (omit this line entirely if `PRONOUN MAP:` was empty) — this is how a later page knows the relationship was already decided instead of re-guessing from scratch."""
+        if context_memory_enabled and is_vietnamese_output
+        else ""
+    )
     memory_note_instruction = (
-        """
-- **After the numbered list**, on a new line, output a section titled exactly `MEMORY NOTE:` followed by ONE short plain-text sentence (no dash, no numbering) summarizing this page for future reference — key characters present, notable events, or relationships revealed. This section is required, even if the sentence is brief."""
+        f"""
+- **After the numbered list**, on a new line, output a section titled exactly `MEMORY NOTE:` followed by ONE short plain-text sentence (no dash, no numbering) summarizing this page for future reference — key characters present, notable events, or relationships revealed.{pronoun_map_echo_instruction} This section is required, even if the sentence is brief."""
         if context_memory_enabled
         else ""
     )
@@ -2036,9 +2044,19 @@ def call_translation_api_batch(
 
     context_memory_section = ""
     if config.context_memory_enabled and (config.context_memory or "").strip():
+        pronoun_map_reuse_note = (
+            "\nIf any accumulated note above has an `XƯNG HÔ:` line, those pairs were already decided on an "
+            "earlier page — reuse the same pair verbatim in this page's `PRONOUN MAP:` for the same "
+            "speaker-listener direction if that pair reappears, instead of re-deciding it from this page's art "
+            "alone. Only deviate if this page's dialogue gives a clear, specific reason the earlier call was "
+            "wrong (e.g. a family address term appears that wasn't visible before)."
+            if "vietnamese" in (output_language or "").lower()
+            else ""
+        )
         context_memory_section = (
             "\n## STORY MEMORY (accumulated from earlier pages of this story)\n"
             f"{config.context_memory.strip()}\n"
+            f"{pronoun_map_reuse_note}"
         )
 
     cache = get_cache()
