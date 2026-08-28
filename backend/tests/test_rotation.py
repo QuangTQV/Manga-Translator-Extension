@@ -230,3 +230,65 @@ def test_missing_key_candidate_is_skipped_without_marking_cooldown():
 
     assert result == "1: translated"
     assert _cooldown_remaining("Google", "", "m") == 0.0
+
+
+def test_content_filter_candidate_rotates_to_next_provider_without_cooldown():
+    """A provider blocking one request under its own content policy (Azure
+    OpenAI's stricter-than-default filter tripping on ordinary manga
+    violence/fan-service) shouldn't fail the whole page if a different
+    configured provider is willing to translate the same content — and
+    unlike a rate limit, there's nothing to cool down (the same key would
+    hit the same block again on retry of the same content, but is perfectly
+    fine for the next page)."""
+    config = TranslationConfig(
+        provider="Azure OpenAI", azure_openai_api_key="az1",
+        backup_api_keys=["g2"], model_name="m", rotation_strategy="sequential",
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", api_keys=["g2"], model_name="m"),
+        ],
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        if candidate.provider == "Azure OpenAI":
+            raise TranslationError(
+                'Azure OpenAI API HTTP Error: Status 400: {"error": {"message": '
+                '"The response was filtered due to the prompt triggering Azure '
+                'OpenAI’s content management policy.", "code": "content_filter"}} '
+                "(Check payload/deployment name/api-version)"
+            )
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+    assert _cooldown_remaining("Azure OpenAI", "az1", "m") == 0.0
+
+
+def test_generic_400_error_without_content_filter_marker_is_not_rotated():
+    """A plain "Status 400" from a genuine misconfiguration (bad deployment
+    name, malformed payload) is not a content-filter block — it would fail
+    identically on every other candidate too, so it must NOT be silently
+    rotated past like one. Confirms the marker match is specific, not a
+    blanket "any 400 is retryable"."""
+    config = TranslationConfig(
+        provider="Azure OpenAI", azure_openai_api_key="az1",
+        backup_api_keys=["g2"], model_name="m", rotation_strategy="sequential",
+    )
+    attempts = []
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        attempts.append(candidate.azure_openai_api_key)
+        raise TranslationError(
+            "Azure OpenAI API HTTP Error: Status 400: {\"error\": {\"message\": "
+            "\"Unknown parameter\"}} (Check payload/deployment name/api-version)"
+        )
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        with pytest.raises(TranslationError, match="Unknown parameter"):
+            _call_llm_endpoint(config, [], "prompt")
+
+    # Only the primary was attempted — a genuine misconfiguration must not
+    # burn through the whole rotation chain pretending a different key on
+    # the same broken deployment might succeed.
+    assert attempts == ["az1"]

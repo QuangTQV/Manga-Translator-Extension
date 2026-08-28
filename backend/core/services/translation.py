@@ -802,6 +802,31 @@ def _is_missing_key_error(exc: Exception) -> bool:
     return "is missing" in str(exc)
 
 
+# Markers for a provider blocking a request over its own content policy
+# (Azure OpenAI's "content_filter" error code, OpenAI's identical field on
+# the same shared error schema) rather than any account/rate-limit issue.
+# Deliberately NOT matched by generic "status 400" — that also covers
+# genuine misconfiguration (bad payload/deployment/api-version), which
+# would fail identically on every other candidate too and shouldn't burn
+# through the whole rotation chain pretending it might succeed elsewhere.
+_CONTENT_FILTER_MARKERS = (
+    "content_filter",
+    "content management policy",
+)
+
+
+def _is_content_filter_error(exc: Exception) -> bool:
+    """True if the provider blocked this specific request/content under its
+    own moderation policy — most often Azure OpenAI's stricter-than-default
+    content filter tripping on ordinary manga violence/fan-service. Nothing
+    to cool down (the same content will fail again on retry of the same
+    candidate), but a *different* configured provider/key may have a looser
+    policy or none at all, so this rotates past it exactly like a rate
+    limit or missing key would."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _CONTENT_FILTER_MARKERS)
+
+
 def _candidate_key(candidate: TranslationConfig) -> Optional[str]:
     """The API key value a candidate config would actually call with."""
     key_field = _PROVIDER_API_KEY_FIELD.get(candidate.provider)
@@ -1058,6 +1083,7 @@ def _call_llm_endpoint(
             is_credit_error = _is_insufficient_credit_error(e)
             is_rate_limited = _is_rate_limit_error(e)
             is_missing_key = _is_missing_key_error(e)
+            is_content_filtered = _is_content_filter_error(e)
             if is_rate_limited or is_credit_error:
                 # Prefer the provider's own Retry-After value over the
                 # user-configured blind guess, when it sent one — clamped
@@ -1076,10 +1102,11 @@ def _call_llm_endpoint(
                     is_credit_error,
                     rate_limit_cooldown,
                 )
-            if not is_last and (is_rate_limited or is_credit_error or is_missing_key):
+            if not is_last and (is_rate_limited or is_credit_error or is_missing_key or is_content_filtered):
                 reason = (
                     "is out of credit/quota" if is_credit_error
                     else "has no key/endpoint configured" if is_missing_key
+                    else "was blocked by the provider's content filter" if is_content_filtered
                     else "was rate limited"
                 )
                 log_message(
