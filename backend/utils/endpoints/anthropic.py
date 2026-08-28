@@ -105,12 +105,26 @@ def call_anthropic_endpoint(
 
     payload = {
         "model": model_name,
-        "system": system_prompt,
         "messages": messages,
         "temperature": clamped_temp,
         "top_k": generation_config.get("top_k"),
         "max_tokens": generation_config.get("max_tokens", 4096),
     }
+    if system_prompt:
+        # Marked as a cache breakpoint: the translation system prompt is
+        # rebuilt identically for every page in a batch/auto-translate run
+        # (it only depends on config, never per-page content), so caching it
+        # turns every page after the first into a ~90%-cheaper cache read
+        # instead of a full-price prompt each time. Anthropic silently
+        # skips caching (no error) if the block is under the minimum
+        # cacheable length, so this is safe to set unconditionally.
+        payload["system"] = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
 
     # Opus 4.7: sampling parameters removed (temperature, top_k return 400)
     is_47 = generation_config.get("is_47_model", False)
@@ -183,6 +197,16 @@ def call_anthropic_endpoint(
                     )
                     raise TranslationError(
                         f"Anthropic API returned error: {error_type} - {error_message}"
+                    )
+
+                usage = result.get("usage") or {}
+                cache_read = usage.get("cache_read_input_tokens")
+                cache_write = usage.get("cache_creation_input_tokens")
+                if cache_read or cache_write:
+                    log_message(
+                        f"Anthropic prompt cache: {cache_read or 0} tokens read from cache, "
+                        f"{cache_write or 0} tokens written to cache",
+                        verbose=debug,
                     )
 
                 if (
