@@ -289,7 +289,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   extensionEnabled: true,
   uiLanguage: 'en',
   config: {
-    inputLanguage: 'Japanese',
+    inputLanguage: 'Auto',
     outputLanguage: 'English',
     providerGroups: [{ provider: 'Google', apiKeys: [], enabled: true }],
     temperature: 0.1,

@@ -79,4 +79,47 @@ test.describe('popup — Translate tab language pickers', () => {
     await reloaded.goto(`chrome-extension://${extensionId}/popup/index.html`);
     await expect(reloaded.locator('#f-target')).toHaveValue('English');
   });
+
+  test('a fresh profile with no saved source language defaults to Auto', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    // Seed a config that has real provider data (so it's distinguishable
+    // from the onInstalled race per seedSettings' own contract) but
+    // deliberately omits inputLanguage, so the popup's own
+    // DEFAULT_SETTINGS.config.inputLanguage fallback is what fills it in.
+    await seedSettings(
+      worker,
+      {
+        backendUrl: 'http://localhost:7677', extensionEnabled: true, uiLanguage: 'en',
+        config: { providerGroups: [{ provider: 'Google', apiKeys: [{ key: 'no-lang-seeded' }], enabled: true }] },
+      },
+      firstKeyMatches('no-lang-seeded'),
+    );
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await expect(popup.locator('#f-source')).toHaveValue('Auto');
+  });
+
+  test('the source field is visually emphasized while set to Auto, and un-emphasized otherwise', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ config: { inputLanguage: 'Auto' } }),
+      firstKeyMatches('seed-key'),
+    );
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    const sourceInput = popup.locator('#f-source');
+    await expect(sourceInput).toHaveClass(/lang-auto/);
+
+    await sourceInput.fill('Japanese');
+    await expect(sourceInput).not.toHaveClass(/lang-auto/);
+
+    await sourceInput.fill('Auto');
+    await expect(sourceInput).toHaveClass(/lang-auto/);
+  });
 });

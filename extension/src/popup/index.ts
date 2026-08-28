@@ -107,11 +107,20 @@ function populateUiLanguageSelect(selected: UiLanguage): void {
   }
 }
 
+// "Auto" (source-only, auto-detect) is visually called out with a distinct
+// accent color so it reads as a deliberate mode, not just another
+// language, since it behaves differently (the model infers the source
+// language per-page instead of being told).
+function updateSourceAutoStyle(): void {
+  sourceInput.classList.toggle('lang-auto', sourceInput.value.trim().toLowerCase() === 'auto');
+}
+
 function renderLanguageSelects(): void {
   populateLanguageDatalist(sourceLanguageList, SOURCE_LANGUAGES);
   populateLanguageDatalist(targetLanguageList, TARGET_LANGUAGES);
   sourceInput.value = settings.config.inputLanguage;
   targetInput.value = settings.config.outputLanguage;
+  updateSourceAutoStyle();
 }
 
 function applyI18n(): void {
@@ -248,6 +257,7 @@ function bind(): void {
   for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
+  sourceInput.addEventListener('input', updateSourceAutoStyle);
 
   uiLanguageSelect.addEventListener('change', () => {
     uiLanguage = normalizeUiLanguage(uiLanguageSelect.value);
