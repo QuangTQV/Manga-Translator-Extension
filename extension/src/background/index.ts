@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, normalizeBackupApiKeys, normalizeFallbackProviders, type AppSettings } from '../shared/types.js';
+import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
 import type { TranslateRequest, TranslateResponse } from '../shared/types.js';
 import { normalizeUiLanguage } from '../shared/i18n.js';
 
@@ -294,6 +294,8 @@ interface SuggestInstructionsBody {
   reasoning_effort?: string;
   backup_api_keys?: string[];
   fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
+  rotation_strategy?: string;
+  cooldown_seconds?: number;
 }
 
 async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<{ suggestion?: string; error?: string }> {
@@ -378,10 +380,10 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
     image: base64,
     input_language: settings.config.inputLanguage,
     output_language: settings.config.outputLanguage,
-    provider: settings.config.provider,
-    base_url: settings.config.baseUrl,
-    model_name: settings.config.modelName,
-    api_key: settings.config.apiKey,
+    provider: settings.config.providerGroups[0]?.provider ?? 'Google',
+    base_url: settings.config.providerGroups[0]?.baseUrl,
+    model_name: settings.config.providerGroups[0]?.modelName,
+    api_key: settings.config.providerGroups[0]?.apiKeys.find((k) => k.enabled)?.key,
     temperature: settings.config.temperature,
     top_p: settings.config.topP,
     top_k: settings.config.topK,
@@ -578,9 +580,8 @@ function normalizeSettings(raw?: Partial<AppSettings>): AppSettings {
     uiLanguage: normalizeUiLanguage(raw?.uiLanguage),
     config: {
       ...DEFAULT_SETTINGS.config,
-      ...(raw?.config ?? {}),
-      backupApiKeys: normalizeBackupApiKeys(raw?.config?.backupApiKeys),
-      fallbackProviders: normalizeFallbackProviders(raw?.config?.fallbackProviders),
+      ...stripLegacyProviderFields(raw?.config),
+      providerGroups: normalizeProviderGroups(raw?.config),
     },
   };
 }

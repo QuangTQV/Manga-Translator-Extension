@@ -126,6 +126,8 @@ class TranslationConfig:
     fallback_providers: List[FallbackProviderConfig] = field(
         default_factory=list
     )  # tried in order after the primary provider and its backup keys are all rate-limited
+    rotation_strategy: str = "round_robin"  # "round_robin" (default), "random", or "sequential" — which candidate a request tries first
+    cooldown_seconds: float = 15.0  # how long a rate-limited key/provider is skipped before being retried
 
 
 @dataclass

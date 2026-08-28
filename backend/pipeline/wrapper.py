@@ -275,6 +275,8 @@ def _build_config(
     fix_hint_bubble_index: int | None = None,
     fix_hint_original_text: str | None = None,
     fix_hint_instruction: str | None = None,
+    rotation_strategy: str | None = None,
+    cooldown_seconds: float | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -303,6 +305,16 @@ def _build_config(
     all_keys = {}
     if api_key:
         all_keys[provider] = api_key
+
+    valid_rotation_strategies = {"round_robin", "random", "sequential"}
+    resolved_rotation_strategy = (
+        rotation_strategy
+        if rotation_strategy in valid_rotation_strategies
+        else "round_robin"
+    )
+    resolved_cooldown_seconds = (
+        max(0.0, cooldown_seconds) if cooldown_seconds is not None else 15.0
+    )
 
     detection = DetectionConfig(
         confidence=0.35,
@@ -346,6 +358,8 @@ def _build_config(
         fix_hint_bubble_index=fix_hint_bubble_index,
         fix_hint_original_text=fix_hint_original_text,
         fix_hint_instruction=fix_hint_instruction,
+        rotation_strategy=resolved_rotation_strategy,
+        cooldown_seconds=resolved_cooldown_seconds,
         ocr_method=ocr_method,
         send_full_page_context=send_full_page_context,
         whiteout_conjoined_bubbles=True,

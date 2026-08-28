@@ -66,6 +66,8 @@ class TranslateOptions(BaseModel):
     backup_api_keys: Optional[List[str]] = None  # extra keys for the same provider/model, tried on rate limit
     fallback_providers: Optional[List[FallbackProviderConfig]] = None  # tried after primary + backup keys are rate-limited
     fix_hint: Optional[FixHintConfig] = None  # re-translate this page with a targeted correction for one bubble
+    rotation_strategy: Optional[str] = None  # "round_robin" (default), "random", or "sequential" — which candidate to try first
+    cooldown_seconds: Optional[float] = None  # how long a rate-limited key/provider is skipped before being retried (default 15s)
 
 
 class TranslateRequest(TranslateOptions):
@@ -126,6 +128,8 @@ class SuggestInstructionsRequest(BaseModel):
     reasoning_effort: Optional[str] = None
     backup_api_keys: Optional[List[str]] = None
     fallback_providers: Optional[List[FallbackProviderConfig]] = None
+    rotation_strategy: Optional[str] = None
+    cooldown_seconds: Optional[float] = None
 
 
 class SuggestInstructionsResponse(BaseModel):

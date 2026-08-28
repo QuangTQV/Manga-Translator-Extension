@@ -66,9 +66,7 @@
     .input:focus, .select:focus, .textarea:focus { border-color: rgba(59,130,246,0.5); }
     .select { cursor: pointer; }
     .textarea { resize: none; min-height: 54px; font-family: inherit; line-height: 1.4; }
-    .llm-fields { display: flex; flex-direction: column; gap: 10px; }
     .llm-fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .model-picker { display: flex; flex-direction: column; gap: 5px; }
     .model-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .btn-fetch-models {
       font-size: 10px; font-weight: 700; padding: 4px 10px;
@@ -79,30 +77,7 @@
     }
     .btn-fetch-models:hover { background: rgba(59,130,246,0.25); }
     .btn-fetch-models:disabled { opacity: 0.4; cursor: not-allowed; }
-    .model-select-wrap { position: relative; }
-    .model-select {
-      width: 100%; border: 1px solid rgba(59,130,246,0.15);
-      background: rgba(8,14,28,0.9); color: #dde6f5;
-      border-radius: 8px; padding: 8px 10px;
-      font-size: 12px; outline: none; cursor: pointer;
-      appearance: none; -webkit-appearance: none;
-      transition: border-color 0.15s;
-    }
-    .model-select:focus { border-color: rgba(59,130,246,0.5); }
-    .model-select:disabled { opacity: 0.5; cursor: not-allowed; }
-    .model-select-wrap::after {
-      content: 'v'; position: absolute; right: 10px; top: 50%;
-      transform: translateY(-50%); font-size: 8px; color: #4a5e80;
-      pointer-events: none;
-    }
-    .model-hint, .toggle-hint { font-size: 10px; color: #4a5e80; line-height: 1.35; }
-    .model-loading { font-size: 11px; color: #60a5fa; display: flex; align-items: center; gap: 6px; }
-    .spinner {
-      width: 12px; height: 12px; border: 2px solid rgba(59,130,246,0.2);
-      border-top-color: #60a5fa; border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .toggle-hint { font-size: 10px; color: #4a5e80; line-height: 1.35; }
     .model-error { font-size: 10px; color: #f87171; }
     .fallback-provider-row {
       display: flex; flex-direction: column; gap: 8px;
@@ -117,6 +92,13 @@
       font-size: 11px; padding: 2px 8px; cursor: pointer;
     }
     .btn-remove-fallback:hover { background: rgba(248,113,113,0.22); }
+    .btn-move {
+      background: rgba(96,165,250,0.12); color: #93c5fd;
+      border: 1px solid rgba(96,165,250,0.25); border-radius: 6px;
+      font-size: 10px; padding: 2px 6px; cursor: pointer; line-height: 1.4;
+    }
+    .btn-move:hover:not(:disabled) { background: rgba(96,165,250,0.22); }
+    .btn-move:disabled { opacity: 0.25; cursor: not-allowed; }
     .btn-add-fallback {
       background: rgba(59,130,246,0.15); color: #60a5fa;
       border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
@@ -301,67 +283,28 @@
     <div id="tab-llm" class="tab-pane">
       <div class="config-section">
         <div class="field">
-          <label class="label" data-i18n="labelProvider">Provider</label>
-          <select id="f-llm-provider" class="select">
-            <option value="Google">Google</option>
-            <option value="OpenAI">OpenAI</option>
-            <option value="Azure OpenAI">Azure OpenAI</option>
-            <option value="Anthropic">Anthropic</option>
-            <option value="xAI">xAI</option>
-            <option value="DeepSeek">DeepSeek</option>
-            <option value="Z.ai">Z.ai</option>
-            <option value="Moonshot AI">Moonshot AI</option>
-            <option value="OpenRouter">OpenRouter</option>
-            <option value="OpenAI-Compatible">OpenAI-Compatible</option>
-          </select>
-        </div>
-
-        <div class="llm-fields">
-          <div class="field">
-            <label class="label" data-i18n="labelBaseUrl">Base URL</label>
-            <input id="f-base-url" class="input" type="url" placeholder="https://api.openai.com/v1" />
-          </div>
-
-          <div class="model-picker">
-            <div class="model-picker-header">
-              <label class="label" data-i18n="labelModel">Model</label>
-              <button id="btn-fetch-models" class="btn-fetch-models" data-i18n="btnFetchModels">Fetch Models</button>
-            </div>
-            <div id="model-picker-wrap">
-              <input id="f-model" class="input" type="text" placeholder="model id, e.g. gpt-4o-mini" data-i18n-placeholder="placeholderModel" />
-            </div>
-            <div id="model-loading" class="model-loading" style="display:none">
-              <div class="spinner"></div><span data-i18n="modelLoading">Fetching models...</span>
-            </div>
-            <div id="model-error" class="model-error" style="display:none"></div>
-            <div class="model-hint" id="model-hint" data-i18n="modelHint">Enter Base URL then click "Fetch Models" to list available models.</div>
-          </div>
-
-          <div class="field">
-            <label class="label" data-i18n="labelApiKey">API Key</label>
-            <div class="backup-key-row" id="f-llm-apikey-row">
-              <input type="checkbox" id="f-llm-apikey-enabled" checked />
-              <input id="f-llm-apikey" class="input" type="password" placeholder="sk-..." data-i18n-placeholder="placeholderApiKey" />
-            </div>
-          </div>
-
-          <div class="field">
-            <label class="label"><span data-i18n="labelBackupApiKeys">Backup API Keys</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
-            <div class="toggle-hint" data-i18n="hintBackupApiKeys">Same provider/model as above, tried in order if the primary key gets rate-limited. Uncheck a key to skip it temporarily without losing it.</div>
-            <div id="backup-api-keys-list"></div>
-            <button id="btn-add-backup-key" class="btn-add-fallback" type="button" data-i18n="btnAddBackupKey">+ Add key</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="model-picker-header">
-            <label class="label"><span data-i18n="labelFallbackProviders">Fallback Providers</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
-          </div>
-          <div class="toggle-hint" data-i18n="hintFallbackProviders">Tried in order, only after the primary provider and all its backup keys above are rate-limited. Uncheck a provider to skip it temporarily without losing it.</div>
-          <div id="fallback-providers-list"></div>
-          <button id="btn-add-fallback-provider" class="btn-add-fallback" type="button" data-i18n="btnAddFallbackProvider">+ Add fallback provider</button>
+          <label class="label" data-i18n="labelProviders">Providers</label>
+          <div class="toggle-hint" data-i18n="hintProviders">Tried in order — use the arrows to control which runs first. Uncheck a provider, or a key within it, to skip it temporarily without losing it.</div>
+          <div id="provider-groups-list"></div>
+          <button id="btn-add-provider-group" class="btn-add-fallback" type="button" data-i18n="btnAddProviderGroup">+ Add provider</button>
           <div id="duplicate-key-warning" class="model-error" style="display:none"></div>
         </div>
+
+        <div class="llm-fields-row">
+          <div class="field">
+            <label class="label" data-i18n="labelRotationStrategy">Rotation Order</label>
+            <select id="f-rotation-strategy" class="select">
+              <option value="round_robin" data-i18n="rotationRoundRobin">Round-robin</option>
+              <option value="random" data-i18n="rotationRandom">Random</option>
+              <option value="sequential" data-i18n="rotationSequential">Sequential</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" data-i18n="labelCooldownSeconds">Cooldown (seconds)</label>
+            <input id="f-cooldown-seconds" class="input" type="number" min="0" step="1" value="15" />
+          </div>
+        </div>
+        <div class="toggle-hint" data-i18n="hintRotationStrategy">Which key/provider a request tries first: Round-robin spreads load evenly across all of them (default), Random picks any ready one, Sequential always starts at the first key in your list. Cooldown is how long a rate-limited key/provider is skipped before being retried.</div>
 
         <div class="llm-fields-row">
           <div class="field slider-row">

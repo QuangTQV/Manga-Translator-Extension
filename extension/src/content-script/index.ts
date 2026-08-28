@@ -1,5 +1,5 @@
 import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
-import { normalizeBackupApiKeys, normalizeFallbackProviders } from '../shared/types.js';
+import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -50,6 +50,7 @@ const EN_MESSAGES = {
   suggestNoImagesReady: 'Selected pages are still loading, wait a moment and try again',
   retryBadgeTitle: 'Translation failed after several retries — click to try again',
   fixHintTooltip: "Click to fix this bubble's translation",
+  zoomTooltip: 'Click to view full size',
   fixHintCurrentLabel: 'Current:',
   fixHintPlaceholder: 'Describe the correction, e.g. "wrong pronoun, should be anh/em" or "should be formal tone"',
   fixHintApply: 'Apply',
@@ -113,6 +114,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: 'Trang da chon van dang tai, doi chut roi thu lai',
     retryBadgeTitle: 'Dich that bai sau nhieu lan thu - bam de thu lai',
     fixHintTooltip: 'Bam de sua ban dich o bubble nay',
+    zoomTooltip: 'Bam de xem anh phong to',
     fixHintCurrentLabel: 'Hien tai:',
     fixHintPlaceholder: 'Mo ta cach sua, vd "phai dung xung anh/em" hoac "giong dieu trang trong hon"',
     fixHintApply: 'Ap dung',
@@ -171,6 +173,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: '所选页面仍在加载，请稍后重试',
     retryBadgeTitle: '多次重试后翻译失败——点击重试',
     fixHintTooltip: '点击修正这个气泡的翻译',
+    zoomTooltip: '点击查看大图',
     fixHintCurrentLabel: '当前:',
     fixHintPlaceholder: '描述修正内容，例如"应该用敬语"或"人称代词错了"',
     fixHintApply: '应用',
@@ -229,6 +232,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: '選択したページがまだ読み込み中です。しばらくしてから再試行してください',
     retryBadgeTitle: '数回再試行しましたが翻訳に失敗しました。クリックして再試行',
     fixHintTooltip: 'クリックしてこの吹き出しの翻訳を修正',
+    zoomTooltip: 'クリックして拡大表示',
     fixHintCurrentLabel: '現在の訳:',
     fixHintPlaceholder: '修正内容を入力（例:「敬語にして」「代名詞が違う」など）',
     fixHintApply: '適用',
@@ -287,6 +291,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: '선택한 페이지를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요',
     retryBadgeTitle: '여러 번 재시도했지만 번역에 실패했습니다 - 클릭하여 다시 시도',
     fixHintTooltip: '클릭하여 이 말풍선의 번역 수정',
+    zoomTooltip: '클릭하여 크게 보기',
     fixHintCurrentLabel: '현재:',
     fixHintPlaceholder: '수정 내용을 입력하세요 (예: "존댓말로", "대명사가 틀림")',
     fixHintApply: '적용',
@@ -2305,23 +2310,25 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
 function bgSuggestInstructions(images: string[], outputLanguage: string, settings: AppSettings): Promise<{ suggestion?: string; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 2 minutes' }), 120_000);
-    const { apiKey, backupKeys } = effectiveApiKeys(settings);
+    const rotation = buildProviderRotation(settings);
     chrome.runtime.sendMessage(
       {
         type: 'SUGGEST_INSTRUCTIONS',
         body: {
           images,
           output_language: outputLanguage,
-          provider: settings.config.provider,
-          base_url: settings.config.baseUrl,
-          model_name: settings.config.modelName,
-          api_key: apiKey,
+          provider: rotation.provider,
+          base_url: rotation.base_url,
+          model_name: rotation.model_name,
+          api_key: rotation.api_key,
           temperature: settings.config.temperature,
           top_p: settings.config.topP,
           top_k: settings.config.topK,
           reasoning_effort: settings.config.reasoningEffort || undefined,
-          backup_api_keys: backupKeys,
-          fallback_providers: enabledFallbackProviders(settings),
+          backup_api_keys: rotation.backup_api_keys,
+          fallback_providers: rotation.fallback_providers,
+          rotation_strategy: settings.config.rotationStrategy,
+          cooldown_seconds: settings.config.cooldownSeconds,
         },
       },
       (resp: unknown) => {
@@ -2530,20 +2537,23 @@ function collectAllImages(): PageEntry[] {
 // HTML builder
 // ─────────────────────────────────────────────────────────────────────────────
 
+function renderCard(p: PageEntry): string {
+  const src = imageCache.get(p.rawUrl) ?? p.thumb;
+  const wasTranslated = translatedCache.has(p.rawUrl);
+  return `
+    <button class="mts-card${p.fetched ? '' : ' fetched-late'}${wasTranslated ? ' translated-cached' : ''}" data-index="${p.index}" type="button">
+      <img class="mts-thumb" src="${src}" alt="${tr('pageAlt', { page: p.index + 1 })}" loading="lazy" />
+      <div class="mts-card-num">${p.index + 1}</div>
+      <div class="mts-check">&#x2713;</div>
+      <div class="mts-card-status"></div>
+      <div class="mts-zoom-btn" data-zoom-index="${p.index}" title="${tr('zoomTooltip')}">&#x1F50D;</div>
+      ${wasTranslated ? '<div class="mts-badge">MT</div>' : ''}
+    </button>
+  `;
+}
+
 function buildScannerHTML(): string {
-  const cards = currentPages.map((p) => {
-    const src = imageCache.get(p.rawUrl) ?? p.thumb;
-    const wasTranslated = translatedCache.has(p.rawUrl);
-    return `
-      <button class="mts-card${p.fetched ? '' : ' fetched-late'}${wasTranslated ? ' translated-cached' : ''}" data-index="${p.index}" type="button">
-        <img class="mts-thumb" src="${src}" alt="${tr('pageAlt', { page: p.index + 1 })}" loading="lazy" />
-        <div class="mts-card-num">${p.index + 1}</div>
-        <div class="mts-check">&#x2713;</div>
-        <div class="mts-card-status"></div>
-        ${wasTranslated ? '<div class="mts-badge">MT</div>' : ''}
-      </button>
-    `;
-  }).join('');
+  const cards = currentPages.map(renderCard).join('');
 
   const totalLabel = totalChapterPages > 0 ? ` / ${totalChapterPages}` : '';
 
@@ -2578,6 +2588,13 @@ function buildScannerHTML(): string {
       </div>
       <div class="mts-grid">${cards}</div>
     </div>
+    <div class="mts-lightbox" id="mts-lightbox" style="display:none">
+      <img class="mts-lightbox-img" id="mts-lightbox-img" src="" alt="" />
+      <button class="mts-btn-close mts-lightbox-close" data-action="lightbox-close" type="button" title="${tr('close')}">&#x2715;</button>
+    </div>
+    <div class="mts-hover-preview" id="mts-hover-preview" style="display:none">
+      <img class="mts-hover-preview-img" id="mts-hover-preview-img" src="" alt="" />
+    </div>
   `;
 }
 
@@ -2589,19 +2606,7 @@ function reRenderGrid(): void {
   const totalLabel = totalChapterPages > 0 ? ` / ${totalChapterPages}` : '';
 
   if (grid) {
-    grid.innerHTML = currentPages.map((p) => {
-      const src = imageCache.get(p.rawUrl) ?? p.thumb;
-      const wasTranslated = translatedCache.has(p.rawUrl);
-      return `
-        <button class="mts-card${p.fetched ? '' : ' fetched-late'}${wasTranslated ? ' translated-cached' : ''}" data-index="${p.index}" type="button">
-          <img class="mts-thumb" src="${src}" alt="${tr('pageAlt', { page: p.index + 1 })}" loading="lazy" />
-          <div class="mts-card-num">${p.index + 1}</div>
-          <div class="mts-check">&#x2713;</div>
-          <div class="mts-card-status"></div>
-          ${wasTranslated ? '<div class="mts-badge">MT</div>' : ''}
-        </button>
-      `;
-    }).join('');
+    grid.innerHTML = currentPages.map(renderCard).join('');
   }
 
   if (countEl) {
@@ -2633,6 +2638,75 @@ function bindScanner(shadow: ShadowRoot): void {
   const stopCollectBtn = shadow.querySelector<HTMLButtonElement>('[data-action="stop-collect"]')!;
   const autoInfo = shadow.querySelector<HTMLElement>('#mts-auto-info')!;
   const autoSpinner = shadow.querySelector<HTMLElement>('#mts-auto-spinner')!;
+  const lightbox = shadow.querySelector<HTMLElement>('#mts-lightbox')!;
+  const lightboxImg = shadow.querySelector<HTMLImageElement>('#mts-lightbox-img')!;
+  const lightboxCloseBtn = shadow.querySelector<HTMLButtonElement>('[data-action="lightbox-close"]')!;
+  const hoverPreview = shadow.querySelector<HTMLElement>('#mts-hover-preview')!;
+  const hoverPreviewImg = shadow.querySelector<HTMLImageElement>('#mts-hover-preview-img')!;
+
+  // Prefer the translated version if this page has one — zooming in is
+  // most useful to check the translation actually reads right, not just
+  // to re-see the original.
+  const zoomSrcFor = (index: number): string | null => {
+    const p = currentPages[index];
+    if (!p) return null;
+    const translatedB64 = translatedCache.get(p.rawUrl);
+    return translatedB64
+      ? `data:image/png;base64,${translatedB64}`
+      : (imageCache.get(p.rawUrl) ?? p.thumb);
+  };
+
+  const openLightbox = (index: number) => {
+    const src = zoomSrcFor(index);
+    if (!src) return;
+    hideHoverPreview();
+    lightboxImg.src = src;
+    lightbox.style.display = 'flex';
+  };
+  const closeLightbox = () => {
+    lightbox.style.display = 'none';
+    lightboxImg.src = '';
+  };
+  lightboxCloseBtn.addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
+
+  // Hover the zoom icon to auto-preview without a click; clicking it still
+  // opens the full lightbox for a deliberate, pinned-open look.
+  const showHoverPreview = (index: number, anchor: HTMLElement) => {
+    const src = zoomSrcFor(index);
+    if (!src) return;
+    hoverPreviewImg.src = src;
+    hoverPreview.style.display = 'flex';
+    const rect = anchor.getBoundingClientRect();
+    const maxWidth = 320;
+    const maxHeight = 420;
+    let left = rect.left + rect.width / 2 - maxWidth / 2;
+    let top = rect.top - maxHeight - 12;
+    if (top < 8) top = rect.bottom + 12;
+    left = Math.max(8, Math.min(left, window.innerWidth - maxWidth - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - maxHeight - 8));
+    hoverPreview.style.left = `${left}px`;
+    hoverPreview.style.top = `${top}px`;
+  };
+  const hideHoverPreview = () => {
+    hoverPreview.style.display = 'none';
+    hoverPreviewImg.src = '';
+  };
+  grid.addEventListener('mouseover', (e) => {
+    const zoomBtn = (e.target as HTMLElement).closest<HTMLElement>('.mts-zoom-btn');
+    if (!zoomBtn) return;
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related && zoomBtn.contains(related)) return;
+    const card = zoomBtn.closest<HTMLElement>('.mts-card');
+    if (card) showHoverPreview(Number(zoomBtn.dataset.zoomIndex), card);
+  });
+  grid.addEventListener('mouseout', (e) => {
+    const zoomBtn = (e.target as HTMLElement).closest<HTMLElement>('.mts-zoom-btn');
+    if (!zoomBtn) return;
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related && zoomBtn.contains(related)) return;
+    hideHoverPreview();
+  });
 
   const refresh = () => {
     countEl.textContent = `${selected.size} / ${currentPages.length}`;
@@ -2646,6 +2720,11 @@ function bindScanner(shadow: ShadowRoot): void {
   };
 
   grid.addEventListener('click', (e) => {
+    const zoomBtn = (e.target as HTMLElement).closest<HTMLElement>('.mts-zoom-btn');
+    if (zoomBtn) {
+      openLightbox(Number(zoomBtn.dataset.zoomIndex));
+      return;
+    }
     const card = (e.target as HTMLElement).closest<HTMLElement>('.mts-card');
     if (!card) return;
     const idx = Number(card.dataset.index);
@@ -2840,7 +2919,11 @@ function bindScanner(shadow: ShadowRoot): void {
   cancelBtn.addEventListener('click', () => { abortTranslate = true; });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeScanner();
+    if (e.key === 'Escape') {
+      if (lightbox.style.display !== 'none') { closeLightbox(); return; }
+      closeScanner();
+      return;
+    }
     if (e.key === 'Enter' && !translateBtn.disabled) translateBtn.click();
   });
 
@@ -2879,36 +2962,42 @@ async function autoCollect(onProgress: (status: string) => void): Promise<void> 
   reRenderGrid();
 }
 
-// Only keys/providers the user hasn't temporarily disabled are ever sent —
-// a disabled entry stays saved in settings (so it can be re-enabled later)
-// but is excluded from rotation entirely, same as if it weren't configured.
-//
-// The backend has no concept of "disabled" for the primary api_key field —
-// it always tries whatever's sent there first. So when the primary key is
-// disabled, promote the first enabled backup key into that slot and send
-// the rest as backups, leaving the disabled primary out of the request.
-function effectiveApiKeys(settings: AppSettings): { apiKey?: string; backupKeys?: string[] } {
-  const enabledBackups = (settings.config.backupApiKeys ?? []).filter((k) => k.enabled).map((k) => k.key);
-  if (settings.config.apiKeyEnabled === false) {
-    const [promoted, ...rest] = enabledBackups;
-    return { apiKey: promoted, backupKeys: rest.length ? rest : undefined };
-  }
-  return { apiKey: settings.config.apiKey, backupKeys: enabledBackups.length ? enabledBackups : undefined };
-}
-
-function enabledFallbackProviders(
-  settings: AppSettings,
-): { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[] | undefined {
-  const providers = (settings.config.fallbackProviders ?? [])
-    .filter((fb) => fb.enabled !== false)
-    .map((fb) => ({
-      provider: fb.provider,
-      model_name: fb.modelName,
-      api_keys: fb.apiKeys.filter((k) => k.enabled).map((k) => k.key),
-      base_url: fb.baseUrl,
-    }))
-    .filter((fb) => fb.api_keys.length > 0);
-  return providers.length ? providers : undefined;
+// Every provider group is equal — no distinguished "primary" — just a flat,
+// user-ordered list where each group's own keys can also be independently
+// enabled/disabled (e.g. one is rate-limited right now). The backend's wire
+// format still wants one (provider, key) pair in the primary slot plus the
+// rest as backup_api_keys/fallback_providers, so the first enabled group
+// fills that slot and the rest become fallback_providers, in list order.
+// A group with zero enabled keys still occupies its position with an empty
+// api_key — the backend already rotates past a candidate with a missing
+// key to the next one, so this correctly falls through to whichever group
+// comes next without any special-casing here.
+function buildProviderRotation(settings: AppSettings): {
+  provider: string;
+  base_url?: string;
+  model_name?: string;
+  api_key?: string;
+  backup_api_keys?: string[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
+} {
+  const groups = (settings.config.providerGroups ?? []).filter((g) => g.enabled !== false);
+  const [first, ...rest] = groups;
+  if (!first) return { provider: 'Google' };
+  const [apiKey, ...backupKeys] = first.apiKeys.filter((k) => k.enabled).map((k) => k.key);
+  const fallbackProviders = rest.map((g) => ({
+    provider: g.provider,
+    model_name: g.modelName,
+    base_url: g.baseUrl,
+    api_keys: g.apiKeys.filter((k) => k.enabled).map((k) => k.key),
+  }));
+  return {
+    provider: first.provider,
+    base_url: first.baseUrl,
+    model_name: first.modelName,
+    api_key: apiKey,
+    backup_api_keys: backupKeys.length ? backupKeys : undefined,
+    fallback_providers: fallbackProviders.length ? fallbackProviders : undefined,
+  };
 }
 
 function buildTranslateRequest(
@@ -2918,15 +3007,15 @@ function buildTranslateRequest(
   contextMemoryText?: string,
 ): TranslateRequest {
   const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
-  const { apiKey, backupKeys } = effectiveApiKeys(settings);
+  const rotation = buildProviderRotation(settings);
   return {
     image,
     input_language: settings.config.inputLanguage,
     output_language: settings.config.outputLanguage,
-    provider: settings.config.provider,
-    base_url: settings.config.baseUrl,
-    model_name: settings.config.modelName,
-    api_key: apiKey,
+    provider: rotation.provider,
+    base_url: rotation.base_url,
+    model_name: rotation.model_name,
+    api_key: rotation.api_key,
     temperature: settings.config.temperature,
     top_p: settings.config.topP,
     top_k: settings.config.topK,
@@ -2946,8 +3035,10 @@ function buildTranslateRequest(
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
     context_memory_enabled: contextMemoryEnabled,
     context_memory: contextMemoryEnabled && contextMemoryText ? contextMemoryText : undefined,
-    backup_api_keys: backupKeys,
-    fallback_providers: enabledFallbackProviders(settings),
+    backup_api_keys: rotation.backup_api_keys,
+    fallback_providers: rotation.fallback_providers,
+    rotation_strategy: settings.config.rotationStrategy,
+    cooldown_seconds: settings.config.cooldownSeconds,
   };
 }
 
@@ -3138,9 +3229,8 @@ function normalizeSettings(raw?: Partial<AppSettings>): AppSettings {
     uiLanguage: normalizeUiLanguage(raw?.uiLanguage),
     config: {
       ...getDefaultSettings().config,
-      ...(raw?.config ?? {}),
-      backupApiKeys: normalizeBackupApiKeys(raw?.config?.backupApiKeys),
-      fallbackProviders: normalizeFallbackProviders(raw?.config?.fallbackProviders),
+      ...stripLegacyProviderFields(raw?.config),
+      providerGroups: normalizeProviderGroups(raw?.config),
     },
   };
 }
@@ -3155,7 +3245,7 @@ function getDefaultSettings(): AppSettings {
     config: {
       inputLanguage: 'Japanese',
       outputLanguage: 'English',
-      provider: 'Google',
+      providerGroups: [{ provider: 'Google', apiKeys: [], enabled: true }],
       temperature: 0.1,
       topP: 0.95,
       topK: 1,
@@ -3295,6 +3385,32 @@ function injectStyles(shadow: ShadowRoot): void {
       background: #080b18; border: 1px solid rgba(80,100,200,0.2);
       border-radius: 20px; overflow: hidden; box-shadow: 0 40px 120px rgba(0,0,0,0.65);
     }
+    .mts-lightbox {
+      position: fixed; inset: 0; z-index: 2;
+      background: rgba(2,4,16,0.9);
+      align-items: center; justify-content: center; padding: 40px;
+      cursor: zoom-out;
+    }
+    .mts-lightbox-img {
+      max-width: 100%; max-height: 100%; object-fit: contain;
+      border-radius: 8px; box-shadow: 0 20px 80px rgba(0,0,0,0.7);
+      cursor: default;
+    }
+    .mts-lightbox-close {
+      position: absolute; top: 20px; right: 20px;
+    }
+    .mts-hover-preview {
+      position: fixed; z-index: 3; pointer-events: none;
+      width: 320px; height: 420px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px; overflow: hidden;
+      border: 1px solid rgba(80,100,200,0.3); box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      background: #0d1428;
+    }
+    .mts-hover-preview-img {
+      display: block; max-width: 100%; max-height: 100%;
+      width: auto; height: auto; object-fit: contain;
+    }
     .mts-box-header {
       padding: 16px 18px 12px; background: rgba(10,15,38,0.98);
       border-bottom: 1px solid rgba(80,100,200,0.1); flex-shrink: 0;
@@ -3372,6 +3488,14 @@ function injectStyles(shadow: ShadowRoot): void {
       background: rgba(34,197,94,0.85); color: white;
       font-size: 9px; font-weight: 900; padding: 1px 5px; border-radius: 4px;
     }
+    .mts-zoom-btn {
+      position: absolute; bottom: 6px; left: 6px;
+      width: 24px; height: 24px; border-radius: 999px;
+      background: rgba(0,0,0,0.65); color: white; font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0.75; transition: opacity 0.15s, background 0.15s;
+    }
+    .mts-zoom-btn:hover { opacity: 1; background: rgba(37,99,235,0.9); }
     .mts-btn-toolbar, .mts-btn-primary, .mts-btn-close {
       display: inline-flex; align-items: center; justify-content: center;
       border: none; border-radius: 9px; cursor: pointer; font-weight: 700;

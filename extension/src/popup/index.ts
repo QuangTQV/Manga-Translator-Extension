@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeBackupApiKeys, normalizeFallbackProviders, type AppSettings, type BackupApiKeyEntry, type FallbackProviderConfig } from '../shared/types.js';
+import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig } from '../shared/types.js';
 import { UI_LANGUAGES, languageLabel, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -30,22 +30,9 @@ const saveBtn = qs<HTMLButtonElement>('btn-save');
 const saveConfigBtn = qs<HTMLButtonElement>('btn-save-config');
 const clearCacheBtn = qs<HTMLButtonElement>('btn-clear-cache');
 
-const llmProviderSelect = qs<HTMLSelectElement>('f-llm-provider');
-const baseUrlInput = qs<HTMLInputElement>('f-base-url');
-const llmApiKeyInput = qs<HTMLInputElement>('f-llm-apikey');
-const llmApiKeyEnabledInput = qs<HTMLInputElement>('f-llm-apikey-enabled');
-const llmApiKeyRow = qs<HTMLDivElement>('f-llm-apikey-row');
-const backupApiKeysList = qs<HTMLDivElement>('backup-api-keys-list');
-const addBackupKeyBtn = qs<HTMLButtonElement>('btn-add-backup-key');
-const fallbackProvidersList = qs<HTMLDivElement>('fallback-providers-list');
-const addFallbackProviderBtn = qs<HTMLButtonElement>('btn-add-fallback-provider');
+const providerGroupsList = qs<HTMLDivElement>('provider-groups-list');
+const addProviderGroupBtn = qs<HTMLButtonElement>('btn-add-provider-group');
 const duplicateKeyWarning = qs<HTMLDivElement>('duplicate-key-warning');
-const fetchModelsBtn = qs<HTMLButtonElement>('btn-fetch-models');
-const modelPickerWrap = qs<HTMLDivElement>('model-picker-wrap');
-const modelInput = qs<HTMLInputElement>('f-model');
-const modelLoading = qs<HTMLDivElement>('model-loading');
-const modelError = qs<HTMLDivElement>('model-error');
-const modelHint = qs<HTMLDivElement>('model-hint');
 const tempSlider = qs<HTMLInputElement>('f-temp');
 const topPSlider = qs<HTMLInputElement>('f-topp');
 const topKSlider = qs<HTMLInputElement>('f-topk');
@@ -54,6 +41,8 @@ const topPVal = qs<HTMLSpanElement>('val-topp');
 const topKVal = qs<HTMLSpanElement>('val-topk');
 const reasoningEffortSelect = qs<HTMLSelectElement>('f-reasoning-effort');
 const imageDetailSelect = qs<HTMLSelectElement>('f-image-detail');
+const rotationStrategySelect = qs<HTMLSelectElement>('f-rotation-strategy');
+const cooldownSecondsInput = qs<HTMLInputElement>('f-cooldown-seconds');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
 const suggestInstructionsBtn = qs<HTMLButtonElement>('btn-suggest-instructions');
@@ -83,9 +72,8 @@ function normalizeSettings(raw?: StoredSettings): AppSettings {
     uiLanguage: normalizeUiLanguage(raw?.uiLanguage),
     config: {
       ...DEFAULT_SETTINGS.config,
-      ...(raw?.config ?? {}),
-      backupApiKeys: normalizeBackupApiKeys(raw?.config?.backupApiKeys),
-      fallbackProviders: normalizeFallbackProviders(raw?.config?.fallbackProviders),
+      ...stripLegacyProviderFields(raw?.config),
+      providerGroups: normalizeProviderGroups(raw?.config),
     },
   };
 }
@@ -198,22 +186,15 @@ async function loadAndBind(): Promise<void> {
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
 
-  llmProviderSelect.value = settings.config.provider;
-  baseUrlInput.value = settings.config.baseUrl ?? '';
-  llmApiKeyInput.value = settings.config.apiKey ?? '';
-  llmApiKeyEnabledInput.checked = settings.config.apiKeyEnabled !== false;
-  llmApiKeyEnabledInput.title = t(uiLanguage, 'hintBackupKeyEnabled');
-  llmApiKeyRow.classList.toggle('disabled', !llmApiKeyEnabledInput.checked);
-  renderBackupApiKeys(settings.config.backupApiKeys ?? []);
-  renderFallbackProviders(settings.config.fallbackProviders ?? []);
+  renderProviderGroups(settings.config.providerGroups ?? []);
   updateDuplicateKeyWarning();
-  modelInput.value = settings.config.modelName ?? '';
-  updateProviderFieldHints();
   tempSlider.value = String(settings.config.temperature);
   topPSlider.value = String(settings.config.topP);
   topKSlider.value = String(settings.config.topK);
   reasoningEffortSelect.value = settings.config.reasoningEffort ?? '';
   imageDetailSelect.value = settings.config.imageDetail || 'auto';
+  rotationStrategySelect.value = settings.config.rotationStrategy || 'round_robin';
+  cooldownSecondsInput.value = String(settings.config.cooldownSeconds ?? 15);
   tempVal.textContent = Number(settings.config.temperature).toFixed(2);
   topPVal.textContent = Number(settings.config.topP).toFixed(2);
   topKVal.textContent = String(settings.config.topK);
@@ -256,43 +237,22 @@ function bind(): void {
     settings = collectAllSettings();
     applyI18n();
     renderLanguageSelects();
-    updateProviderFieldHints();
     void autoSave();
   });
 
-  fetchModelsBtn.addEventListener('click', async () => {
-    const baseUrl = baseUrlInput.value.trim();
-    if (!baseUrl) {
-      showModelError(t(uiLanguage, 'errorEnterBaseUrl'));
-      return;
-    }
-    await fetchAndShowModels(baseUrl, llmApiKeyInput.value.trim(), llmProviderSelect.value);
-  });
-
-  llmProviderSelect.addEventListener('change', () => {
-    updateProviderFieldHints();
-    updateDuplicateKeyWarning();
-    void autoSave();
-  });
-  for (const el of [baseUrlInput, modelInput, llmApiKeyInput, instructionsInput, llmInstructionsInput]) {
+  for (const el of [instructionsInput, llmInstructionsInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
-  llmApiKeyInput.addEventListener('input', () => updateDuplicateKeyWarning());
-  llmApiKeyEnabledInput.addEventListener('change', () => {
-    llmApiKeyRow.classList.toggle('disabled', !llmApiKeyEnabledInput.checked);
-    void autoSave();
-  });
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
   imageDetailSelect.addEventListener('change', () => { void autoSave(); });
+  rotationStrategySelect.addEventListener('change', () => { void autoSave(); });
+  cooldownSecondsInput.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
-  addBackupKeyBtn.addEventListener('click', () => {
-    backupApiKeysList.appendChild(createBackupKeyRow());
-    updateDuplicateKeyWarning();
-  });
-  addFallbackProviderBtn.addEventListener('click', () => {
-    fallbackProvidersList.appendChild(createFallbackProviderRow());
+  addProviderGroupBtn.addEventListener('click', () => {
+    providerGroupsList.appendChild(createProviderGroupRow());
+    syncMoveButtons(providerGroupsList, 'fallback-provider-row');
     updateDuplicateKeyWarning();
   });
 
@@ -412,137 +372,95 @@ async function refreshAutoTranslateStatus(): Promise<void> {
   }
 }
 
-function updateProviderFieldHints(): void {
-  const isAzure = llmProviderSelect.value === 'Azure OpenAI';
-  baseUrlInput.placeholder = isAzure
-    ? 'https://your-resource.openai.azure.com (or full deployment/Foundry v1 URL)'
-    : 'https://api.openai.com/v1';
-  modelInput.placeholder = isAzure ? 'deployment name' : t(uiLanguage, 'placeholderModel');
-}
-
-async function fetchAndShowModels(baseUrl: string, apiKey: string, provider: string): Promise<void> {
-  hideModelFeedback();
-  modelLoading.style.display = 'flex';
-  fetchModelsBtn.disabled = true;
-
-  try {
-    const models = await listModels(baseUrl, apiKey, provider);
-    if (!models || models.length === 0) {
-      showModelHint(t(uiLanguage, 'modelNoModels'));
-      return;
-    }
-    switchToModelSelect(models);
-  } catch (err) {
-    showModelError(err instanceof Error ? err.message : String(err));
-  } finally {
-    modelLoading.style.display = 'none';
-    fetchModelsBtn.disabled = false;
-  }
-}
-
-function switchToModelSelect(models: string[]): void {
-  const currentModel = modelInput.value.trim();
-  const select = document.createElement('select');
-  select.id = 'f-model-select';
-  select.className = 'model-select';
-  select.replaceChildren();
-  for (const model of models) {
-    const option = document.createElement('option');
-    option.value = model;
-    option.textContent = model;
-    select.appendChild(option);
-  }
-  if (currentModel && models.includes(currentModel)) {
-    select.value = currentModel;
-  } else if (models.length > 0) {
-    select.value = models[0] ?? '';
-  }
-
-  modelPickerWrap.querySelector('#f-model-select')?.remove();
-  modelPickerWrap.appendChild(select);
-
-  select.addEventListener('change', () => {
-    modelInput.value = select.value;
-    void autoSave();
-  });
-
-  if (!currentModel) {
-    modelInput.value = select.value;
-    void autoSave();
-  }
-  hideModelFeedback();
-  showModelHint(t(uiLanguage, 'modelFound', { count: models.length }));
-}
-
-function showModelError(msg: string): void {
-  modelError.textContent = msg;
-  modelError.style.display = 'block';
-  modelHint.style.display = 'none';
-}
-
-function showModelHint(msg: string): void {
-  modelHint.textContent = msg;
-  modelHint.style.display = 'block';
-  modelError.style.display = 'none';
-}
-
-function hideModelFeedback(): void {
-  modelError.style.display = 'none';
-  modelHint.style.display = 'none';
-}
-
-async function listModels(baseUrl: string, apiKey: string, provider: string): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const tid = setTimeout(() => reject(new Error(t(uiLanguage, 'listModelsTimeout'))), 30000);
-    chrome.runtime.sendMessage(
-      { type: 'LIST_MODELS', baseUrl, apiKey, provider },
-      (resp: unknown) => {
-        clearTimeout(tid);
-        const lastError = chrome.runtime.lastError;
-        if (lastError) {
-          reject(new Error(`extension: ${lastError.message}`));
-          return;
-        }
-        const r = resp as { models?: string[]; error?: string };
-        if (r.error) reject(new Error(r.error));
-        else resolve(r.models ?? []);
-      },
-    );
-  });
-}
-
+// Duplicated within the same provider+model is flagged (rotating between
+// two identical accounts wastes a request instead of reaching fresh
+// quota — the backend silently skips the repeat anyway). The same key
+// against a *different* model is NOT flagged: many providers meter rate
+// limits per model, so reusing one account across two models is a
+// legitimate way to get two independent rotation candidates, not a
+// mistake — matches the backend's own (provider, key, model) dedup scope.
 function updateDuplicateKeyWarning(): void {
-  const seenByProvider = new Map<string, Set<string>>();
-  const dupCountByProvider = new Map<string, number>();
+  const seenByBucket = new Map<string, Set<string>>();
+  const dupInfoByBucket = new Map<string, { provider: string; model?: string; count: number }>();
 
-  function check(provider: string, rawKey: string): void {
+  function check(provider: string, model: string | undefined, rawKey: string): void {
     const key = rawKey.trim();
     if (!key) return;
-    let seen = seenByProvider.get(provider);
-    if (!seen) { seen = new Set(); seenByProvider.set(provider, seen); }
+    const bucket = `${provider} ${model ?? ''}`;
+    let seen = seenByBucket.get(bucket);
+    if (!seen) { seen = new Set(); seenByBucket.set(bucket, seen); }
     if (seen.has(key)) {
-      dupCountByProvider.set(provider, (dupCountByProvider.get(provider) ?? 0) + 1);
+      const info = dupInfoByBucket.get(bucket) ?? { provider, model, count: 0 };
+      info.count += 1;
+      dupInfoByBucket.set(bucket, info);
     } else {
       seen.add(key);
     }
   }
 
-  const primaryProvider = llmProviderSelect.value;
-  check(primaryProvider, llmApiKeyInput.value);
-  for (const entry of collectBackupApiKeys()) check(primaryProvider, entry.key);
-  for (const fb of collectFallbackProviders()) {
-    for (const entry of fb.apiKeys) check(fb.provider, entry.key);
+  for (const group of collectProviderGroups()) {
+    for (const entry of group.apiKeys) check(group.provider, group.modelName, entry.key);
   }
 
-  const lines = Array.from(dupCountByProvider.entries())
-    .filter(([, count]) => count > 0)
-    .map(([provider, count]) => t(uiLanguage, 'warningDuplicateKeys', { provider, count }));
+  const lines = Array.from(dupInfoByBucket.values())
+    .map(({ provider, model, count }) => t(uiLanguage, 'warningDuplicateKeys', {
+      provider: model ? `${provider} (${model})` : provider,
+      count,
+    }));
 
   duplicateKeyWarning.style.display = lines.length ? 'block' : 'none';
   duplicateKeyWarning.textContent = lines.join(' ');
 }
 
-function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElement {
+// Order matters for the "sequential" rotation strategy (always starts at
+// the first entry, only advancing on failure) — these let the user drag a
+// key/provider to the front instead of deleting and re-adding everything
+// in the right order. Works for any row type sharing a `rowClass`: the top-
+// level API Keys list, each fallback provider's own nested key list, and
+// the fallback-provider list itself.
+function syncMoveButtons(container: HTMLElement, rowClass: string): void {
+  const rows = Array.from(container.children) as HTMLElement[];
+  rows.forEach((row, i) => {
+    if (!row.classList.contains(rowClass)) return;
+    const up = row.querySelector<HTMLButtonElement>('.btn-move-up');
+    const down = row.querySelector<HTMLButtonElement>('.btn-move-down');
+    if (up) up.disabled = i === 0;
+    if (down) down.disabled = i === rows.length - 1;
+  });
+}
+
+function moveRow(row: HTMLElement, direction: -1 | 1, rowClass: string): void {
+  const parent = row.parentElement;
+  if (!parent) return;
+  if (direction === -1 && row.previousElementSibling) {
+    parent.insertBefore(row, row.previousElementSibling);
+  } else if (direction === 1 && row.nextElementSibling) {
+    parent.insertBefore(row.nextElementSibling, row);
+  }
+  syncMoveButtons(parent, rowClass);
+  updateDuplicateKeyWarning();
+  void autoSave();
+}
+
+function createMoveButtons(row: HTMLElement, rowClass: string): [HTMLButtonElement, HTMLButtonElement] {
+  const upBtn = document.createElement('button');
+  upBtn.type = 'button';
+  upBtn.className = 'btn-move btn-move-up';
+  upBtn.textContent = '▲';
+  upBtn.title = t(uiLanguage, 'hintMoveUp');
+  upBtn.addEventListener('click', () => moveRow(row, -1, rowClass));
+
+  const downBtn = document.createElement('button');
+  downBtn.type = 'button';
+  downBtn.className = 'btn-move btn-move-down';
+  downBtn.textContent = '▼';
+  downBtn.title = t(uiLanguage, 'hintMoveDown');
+  downBtn.addEventListener('click', () => moveRow(row, 1, rowClass));
+
+  return [upBtn, downBtn];
+}
+
+function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'fallback-provider-row';
 
@@ -562,16 +480,24 @@ function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElemen
   enabledCheckbox.style.cursor = 'pointer';
   const indexLabel = document.createElement('span');
   indexLabel.className = 'fallback-provider-index';
-  indexLabel.textContent = t(uiLanguage, 'labelFallbackProvider');
+  indexLabel.textContent = t(uiLanguage, 'labelProviderGroup');
   enabledLabel.append(enabledCheckbox, indexLabel);
   enabledLabel.title = t(uiLanguage, 'hintFallbackEnabled');
+
+  const [fbUpBtn, fbDownBtn] = createMoveButtons(row, 'fallback-provider-row');
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = `× ${t(uiLanguage, 'btnRemoveFallback')}`;
-  removeBtn.addEventListener('click', () => { row.remove(); updateDuplicateKeyWarning(); void autoSave(); });
-  header.append(enabledLabel, removeBtn);
+  removeBtn.addEventListener('click', () => {
+    const parent = row.parentElement;
+    row.remove();
+    if (parent) syncMoveButtons(parent, 'fallback-provider-row');
+    updateDuplicateKeyWarning();
+    void autoSave();
+  });
+  header.append(enabledLabel, fbUpBtn, fbDownBtn, removeBtn);
 
   const providerSelect = document.createElement('select');
   providerSelect.className = 'select fb-provider';
@@ -600,6 +526,7 @@ function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElemen
   for (const entry of data?.apiKeys ?? []) {
     apiKeysList.appendChild(createBackupKeyRow(entry));
   }
+  syncMoveButtons(apiKeysList, 'backup-key-row');
 
   const addKeyBtn = document.createElement('button');
   addKeyBtn.type = 'button';
@@ -607,6 +534,7 @@ function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElemen
   addKeyBtn.textContent = t(uiLanguage, 'btnAddBackupKey');
   addKeyBtn.addEventListener('click', () => {
     apiKeysList.appendChild(createBackupKeyRow());
+    syncMoveButtons(apiKeysList, 'backup-key-row');
     updateDuplicateKeyWarning();
   });
 
@@ -619,16 +547,17 @@ function createFallbackProviderRow(data?: FallbackProviderConfig): HTMLDivElemen
   return row;
 }
 
-function renderFallbackProviders(rows: FallbackProviderConfig[]): void {
-  fallbackProvidersList.innerHTML = '';
+function renderProviderGroups(rows: ProviderGroupConfig[]): void {
+  providerGroupsList.innerHTML = '';
   for (const row of rows) {
-    fallbackProvidersList.appendChild(createFallbackProviderRow(row));
+    providerGroupsList.appendChild(createProviderGroupRow(row));
   }
+  syncMoveButtons(providerGroupsList, 'fallback-provider-row');
 }
 
-function collectFallbackProviders(): FallbackProviderConfig[] {
-  const rows: FallbackProviderConfig[] = [];
-  for (const rowEl of Array.from(fallbackProvidersList.querySelectorAll<HTMLDivElement>('.fallback-provider-row'))) {
+function collectProviderGroups(): ProviderGroupConfig[] {
+  const rows: ProviderGroupConfig[] = [];
+  for (const rowEl of Array.from(providerGroupsList.querySelectorAll<HTMLDivElement>('.fallback-provider-row'))) {
     const provider = rowEl.querySelector<HTMLSelectElement>('.fb-provider')?.value ?? '';
     const modelName = rowEl.querySelector<HTMLInputElement>('.fb-model')?.value.trim() ?? '';
     const baseUrl = rowEl.querySelector<HTMLInputElement>('.fb-base-url')?.value.trim() ?? '';
@@ -662,11 +591,19 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   keyField.placeholder = t(uiLanguage, 'placeholderApiKey');
   keyField.value = data?.key ?? '';
 
+  const [upBtn, downBtn] = createMoveButtons(row, 'backup-key-row');
+
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = '×';
-  removeBtn.addEventListener('click', () => { row.remove(); updateDuplicateKeyWarning(); void autoSave(); });
+  removeBtn.addEventListener('click', () => {
+    const parent = row.parentElement;
+    row.remove();
+    if (parent) syncMoveButtons(parent, 'backup-key-row');
+    updateDuplicateKeyWarning();
+    void autoSave();
+  });
 
   const syncDisabledStyle = () => row.classList.toggle('disabled', !enabledCheckbox.checked);
   syncDisabledStyle();
@@ -676,26 +613,8 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   }
   keyField.addEventListener('input', () => updateDuplicateKeyWarning());
 
-  row.append(enabledCheckbox, keyField, removeBtn);
+  row.append(enabledCheckbox, keyField, upBtn, downBtn, removeBtn);
   return row;
-}
-
-function renderBackupApiKeys(rows: BackupApiKeyEntry[]): void {
-  backupApiKeysList.innerHTML = '';
-  for (const row of rows) {
-    backupApiKeysList.appendChild(createBackupKeyRow(row));
-  }
-}
-
-function collectBackupApiKeys(): BackupApiKeyEntry[] {
-  const rows: BackupApiKeyEntry[] = [];
-  for (const rowEl of Array.from(backupApiKeysList.querySelectorAll<HTMLDivElement>('.backup-key-row'))) {
-    const key = rowEl.querySelector<HTMLInputElement>('.bk-key')?.value.trim() ?? '';
-    const enabled = rowEl.querySelector<HTMLInputElement>('.bk-enabled')?.checked ?? true;
-    if (!key) continue; // skip empty rows
-    rows.push({ key, enabled });
-  }
-  return rows;
 }
 
 async function autoSave(): Promise<boolean> {
@@ -707,7 +626,6 @@ async function autoSave(): Promise<boolean> {
 }
 
 function collectAllSettings(): AppSettings {
-  const model = modelInput.value.trim();
   return {
     ...settings,
     extensionEnabled: extensionEnabledToggle.checked,
@@ -717,16 +635,13 @@ function collectAllSettings(): AppSettings {
       ...settings.config,
       inputLanguage: sourceSelect.value,
       outputLanguage: targetSelect.value,
-      provider: llmProviderSelect.value,
-      baseUrl: baseUrlInput.value.trim() || undefined,
-      modelName: model || undefined,
-      apiKey: llmApiKeyInput.value.trim() || undefined,
-      apiKeyEnabled: llmApiKeyEnabledInput.checked,
       temperature: parseFloat(tempSlider.value),
       topP: parseFloat(topPSlider.value),
       topK: parseInt(topKSlider.value, 10),
       reasoningEffort: reasoningEffortSelect.value || undefined,
       imageDetail: imageDetailSelect.value || 'auto',
+      rotationStrategy: (rotationStrategySelect.value || 'round_robin') as TranslateConfig['rotationStrategy'],
+      cooldownSeconds: Math.max(0, parseFloat(cooldownSecondsInput.value)) || 15,
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,
@@ -734,8 +649,7 @@ function collectAllSettings(): AppSettings {
       contextMemoryEnabled: contextMemoryToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
-      backupApiKeys: collectBackupApiKeys(),
-      fallbackProviders: collectFallbackProviders(),
+      providerGroups: collectProviderGroups(),
     },
   };
 }

@@ -92,6 +92,8 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
         fix_hint_bubble_index=req.fix_hint.bubble_index if req.fix_hint else None,
         fix_hint_original_text=req.fix_hint.original_text if req.fix_hint else None,
         fix_hint_instruction=req.fix_hint.instruction if req.fix_hint else None,
+        rotation_strategy=req.rotation_strategy,
+        cooldown_seconds=req.cooldown_seconds,
         font_dir=req.font_dir,
         max_font_size=req.max_font_size,
         min_font_size=req.min_font_size,
@@ -163,6 +165,8 @@ def _translate_single_item(
             fix_hint_bubble_index=req.fix_hint.bubble_index if req.fix_hint else None,
             fix_hint_original_text=req.fix_hint.original_text if req.fix_hint else None,
             fix_hint_instruction=req.fix_hint.instruction if req.fix_hint else None,
+        rotation_strategy=req.rotation_strategy,
+        cooldown_seconds=req.cooldown_seconds,
             font_dir=req.font_dir,
             max_font_size=req.max_font_size,
             min_font_size=req.min_font_size,
@@ -285,6 +289,8 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
             if req.fallback_providers
             else None
         ),
+        rotation_strategy=req.rotation_strategy,
+        cooldown_seconds=req.cooldown_seconds,
         font_dir=None,
         max_font_size=16,
         min_font_size=8,

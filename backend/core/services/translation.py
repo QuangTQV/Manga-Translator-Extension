@@ -1,5 +1,6 @@
 import base64
 import json
+import random
 import re
 import threading
 import time
@@ -798,13 +799,17 @@ def _candidate_key(candidate: TranslationConfig) -> Optional[str]:
     return getattr(candidate, key_field, None) if key_field else None
 
 
-# In-process cooldown tracker: once a (provider, key) pair gets rate-limited
-# or reports no credit, it's benched for a while instead of being retried on
-# the very next request — hammering an account that's already been told to
-# back off just burns more of its rate-limit window and delays recovery.
-# Process-lifetime only (resets on backend restart); deliberately not
-# persisted, this is an operational throttle, not durable state.
-_cooldowns: Dict[Tuple[str, str], float] = {}  # (provider, key) -> expires_at
+# In-process cooldown tracker: once a (provider, key, model) triple gets
+# rate-limited or reports no credit, it's benched for a while instead of
+# being retried on the very next request — hammering an account that's
+# already been told to back off just burns more of its rate-limit window
+# and delays recovery. Scoped to the model too, not just the account —
+# many providers (Gemini's free tier in particular) meter rate limits per
+# model, so a limit on one model doesn't mean a different model on the
+# same key is also out of quota. Process-lifetime only (resets on backend
+# restart); deliberately not persisted, this is an operational throttle,
+# not durable state.
+_cooldowns: Dict[Tuple[str, str, str], float] = {}  # (provider, key, model) -> expires_at
 _cooldowns_lock = threading.Lock()
 # Backend doesn't parse the provider's actual Retry-After header (not all
 # providers send one, and the ones that do aren't threaded up from
@@ -818,45 +823,67 @@ _RATE_LIMIT_COOLDOWN_SECONDS = 15.0
 _INSUFFICIENT_CREDIT_COOLDOWN_SECONDS = 900.0  # 15 minutes
 
 
-def _mark_cooldown(provider: str, key: Optional[str], is_credit_error: bool) -> None:
+def _mark_cooldown(
+    provider: str,
+    key: Optional[str],
+    model: Optional[str],
+    is_credit_error: bool,
+    rate_limit_cooldown_seconds: float = _RATE_LIMIT_COOLDOWN_SECONDS,
+) -> None:
     if not key:
         return
     duration = (
         _INSUFFICIENT_CREDIT_COOLDOWN_SECONDS
         if is_credit_error
-        else _RATE_LIMIT_COOLDOWN_SECONDS
+        else rate_limit_cooldown_seconds
     )
     with _cooldowns_lock:
-        _cooldowns[(provider, key)] = time.time() + duration
+        _cooldowns[(provider, key, model or "")] = time.time() + duration
 
 
-def _cooldown_remaining(provider: str, key: Optional[str]) -> float:
-    """Seconds until this (provider, key) is usable again — 0 if it's not
-    currently cooling down (including keys never seen before)."""
+def _cooldown_remaining(provider: str, key: Optional[str], model: Optional[str]) -> float:
+    """Seconds until this (provider, key, model) is usable again — 0 if it's
+    not currently cooling down (including combinations never seen before)."""
     if not key:
         return 0.0
     with _cooldowns_lock:
-        expires_at = _cooldowns.get((provider, key))
+        expires_at = _cooldowns.get((provider, key, model or ""))
     if not expires_at:
         return 0.0
     return max(expires_at - time.time(), 0.0)
 
 
 # Round-robin cursor per distinct candidate pool (identified by its exact
-# ordered set of (provider, key) pairs) — spreads load proactively across
-# every configured key/provider instead of always hammering the primary
-# first and only touching backups reactively once it starts failing. Two
-# keys on the same free-tier RPM cap effectively double combined throughput
-# this way, instead of exhausting one before the other is ever used.
-_round_robin_cursors: Dict[Tuple[Tuple[str, str], ...], int] = {}
+# ordered set of (provider, key, model) triples) — spreads load proactively
+# across every configured key/provider/model instead of always hammering
+# the primary first and only touching backups reactively once it starts
+# failing. Two keys on the same free-tier RPM cap effectively double
+# combined throughput this way, instead of exhausting one before the other
+# is ever used.
+_round_robin_cursors: Dict[Tuple[Tuple[str, str, str], ...], int] = {}
 _round_robin_lock = threading.Lock()
 
 
-def _next_round_robin_offset(pool_signature: Tuple[Tuple[str, str], ...]) -> int:
+def _next_round_robin_offset(pool_signature: Tuple[Tuple[str, str, str], ...]) -> int:
     with _round_robin_lock:
         offset = _round_robin_cursors.get(pool_signature, 0)
         _round_robin_cursors[pool_signature] = offset + 1
         return offset
+
+
+def _starting_offset(
+    strategy: str, pool_signature: Tuple[Tuple[str, str, str], ...], pool_size: int
+) -> int:
+    """Which candidate a request tries first, before rotation-on-failure
+    walks the rest in order. "sequential" always starts at the first
+    configured key/provider (simplest, but concentrates load there);
+    "random" picks uniformly at random each call; "round_robin" (default)
+    advances a per-pool cursor so consecutive requests fan out evenly."""
+    if strategy == "sequential":
+        return 0
+    if strategy == "random":
+        return random.randrange(pool_size)
+    return _next_round_robin_offset(pool_signature) % pool_size
 
 
 def _iter_llm_candidates(config: TranslationConfig):
@@ -865,11 +892,15 @@ def _iter_llm_candidates(config: TranslationConfig):
     fallbacks are configured), then the same provider/model with each backup
     key, then each fallback provider with each of its keys in turn.
 
-    A (provider, key) pair is only ever yielded once — retrying the exact
-    same account under a different label wastes a rate-limited request
-    instead of actually rotating to fresh quota, so duplicates anywhere in
-    the chain (primary vs. backups, backups vs. each other, vs. a fallback
-    provider reusing the same key) are silently skipped after the first.
+    A (provider, key, model) triple is only ever yielded once — retrying the
+    exact same account *and* model under a different label wastes a rate-
+    limited request instead of actually rotating to fresh quota, so
+    duplicates anywhere in the chain (primary vs. backups, backups vs. each
+    other, vs. a fallback provider reusing the same key) are silently
+    skipped after the first. The same key against a *different* model is
+    NOT a duplicate — many providers (Gemini's free tier in particular)
+    meter rate limits per model, so the same account can legitimately be
+    configured twice with two different models to try.
     """
     yield config
     seen: set = set()
@@ -877,12 +908,12 @@ def _iter_llm_candidates(config: TranslationConfig):
     key_field = _PROVIDER_API_KEY_FIELD.get(config.provider)
     primary_key = getattr(config, key_field, None) if key_field else None
     if key_field and primary_key:
-        seen.add((config.provider, primary_key))
+        seen.add((config.provider, primary_key, config.model_name))
     if key_field:
         for backup_key in config.backup_api_keys or []:
-            if not backup_key or (config.provider, backup_key) in seen:
+            if not backup_key or (config.provider, backup_key, config.model_name) in seen:
                 continue
-            seen.add((config.provider, backup_key))
+            seen.add((config.provider, backup_key, config.model_name))
             yield replace(config, **{key_field: backup_key})
 
     for fb in config.fallback_providers or []:
@@ -896,14 +927,15 @@ def _iter_llm_candidates(config: TranslationConfig):
             extra_fields["azure_openai_is_v1"] = fb.azure_openai_is_v1
         elif fb.provider == "OpenAI-Compatible":
             extra_fields["openai_compatible_url"] = fb.openai_compatible_url
+        fb_model = fb.model_name or config.model_name
         for fb_key in fb.api_keys or []:
-            if not fb_key or (fb.provider, fb_key) in seen:
+            if not fb_key or (fb.provider, fb_key, fb_model) in seen:
                 continue
-            seen.add((fb.provider, fb_key))
+            seen.add((fb.provider, fb_key, fb_model))
             yield replace(
                 config,
                 provider=fb.provider,
-                model_name=fb.model_name or config.model_name,
+                model_name=fb_model,
                 **{fb_key_field: fb_key},
                 **extra_fields,
             )
@@ -935,7 +967,7 @@ def _call_llm_endpoint(
     candidates = []
     cooling_remaining = []
     for candidate in all_candidates:
-        remaining = _cooldown_remaining(candidate.provider, _candidate_key(candidate))
+        remaining = _cooldown_remaining(candidate.provider, _candidate_key(candidate), candidate.model_name)
         if remaining > 0:
             cooling_remaining.append(remaining)
             log_message(
@@ -954,17 +986,17 @@ def _call_llm_endpoint(
             f"in about {soonest:.0f}s."
         )
 
-    # Proactively spread load across every ready candidate instead of always
-    # starting from the primary — advance a per-pool cursor each call so
-    # consecutive translate requests fan out round-robin. Rotation-on-failure
-    # below still walks the rest of this (now rotated) order if the chosen
-    # starting candidate fails, so nothing here removes the fallback chain —
-    # it only changes which candidate goes first.
+    # Pick which ready candidate goes first, per config.rotation_strategy
+    # (default round_robin: spread load proactively instead of always
+    # starting from the primary). Rotation-on-failure below still walks the
+    # rest of this (now rotated) order if the chosen starting candidate
+    # fails, so nothing here removes the fallback chain — it only changes
+    # which candidate goes first.
     if len(candidates) > 1:
         pool_signature = tuple(
-            (c.provider, _candidate_key(c) or "") for c in all_candidates
+            (c.provider, _candidate_key(c) or "", c.model_name or "") for c in all_candidates
         )
-        offset = _next_round_robin_offset(pool_signature) % len(candidates)
+        offset = _starting_offset(config.rotation_strategy, pool_signature, len(candidates))
         if offset:
             candidates = candidates[offset:] + candidates[:offset]
 
@@ -992,7 +1024,13 @@ def _call_llm_endpoint(
             is_rate_limited = _is_rate_limit_error(e)
             is_missing_key = _is_missing_key_error(e)
             if is_rate_limited or is_credit_error:
-                _mark_cooldown(candidate.provider, _candidate_key(candidate), is_credit_error)
+                _mark_cooldown(
+                    candidate.provider,
+                    _candidate_key(candidate),
+                    candidate.model_name,
+                    is_credit_error,
+                    config.cooldown_seconds,
+                )
             if not is_last and (is_rate_limited or is_credit_error or is_missing_key):
                 reason = (
                     "is out of credit/quota" if is_credit_error

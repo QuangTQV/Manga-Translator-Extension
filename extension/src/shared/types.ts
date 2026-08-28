@@ -2,8 +2,8 @@
 
 import type { UiLanguage } from './i18n.js';
 
-// One entry in a key list (Backup API Keys, or one fallback provider's own
-// keys). enabled lets the user temporarily exclude a specific key from
+// One entry in a key list (a provider's API Keys, or one fallback provider's
+// own keys). enabled lets the user temporarily exclude a specific key from
 // rotation (e.g. it's hitting rate limits hard right now) without
 // losing/retyping it.
 export interface BackupApiKeyEntry {
@@ -11,14 +11,13 @@ export interface BackupApiKeyEntry {
   enabled: boolean;
 }
 
-// A fallback LLM provider to try if the primary provider (and its backup
-// keys) are all rate-limited — tried in list order. enabled defaults to
-// true when absent (older saved settings predate this field) — set false
-// to temporarily skip this provider entirely during rotation without
-// deleting it. Each of its own apiKeys can also be individually toggled
-// the same way (e.g. one of this provider's keys is rate-limited but the
-// others still work).
-export interface FallbackProviderConfig {
+// One provider in the rotation list — tried in list order, no entry is
+// distinguished as "primary". enabled defaults to true when absent (older
+// saved settings predate this field) — set false to temporarily skip this
+// provider entirely during rotation without deleting it. Each of its own
+// apiKeys can also be individually toggled the same way (e.g. one of this
+// provider's keys is rate-limited but the others still work).
+export interface ProviderGroupConfig {
   provider: string;
   modelName?: string;
   apiKeys: BackupApiKeyEntry[];
@@ -45,34 +44,97 @@ export function normalizeBackupApiKeys(raw: unknown): BackupApiKeyEntry[] {
   return out;
 }
 
-// Fallback provider rows used to be saved with apiKeys: string[] and no
-// enabled field. Migrates both to the current shape.
-export function normalizeFallbackProviders(raw: unknown): FallbackProviderConfig[] {
-  if (!Array.isArray(raw)) return [];
-  const out: FallbackProviderConfig[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const obj = item as Record<string, unknown>;
-    if (typeof obj.provider !== 'string' || !obj.provider) continue;
-    out.push({
-      provider: obj.provider,
-      modelName: typeof obj.modelName === 'string' ? obj.modelName : undefined,
-      apiKeys: normalizeBackupApiKeys(obj.apiKeys),
-      baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : undefined,
-      enabled: obj.enabled !== false,
-    });
+// The primary provider used to have one distinguished `apiKey`/`apiKeyEnabled`
+// field plus a separate `backupApiKeys` list before being merged into one
+// flat `apiKeys` list (no more distinguished key), and before THAT merge,
+// its provider/baseUrl/modelName/apiKeys lived at the top of TranslateConfig
+// as a distinguished "primary" provider, separate from `fallbackProviders`.
+// Both distinctions turned out to be artificial — the backend already
+// round-robins the starting candidate across every key and every provider
+// equally — so everything is now one flat, equally-weighted, user-orderable
+// `providerGroups` list. This helper migrates a single group's raw shape;
+// normalizeProviderGroups (below) handles the full top-level migration.
+function normalizeOneProviderGroup(item: unknown): ProviderGroupConfig | null {
+  if (!item || typeof item !== 'object') return null;
+  const obj = item as Record<string, unknown>;
+  if (typeof obj.provider !== 'string' || !obj.provider) return null;
+  return {
+    provider: obj.provider,
+    modelName: typeof obj.modelName === 'string' ? obj.modelName : undefined,
+    apiKeys: normalizeApiKeys(obj),
+    baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : undefined,
+    enabled: obj.enabled !== false,
+  };
+}
+
+// A single provider's keys used to be saved as a plain string[], then as
+// `apiKeys: BackupApiKeyEntry[]`, then (for what used to be the distinguished
+// "primary" provider only) split across `apiKey`/`apiKeyEnabled` plus a
+// separate `backupApiKeys` list. Accepts any of those shapes and always
+// returns the flat, current one, with a migrated single `apiKey` placed
+// first.
+export function normalizeApiKeys(rawConfig: unknown): BackupApiKeyEntry[] {
+  if (!rawConfig || typeof rawConfig !== 'object') return [];
+  const obj = rawConfig as Record<string, unknown>;
+  if (Array.isArray(obj.apiKeys)) return normalizeBackupApiKeys(obj.apiKeys);
+  const merged: unknown[] = [];
+  if (typeof obj.apiKey === 'string' && obj.apiKey.trim()) {
+    merged.push({ key: obj.apiKey.trim(), enabled: obj.apiKeyEnabled !== false });
   }
-  return out;
+  if (Array.isArray(obj.backupApiKeys)) merged.push(...obj.backupApiKeys);
+  return normalizeBackupApiKeys(merged);
+}
+
+// Migrates a raw stored config into the current flat `providerGroups` list.
+// Old settings had the "primary" provider's fields (provider/baseUrl/
+// modelName/apiKeys, or even older apiKey/apiKeyEnabled/backupApiKeys) at
+// the top level, plus a separate `fallbackProviders` list tried only after
+// it — that old primary becomes position 0, followed by its old fallbacks,
+// in the same order they used to run in, so nothing about existing
+// rotation behavior changes on upgrade, only that the user can now freely
+// reorder every entry including what used to be "primary".
+export function normalizeProviderGroups(rawConfig: unknown): ProviderGroupConfig[] {
+  if (!rawConfig || typeof rawConfig !== 'object') return [];
+  const obj = rawConfig as Record<string, unknown>;
+  if (Array.isArray(obj.providerGroups)) {
+    const out: ProviderGroupConfig[] = [];
+    for (const item of obj.providerGroups) {
+      const g = normalizeOneProviderGroup(item);
+      if (g) out.push(g);
+    }
+    return out;
+  }
+  const groups: ProviderGroupConfig[] = [];
+  const oldPrimary = normalizeOneProviderGroup(obj);
+  if (oldPrimary) groups.push(oldPrimary);
+  if (Array.isArray(obj.fallbackProviders)) {
+    for (const item of obj.fallbackProviders) {
+      const g = normalizeOneProviderGroup(item);
+      if (g) groups.push(g);
+    }
+  }
+  return groups;
+}
+
+// A plain object spread (`{...DEFAULT_SETTINGS.config, ...raw.config}`) would
+// carry every old top-level provider field forward into storage forever
+// alongside the new merged `providerGroups` list — dead data that's
+// silently ignored everywhere but never cleaned up. Spread this instead of
+// the raw config object to drop them once migrated.
+export function stripLegacyProviderFields(rawConfig: unknown): Record<string, unknown> {
+  if (!rawConfig || typeof rawConfig !== 'object') return {};
+  const {
+    provider: _provider, baseUrl: _baseUrl, modelName: _modelName,
+    apiKey: _apiKey, apiKeyEnabled: _apiKeyEnabled, apiKeys: _apiKeys,
+    backupApiKeys: _backupApiKeys, fallbackProviders: _fallbackProviders,
+    ...rest
+  } = rawConfig as Record<string, unknown>;
+  return rest;
 }
 
 export interface TranslateConfig {
   inputLanguage: string;
   outputLanguage: string;
-  provider: string;
-  baseUrl?: string;     // for OpenAI-Compatible provider, or Azure endpoint for Azure OpenAI
-  modelName?: string;   // for Azure OpenAI, this is the deployment name
-  apiKey?: string;
-  apiKeyEnabled?: boolean; // false to temporarily skip the primary key (e.g. rate-limited) without deleting it — falls through to backup keys/fallback providers. Defaults to true when absent.
   temperature: number;
   topP: number;
   topK: number;
@@ -83,8 +145,9 @@ export interface TranslateConfig {
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
   contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
-  backupApiKeys?: BackupApiKeyEntry[]; // extra keys for the same provider/model, tried in order on rate limit
-  fallbackProviders?: FallbackProviderConfig[]; // tried after the primary provider + backup keys are all rate-limited
+  providerGroups: ProviderGroupConfig[]; // every provider tried in rotation, in list order — no entry is distinguished as "primary"; the backend round-robins the starting candidate across all of them (and all their keys) equally
+  rotationStrategy?: 'round_robin' | 'random' | 'sequential'; // which key/provider a request tries first — round_robin (default) spreads load evenly, random picks any ready one, sequential always starts at the first configured entry
+  cooldownSeconds?: number; // how long a rate-limited key/provider is skipped before being retried (default 15s)
   fontDir?: string;
   maxFontSize: number;
   minFontSize: number;
@@ -173,6 +236,8 @@ export interface TranslateRequest {
   backup_api_keys?: string[];
   fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
   fix_hint?: { bubble_index?: number; original_text?: string; instruction: string };
+  rotation_strategy?: string;
+  cooldown_seconds?: number;
   font_dir?: string;
   max_font_size: number;
   min_font_size: number;
@@ -219,7 +284,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   config: {
     inputLanguage: 'Japanese',
     outputLanguage: 'English',
-    provider: 'Google',
+    providerGroups: [{ provider: 'Google', apiKeys: [], enabled: true }],
     temperature: 0.1,
     topP: 0.95,
     topK: 1,
@@ -234,6 +299,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     preTranslate: false,
     previousContextEnabled: false,
     contextMemoryEnabled: false,
+    rotationStrategy: 'round_robin',
+    cooldownSeconds: 15,
   },
 };
 

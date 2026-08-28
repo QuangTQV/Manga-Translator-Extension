@@ -15,7 +15,7 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6">
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-backend-009688">
   <img alt="Windows portable" src="https://img.shields.io/badge/Windows-portable-0078D4">
-  <img alt="Release" src="https://img.shields.io/github/v/release/lehuyqq/Manga-Translator-Extension?label=release">
+  <img alt="Release" src="https://img.shields.io/github/v/release/QuangTQV/Manga-Translator-Extension?label=release">
 </p>
 
 <p align="center">
@@ -95,7 +95,7 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 最新 release：
 
 ```text
-https://github.com/lehuyqq/Manga-Translator-Extension/releases/latest
+https://github.com/QuangTQV/Manga-Translator-Extension/releases/latest
 ```
 
 推荐下载的 release assets：
@@ -126,7 +126,7 @@ Expand-Archive .\manga-translator-models-no-flux-v1.0.1.zip -DestinationPath .
 1. 下载源码或 clone repository。
 
 ```powershell
-git clone https://github.com/lehuyqq/Manga-Translator-Extension.git
+git clone https://github.com/QuangTQV/Manga-Translator-Extension.git
 cd Manga-Translator-Extension
 ```
 
