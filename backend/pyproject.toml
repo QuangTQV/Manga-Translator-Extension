@@ -35,6 +35,14 @@ dependencies = [
     "ultralytics>=8.3.94",
 ]
 
+[project.optional-dependencies]
+# Unit tests only exercise pure config/rotation/HTTP-error logic with the
+# HTTP layer mocked out — they don't need torch/ultralytics/etc., but keep
+# this as an extra (not a base dependency) so a normal install stays light.
+dev = [
+    "pytest>=8.0.0",
+]
+
 # Discover only the 'backend' package directory (src-layout)
 [tool.setuptools.packages.find]
 where = ["."]
@@ -44,3 +52,6 @@ include = ["config", "endpoints*", "pipeline*", "core*", "utils*", "main", "sche
 host = "0.0.0.0"
 port = 7677
 reload = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -29,8 +29,15 @@ python3 -m venv .venv
 # health check
 curl http://localhost:7677/health
 
-# syntax-check a single file (there is no pytest/test suite in this repo)
+# syntax-check a single file (quick sanity check, not a substitute for tests)
 ./.venv/bin/python -m py_compile pipeline/wrapper.py
+
+# unit tests (backend/tests/) — pure config/rotation/HTTP-error logic with
+# the HTTP layer mocked out; no ML models or network needed. Install once
+# with `./.venv/bin/pip install -e ".[dev]"`.
+./.venv/bin/pip install -e ".[dev]"
+./.venv/bin/python -m pytest
+./.venv/bin/python -m pytest tests/test_rotation.py -k weighted_random  # single test
 ```
 
 Docker alternative (backend only, built from repo root so it can `COPY backend /app/backend`): `docker build -t manga-translator-backend .`
