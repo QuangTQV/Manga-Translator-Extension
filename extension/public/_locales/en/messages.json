@@ -4,5 +4,8 @@
   },
   "extensionDescription": {
     "message": "Scan manga pages, choose images, and overlay translated results with a local MangaTranslator backend."
+  },
+  "commandToggleAutoTranslate": {
+    "message": "Toggle auto-translate on the active tab"
   }
 }

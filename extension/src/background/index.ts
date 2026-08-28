@@ -13,6 +13,20 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'toggle-auto-translate') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  try {
+    await ensureContentScript(tab.id);
+    const status = await chrome.tabs.sendMessage(tab.id, { type: 'GET_AUTO_TRANSLATE_STATUS' });
+    await chrome.tabs.sendMessage(tab.id, { type: status?.active ? 'STOP_AUTO_TRANSLATE' : 'START_AUTO_TRANSLATE' });
+  } catch {
+    // No content script on this page (e.g. chrome:// or an extension gallery
+    // page) — nothing to toggle, and no popup open to surface an error to.
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     if (message.type === 'GET_SETTINGS') {

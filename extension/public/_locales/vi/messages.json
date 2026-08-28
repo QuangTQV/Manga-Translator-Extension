@@ -4,5 +4,8 @@
   },
   "extensionDescription": {
     "message": "Quét trang manga, chọn ảnh và phủ kết quả dịch bằng backend MangaTranslator cục bộ."
+  },
+  "commandToggleAutoTranslate": {
+    "message": "Bật/tắt tự động dịch trên tab đang mở"
   }
 }

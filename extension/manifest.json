@@ -36,5 +36,14 @@
       "resources": ["assets/*", "content-script/*"],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "commands": {
+    "toggle-auto-translate": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "__MSG_commandToggleAutoTranslate__"
+    }
+  }
 }
