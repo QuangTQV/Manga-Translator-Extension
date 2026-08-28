@@ -401,6 +401,53 @@ def process_single_bubble(
         raise CleaningError("Failed to process bubble mask") from e
 
 
+def _build_original_crop_fallback_entry(
+    detection: dict,
+    image: np.ndarray,
+    img_width: int,
+    img_height: int,
+    is_sam: bool,
+) -> Optional[dict]:
+    """When mask processing fails for a bubble (standard cleaning AND the
+    Otsu retry), the bubble used to be dropped from processed_bubbles_info
+    entirely via `continue` — silently losing its `original_crop_pil`, so
+    the render step's bubble_render_info_map lookup misses it downstream
+    and the "restore the original text on render failure" fallback in
+    pipeline.py has nothing to restore, leaving the bubble fully blank
+    even though its background may already be whited-out (e.g. by an
+    overlapping conjoined-bubble neighbor's own successful cleaning).
+
+    Returns a minimal entry instead: no mask (rendering falls back to its
+    existing padded-bbox path when mask is None), just enough for the
+    lookup to succeed and the original-crop restore fallback to have
+    something to work with. Returns None if the bbox itself is unusable.
+    """
+    bubble_bbox = detection.get("bbox")
+    if not bubble_bbox or len(bubble_bbox) != 4:
+        return None
+    bx0, by0, bx1, by1 = [int(c) for c in bubble_bbox]
+    bx0 = max(0, min(img_width, bx0))
+    bx1 = max(0, min(img_width, bx1))
+    by0 = max(0, min(img_height, by0))
+    by1 = max(0, min(img_height, by1))
+    if bx1 <= bx0 or by1 <= by0:
+        return None
+
+    original_crop_pil = cv2_to_pil(image[by0:by1, bx0:bx1].copy())
+    return {
+        "mask": None,
+        "base_mask": None,
+        "color": (255, 255, 255),
+        "bbox": bubble_bbox,
+        "is_colored": False,
+        "text_bbox": None,
+        "text_color_bgr": None,
+        "is_sam": is_sam,
+        "inpainted": False,
+        "original_crop_pil": original_crop_pil,
+    }
+
+
 def clean_speech_bubbles(
     image_input: Union[str, Path, Image.Image],
     model_path,
@@ -607,6 +654,17 @@ def clean_speech_bubbles(
                     if not retry_success:
                         error_msg = f"Error processing SAM mask for detection {detection.get('bbox')}: {e}"
                         log_message(error_msg, always_print=True)
+                        fallback_entry = _build_original_crop_fallback_entry(
+                            detection, image, img_width, img_height, is_sam=True
+                        )
+                        if fallback_entry:
+                            processed_bubbles.append(fallback_entry)
+                            log_message(
+                                f"Detection {detection.get('bbox')}: cleaning failed, "
+                                "keeping original crop as a render fallback instead of "
+                                "dropping this bubble entirely",
+                                always_print=True,
+                            )
                         continue
             else:
                 if "mask_points" not in detection or not detection["mask_points"]:
@@ -706,6 +764,17 @@ def clean_speech_bubbles(
                     if not retry_success:
                         error_msg = f"Error processing YOLO mask for detection {detection.get('bbox')}: {e}"
                         log_message(error_msg, always_print=True)
+                        fallback_entry = _build_original_crop_fallback_entry(
+                            detection, image, img_width, img_height, is_sam=False
+                        )
+                        if fallback_entry:
+                            processed_bubbles.append(fallback_entry)
+                            log_message(
+                                f"Detection {detection.get('bbox')}: cleaning failed, "
+                                "keeping original crop as a render fallback instead of "
+                                "dropping this bubble entirely",
+                                always_print=True,
+                            )
                         continue
 
             if final_mask is not None and fill_color_bgr is not None:
