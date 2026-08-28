@@ -12,6 +12,11 @@ extension/dist/
 extension/node_modules/
 extension/.vite/
 
+# Playwright test output
+extension/test-results/
+extension/playwright-report/
+extension/blob-report/
+
 # Portable runtime and generated assets
 backend/runtime/
 backend/models/

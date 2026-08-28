@@ -401,7 +401,7 @@ let autoTranslatePeriodicTimer: number | undefined;
 let autoTranslateRemoveUiTimer: number | undefined;
 let autoTranslateQueue: Array<{ img: HTMLImageElement; url: string; priority: boolean }> = [];
 let autoTranslateQueuedUrls = new Set<string>();
-let autoTranslateInFlightUrls = new Set<string>();
+const autoTranslateInFlightUrls = new Set<string>();
 let autoTranslateProcessing = false;
 let autoTranslateConcurrent = 0;
 let scannerPausedAutoTranslate = false;
@@ -3072,11 +3072,9 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
     return true;
   }
 
-  let imgData: string | null = null;
-
   // fetchImageData tries DOM capture first (uses browser's cached/authed image),
   // then background fetch, then direct CORS fetch
-  imgData = await fetchImageData(page.rawUrl, window.location.href);
+  const imgData = await fetchImageData(page.rawUrl, window.location.href);
 
   if (!imgData) {
     if (statusEl) { statusEl.textContent = tr('loadError'); statusEl.className = 'mts-card-status failed'; }

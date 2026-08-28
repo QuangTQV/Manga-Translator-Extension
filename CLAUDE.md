@@ -53,7 +53,14 @@ npm run dev        # vite dev server
 
 Load unpacked at `chrome://extensions/` → Developer mode → Load unpacked → select `extension/dist/`.
 
-Note: `package.json` declares `npm run lint` but `eslint` is not actually listed in `devDependencies`, so that script currently fails — use `npm run build` (via `tsc`) as the practical typecheck/verification step.
+`npm run lint` (ESLint, flat config in `eslint.config.js`) and `npm run build` (`tsc` typecheck + Vite build) are both real verification steps — run both before considering a change done.
+
+End-to-end tests (Playwright, `extension/tests/`) load the actual built extension into a real Chromium persistent context — they cover popup settings persistence, provider-group rotation config, and the in-page Scanner UI (which lives in a closed shadow root, so tests drive it via raw CDP — see `tests/shadow-dom.ts`).
+
+```bash
+npm test   # runs `npm run build` first, then the full Playwright suite
+npx playwright test tests/popup.spec.ts   # a single spec file
+```
 
 ## Architecture
 

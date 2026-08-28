@@ -347,7 +347,7 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
   const referer = pageUrl ? pageUrl.split('/').slice(0, 3).join('/') : '';
   console.log('[BG] fetchAndTranslate url:', imageUrl, 'referer:', referer);
   // 1. Fetch image
-  let base64: string | null = null;
+  let base64: string;
   try {
     const res = await fetch(imageUrl, {
       headers: {
