@@ -940,6 +940,11 @@ function stopAutoTranslate(preserveScannerResume = false): void {
   }
   autoTranslatePendingMutationNodes = new Set();
   autoTranslateMutationFlushScheduled = false;
+  // Safety net for translateAndApply()'s "keep the in-progress badge up
+  // across a soon-to-retry failure" behavior — if a retry never actually
+  // happens because auto-translate is stopped in that gap, this is what
+  // clears the badge instead of it being stuck forever.
+  document.querySelectorAll('.mt-progress-badge').forEach((el) => el.remove());
   window.removeEventListener('scroll', scheduleAutoTranslateScan);
   window.removeEventListener('resize', scheduleAutoTranslateScan);
   document.removeEventListener('visibilitychange', handleAutoTranslateVisibilityChange);
@@ -1057,12 +1062,23 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   updateAutoTranslateCounter();
   addInProgressBadge(img);
 
+  // A failed attempt that's about to be silently retried on the next scan
+  // pass (rather than the terminal failure that hands off to the retry
+  // badge) shouldn't remove the in-progress badge in between — the next
+  // addInProgressBadge() call would find nothing and create a brand new
+  // element, restarting its animation from scratch and reading as the
+  // indicator repeatedly turning off and on rather than one continuous
+  // "still working on it". Leaving the existing element in place lets the
+  // next attempt's addInProgressBadge() reuse it untouched instead.
+  let willRetrySoon = false;
+
   try {
     const pageUrl = window.location.href;
     const imgData = await fetchImageData(url, pageUrl);
     if (!autoTranslateActive) return;
     if (!imgData) {
       console.log('[MT] image data unavailable:', url);
+      willRetrySoon = retries + 1 < AUTO_RETRY_MAX;
       markAutoTranslateFailure(img, url, retries);
       return;
     }
@@ -1101,6 +1117,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 
     if (result.error) {
       console.log('[MT] bgTranslateImage error:', result.error);
+      willRetrySoon = retries + 1 < AUTO_RETRY_MAX;
       markAutoTranslateFailure(img, url, retries);
       return;
     }
@@ -1140,7 +1157,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     console.log('[MT] applied:', url);
     updateAutoTranslateCounter();
   } finally {
-    removeInProgressBadge(img);
+    if (!willRetrySoon) removeInProgressBadge(img);
   }
 }
 
