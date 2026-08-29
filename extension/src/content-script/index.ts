@@ -3172,30 +3172,42 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 // Image capture / fetch
 // ─────────────────────────────────────────────────────────────────────────────
 
-function captureImgElement(img: HTMLImageElement): string | null {
-  try {
-    // naturalWidth/naturalHeight can already be non-zero (reported from
-    // image headers) before the pixel data has fully decoded — drawImage
-    // at that point can paint an incomplete/blank frame onto the canvas
-    // (the white fillRect below then shows through as a "translated" blank
-    // white page, since nothing catches or retries this: canvas.toDataURL
-    // still succeeds and returns a normal-looking, just-empty PNG). Bail
-    // out to fetchImageData's network-fetch fallbacks instead, which pull
-    // the actual image bytes directly rather than reading current canvas
-    // paint state.
-    if (!img.complete) return null;
-    const w = img.naturalWidth || img.width;
-    const h = img.naturalHeight || img.height;
-    if (w === 0 || h === 0) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return canvas.toDataURL('image/png').replace(/^data:image\/\w+;base64,/, '');
-  } catch { return null; }
+function captureImgElement(img: HTMLImageElement): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      // naturalWidth/naturalHeight can already be non-zero (reported from
+      // image headers) before the pixel data has fully decoded — drawImage
+      // at that point can paint an incomplete/blank frame onto the canvas
+      // (the white fillRect below then shows through as a "translated" blank
+      // white page, since nothing catches or retries this: canvas.toBlob
+      // still succeeds and returns a normal-looking, just-empty PNG). Bail
+      // out to fetchImageData's network-fetch fallbacks instead, which pull
+      // the actual image bytes directly rather than reading current canvas
+      // paint state.
+      if (!img.complete) { resolve(null); return; }
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (w === 0 || h === 0) { resolve(null); return; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(null); return; }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      // toBlob (async, off the synchronous call stack) instead of
+      // toDataURL (blocking): same lossless PNG bytes, same base64 result —
+      // just doesn't freeze the tab's main thread for the encode, which
+      // matters when scanning/auto-translating many pages back to back.
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(null); return; }
+        const fr = new FileReader();
+        fr.onloadend = () => resolve((fr.result as string).replace(/^data:image\/\w+;base64,/, ''));
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(blob);
+      }, 'image/png');
+    } catch { resolve(null); }
+  });
 }
 
 async function fetchImageData(url: string, pageUrl: string): Promise<string | null> {
@@ -3205,7 +3217,7 @@ async function fetchImageData(url: string, pageUrl: string): Promise<string | nu
       `img[src="${url}"], img[data-mt-raw="${url}"]`,
     );
     if (domImg) {
-      const captured = captureImgElement(domImg);
+      const captured = await captureImgElement(domImg);
       if (captured) return captured;
     }
   } catch { /* fall through */ }
