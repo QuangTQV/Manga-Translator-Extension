@@ -292,3 +292,79 @@ def test_generic_400_error_without_content_filter_marker_is_not_rotated():
     # burn through the whole rotation chain pretending a different key on
     # the same broken deployment might succeed.
     assert attempts == ["az1"]
+
+
+# ---------------------------------------------------------------------------
+# enable_web_search: try a search-capable candidate before an incapable one
+# ---------------------------------------------------------------------------
+def test_web_search_enabled_tries_capable_fallback_before_incapable_primary():
+    # DeepSeek has no web-search implementation at all — sending a search
+    # request to it silently does a normal, non-search call. With
+    # enable_web_search on, a capable fallback (Google) should be tried
+    # first instead, or the whole point of the toggle is defeated whenever
+    # an incapable candidate happens to be configured first.
+    config = TranslationConfig(
+        provider="DeepSeek", deepseek_api_key="ds1", model_name="m",
+        rotation_strategy="sequential", enable_web_search=True,
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", api_keys=["g1"], model_name="m"),
+        ],
+    )
+    attempts = []
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        attempts.append(candidate.provider)
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+    assert attempts == ["Google"]
+
+
+def test_web_search_disabled_keeps_configured_order():
+    config = TranslationConfig(
+        provider="DeepSeek", deepseek_api_key="ds1", model_name="m",
+        rotation_strategy="sequential", enable_web_search=False,
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", api_keys=["g1"], model_name="m"),
+        ],
+    )
+    attempts = []
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        attempts.append(candidate.provider)
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        _call_llm_endpoint(config, [], "prompt")
+
+    assert attempts == ["DeepSeek"]
+
+
+def test_web_search_falls_through_to_incapable_candidate_if_capable_one_fails():
+    # Reordering for search-capability must not remove the incapable
+    # candidate from the chain — if the prioritized capable one is
+    # rate-limited, the incapable one is still a better outcome (a
+    # translation without search) than failing the whole request.
+    config = TranslationConfig(
+        provider="DeepSeek", deepseek_api_key="ds1", model_name="m",
+        rotation_strategy="sequential", enable_web_search=True,
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", api_keys=["g1"], model_name="m"),
+        ],
+    )
+    attempts = []
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        attempts.append(candidate.provider)
+        if candidate.provider == "Google":
+            raise TranslationError("Google API HTTP Error: Rate limited after 4 attempts: ...")
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+    assert attempts == ["Google", "DeepSeek"]

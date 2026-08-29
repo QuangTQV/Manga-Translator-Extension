@@ -744,6 +744,20 @@ _PROVIDER_API_KEY_FIELD = {
     "OpenAI-Compatible": "openai_compatible_api_key",
 }
 
+# Providers whose utils/endpoints/<provider>.py actually implements
+# enable_web_search — DeepSeek and OpenAI-Compatible have no such handling
+# at all, so sending a web-search request to them silently does a normal,
+# non-search call instead of erroring. Used by _call_llm_endpoint to try a
+# capable candidate first when enable_web_search is set, instead of
+# quietly not searching just because the first-ordered candidate happens
+# to be one of these two. (Azure OpenAI is included even though it also
+# requires the *deployed model itself* to be a search-capable variant —
+# that's a per-deployment condition this list can't see, unlike these two
+# providers which structurally never support it regardless of model.)
+_WEB_SEARCH_CAPABLE_PROVIDERS = {
+    "Google", "OpenAI", "Azure OpenAI", "Anthropic", "xAI", "Z.ai", "Moonshot AI", "OpenRouter",
+}
+
 
 def _is_rate_limit_error(exc: Exception) -> bool:
     """True if this is a TranslationError raised after a provider endpoint
@@ -1059,6 +1073,20 @@ def _call_llm_endpoint(
         offset = _starting_offset(config.rotation_strategy, pool_signature, len(candidates), weights)
         if offset:
             candidates = candidates[offset:] + candidates[:offset]
+
+    # A web-search request only actually searches on a candidate whose
+    # provider implements it — reordering here (rather than just hoping
+    # the first-ordered candidate happens to support it) is what makes
+    # "enable web search" reliably search instead of silently not
+    # searching just because e.g. a DeepSeek backup key sorted first.
+    # Stable partition: search-capable candidates first, in their existing
+    # relative order, so this doesn't disturb rotation/weighting among
+    # candidates that are equally (in)capable of searching.
+    if config.enable_web_search and len(candidates) > 1:
+        capable = [c for c in candidates if c.provider in _WEB_SEARCH_CAPABLE_PROVIDERS]
+        incapable = [c for c in candidates if c.provider not in _WEB_SEARCH_CAPABLE_PROVIDERS]
+        if capable and incapable:
+            candidates = capable + incapable
 
     for idx, candidate in enumerate(candidates):
         is_last = idx == len(candidates) - 1
