@@ -400,6 +400,8 @@ let autoTranslateIntersectionObserver: IntersectionObserver | null = null;
 let autoTranslateScanTimer: number | undefined;
 let autoTranslatePeriodicTimer: number | undefined;
 let autoTranslateRemoveUiTimer: number | undefined;
+let autoTranslatePendingMutationNodes = new Set<Element>();
+let autoTranslateMutationFlushScheduled = false;
 let autoTranslateQueue: Array<{ img: HTMLImageElement; url: string; priority: boolean }> = [];
 let autoTranslateQueuedUrls = new Set<string>();
 const autoTranslateInFlightUrls = new Set<string>();
@@ -619,22 +621,21 @@ async function startAutoTranslate(): Promise<void> {
 
   void processAutoTranslateQueue();
 
-  // Watch for new images and lazy-loader attribute changes.
+  // Watch for new images and lazy-loader attribute changes. Mutation
+  // callbacks can fire in rapid bursts (infinite-scroll sites lazy-loading
+  // many images at once) — collecting nodes into a shared Set and only
+  // actually scanning them once per animation frame avoids a forced-layout
+  // storm (handleAutoTranslateImage/scanAutoTranslateImages call
+  // getBoundingClientRect) from running once per node per burst.
   autoTranslateObserver = new MutationObserver((mutations) => {
     if (!autoTranslateActive) return;
     for (const mut of mutations) {
       for (const node of mut.addedNodes) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        const el = node as Element;
-
-        if (el.tagName === 'IMG') {
-          handleAutoTranslateImage(el as HTMLImageElement);
-        }
-
-        scanAutoTranslateImages(el);
+        autoTranslatePendingMutationNodes.add(node as Element);
       }
     }
-    void processAutoTranslateQueue();
+    scheduleAutoTranslateMutationFlush();
   });
 
   autoTranslateObserver.observe(document.body, {
@@ -644,9 +645,55 @@ async function startAutoTranslate(): Promise<void> {
 
   window.addEventListener('scroll', scheduleAutoTranslateScan, { passive: true });
   window.addEventListener('resize', scheduleAutoTranslateScan, { passive: true });
-  autoTranslatePeriodicTimer = window.setInterval(scheduleAutoTranslateScan, 4000);
+  document.addEventListener('visibilitychange', handleAutoTranslateVisibilityChange);
+  restartAutoTranslatePeriodicTimer();
 
   updateAutoTranslateIndicator('active');
+}
+
+function scheduleAutoTranslateMutationFlush(): void {
+  if (autoTranslateMutationFlushScheduled) return;
+  autoTranslateMutationFlushScheduled = true;
+  window.requestAnimationFrame(() => {
+    autoTranslateMutationFlushScheduled = false;
+    const nodes = autoTranslatePendingMutationNodes;
+    autoTranslatePendingMutationNodes = new Set();
+    if (!autoTranslateActive) return;
+    for (const el of nodes) {
+      if (el.tagName === 'IMG') {
+        handleAutoTranslateImage(el as HTMLImageElement);
+      }
+      scanAutoTranslateImages(el);
+    }
+    void processAutoTranslateQueue();
+  });
+}
+
+// The periodic DOM rescan (fallback for lazy-loaders that swap an existing
+// <img>'s src/data-src attribute in place, which the MutationObserver above
+// — watching childList/subtree, not attributes — doesn't catch) has nothing
+// useful to look at while the tab isn't visible: nothing the reader isn't
+// looking at can lazy-load via scroll, and any already-queued/in-flight
+// translation keeps running regardless (processAutoTranslateQueue is a
+// self-sustaining loop, not gated by this timer). Slow it down instead of
+// fully stopping it, so a site's own background JS inserting/swapping images
+// while hidden still gets picked up within half a minute rather than only on
+// return — and do an immediate scan on return either way to catch up fast.
+const AUTO_PERIODIC_SCAN_INTERVAL_MS = 4000;
+const AUTO_PERIODIC_SCAN_INTERVAL_HIDDEN_MS = 25000;
+
+function restartAutoTranslatePeriodicTimer(): void {
+  if (autoTranslatePeriodicTimer !== undefined) {
+    window.clearInterval(autoTranslatePeriodicTimer);
+  }
+  const interval = document.hidden ? AUTO_PERIODIC_SCAN_INTERVAL_HIDDEN_MS : AUTO_PERIODIC_SCAN_INTERVAL_MS;
+  autoTranslatePeriodicTimer = window.setInterval(scheduleAutoTranslateScan, interval);
+}
+
+function handleAutoTranslateVisibilityChange(): void {
+  if (!autoTranslateActive) return;
+  restartAutoTranslatePeriodicTimer();
+  if (!document.hidden) scheduleAutoTranslateScan();
 }
 
 function scheduleAutoTranslateScan(): void {
@@ -881,8 +928,11 @@ function stopAutoTranslate(preserveScannerResume = false): void {
     clearInterval(autoTranslatePeriodicTimer);
     autoTranslatePeriodicTimer = undefined;
   }
+  autoTranslatePendingMutationNodes = new Set();
+  autoTranslateMutationFlushScheduled = false;
   window.removeEventListener('scroll', scheduleAutoTranslateScan);
   window.removeEventListener('resize', scheduleAutoTranslateScan);
+  document.removeEventListener('visibilitychange', handleAutoTranslateVisibilityChange);
   updateAutoTranslateIndicator('stopped');
   if (autoTranslateRemoveUiTimer !== undefined) clearTimeout(autoTranslateRemoveUiTimer);
   autoTranslateRemoveUiTimer = window.setTimeout(() => {
@@ -3172,30 +3222,42 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 // Image capture / fetch
 // ─────────────────────────────────────────────────────────────────────────────
 
-function captureImgElement(img: HTMLImageElement): string | null {
-  try {
-    // naturalWidth/naturalHeight can already be non-zero (reported from
-    // image headers) before the pixel data has fully decoded — drawImage
-    // at that point can paint an incomplete/blank frame onto the canvas
-    // (the white fillRect below then shows through as a "translated" blank
-    // white page, since nothing catches or retries this: canvas.toDataURL
-    // still succeeds and returns a normal-looking, just-empty PNG). Bail
-    // out to fetchImageData's network-fetch fallbacks instead, which pull
-    // the actual image bytes directly rather than reading current canvas
-    // paint state.
-    if (!img.complete) return null;
-    const w = img.naturalWidth || img.width;
-    const h = img.naturalHeight || img.height;
-    if (w === 0 || h === 0) return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return canvas.toDataURL('image/png').replace(/^data:image\/\w+;base64,/, '');
-  } catch { return null; }
+function captureImgElement(img: HTMLImageElement): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      // naturalWidth/naturalHeight can already be non-zero (reported from
+      // image headers) before the pixel data has fully decoded — drawImage
+      // at that point can paint an incomplete/blank frame onto the canvas
+      // (the white fillRect below then shows through as a "translated" blank
+      // white page, since nothing catches or retries this: canvas.toBlob
+      // still succeeds and returns a normal-looking, just-empty PNG). Bail
+      // out to fetchImageData's network-fetch fallbacks instead, which pull
+      // the actual image bytes directly rather than reading current canvas
+      // paint state.
+      if (!img.complete) { resolve(null); return; }
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (w === 0 || h === 0) { resolve(null); return; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(null); return; }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      // toBlob (async, off the synchronous call stack) instead of
+      // toDataURL (blocking): same lossless PNG bytes, same base64 result —
+      // just doesn't freeze the tab's main thread for the encode, which
+      // matters when scanning/auto-translating many pages back to back.
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(null); return; }
+        const fr = new FileReader();
+        fr.onloadend = () => resolve((fr.result as string).replace(/^data:image\/\w+;base64,/, ''));
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(blob);
+      }, 'image/png');
+    } catch { resolve(null); }
+  });
 }
 
 async function fetchImageData(url: string, pageUrl: string): Promise<string | null> {
@@ -3205,7 +3267,7 @@ async function fetchImageData(url: string, pageUrl: string): Promise<string | nu
       `img[src="${url}"], img[data-mt-raw="${url}"]`,
     );
     if (domImg) {
-      const captured = captureImgElement(domImg);
+      const captured = await captureImgElement(domImg);
       if (captured) return captured;
     }
   } catch { /* fall through */ }
