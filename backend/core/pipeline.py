@@ -840,10 +840,24 @@ def translate_and_render(
                     "Resized full image for context with LANCZOS", verbose=verbose
                 )
             else:  # upscale_method == "none"
-                # No resizing/upscaling
-                log_message(
-                    "Using full image for context without resizing", verbose=verbose
-                )
+                # "none" opts out of upscaling, not out of the configured cap —
+                # an oversized source (e.g. a 4K scan) still needs to be capped
+                # down for the context request, just never scaled up past its
+                # own resolution.
+                if max(context_image_pil.size) > effective_context_max_side:
+                    context_image_pil = resize_to_max_side(
+                        context_image_pil,
+                        effective_context_max_side,
+                        verbose=verbose,
+                    )
+                    log_message(
+                        "Downscaled full image for context (no upscaling)",
+                        verbose=verbose,
+                    )
+                else:
+                    log_message(
+                        "Using full image for context without resizing", verbose=verbose
+                    )
 
             context_image_cv = pil_to_cv2(context_image_pil)
             is_success, buffer = cv2.imencode(cv2_ext, context_image_cv)

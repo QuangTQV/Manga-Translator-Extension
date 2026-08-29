@@ -400,6 +400,8 @@ let autoTranslateIntersectionObserver: IntersectionObserver | null = null;
 let autoTranslateScanTimer: number | undefined;
 let autoTranslatePeriodicTimer: number | undefined;
 let autoTranslateRemoveUiTimer: number | undefined;
+let autoTranslatePendingMutationNodes = new Set<Element>();
+let autoTranslateMutationFlushScheduled = false;
 let autoTranslateQueue: Array<{ img: HTMLImageElement; url: string; priority: boolean }> = [];
 let autoTranslateQueuedUrls = new Set<string>();
 const autoTranslateInFlightUrls = new Set<string>();
@@ -619,22 +621,21 @@ async function startAutoTranslate(): Promise<void> {
 
   void processAutoTranslateQueue();
 
-  // Watch for new images and lazy-loader attribute changes.
+  // Watch for new images and lazy-loader attribute changes. Mutation
+  // callbacks can fire in rapid bursts (infinite-scroll sites lazy-loading
+  // many images at once) — collecting nodes into a shared Set and only
+  // actually scanning them once per animation frame avoids a forced-layout
+  // storm (handleAutoTranslateImage/scanAutoTranslateImages call
+  // getBoundingClientRect) from running once per node per burst.
   autoTranslateObserver = new MutationObserver((mutations) => {
     if (!autoTranslateActive) return;
     for (const mut of mutations) {
       for (const node of mut.addedNodes) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        const el = node as Element;
-
-        if (el.tagName === 'IMG') {
-          handleAutoTranslateImage(el as HTMLImageElement);
-        }
-
-        scanAutoTranslateImages(el);
+        autoTranslatePendingMutationNodes.add(node as Element);
       }
     }
-    void processAutoTranslateQueue();
+    scheduleAutoTranslateMutationFlush();
   });
 
   autoTranslateObserver.observe(document.body, {
@@ -644,9 +645,55 @@ async function startAutoTranslate(): Promise<void> {
 
   window.addEventListener('scroll', scheduleAutoTranslateScan, { passive: true });
   window.addEventListener('resize', scheduleAutoTranslateScan, { passive: true });
-  autoTranslatePeriodicTimer = window.setInterval(scheduleAutoTranslateScan, 4000);
+  document.addEventListener('visibilitychange', handleAutoTranslateVisibilityChange);
+  restartAutoTranslatePeriodicTimer();
 
   updateAutoTranslateIndicator('active');
+}
+
+function scheduleAutoTranslateMutationFlush(): void {
+  if (autoTranslateMutationFlushScheduled) return;
+  autoTranslateMutationFlushScheduled = true;
+  window.requestAnimationFrame(() => {
+    autoTranslateMutationFlushScheduled = false;
+    const nodes = autoTranslatePendingMutationNodes;
+    autoTranslatePendingMutationNodes = new Set();
+    if (!autoTranslateActive) return;
+    for (const el of nodes) {
+      if (el.tagName === 'IMG') {
+        handleAutoTranslateImage(el as HTMLImageElement);
+      }
+      scanAutoTranslateImages(el);
+    }
+    void processAutoTranslateQueue();
+  });
+}
+
+// The periodic DOM rescan (fallback for lazy-loaders that swap an existing
+// <img>'s src/data-src attribute in place, which the MutationObserver above
+// — watching childList/subtree, not attributes — doesn't catch) has nothing
+// useful to look at while the tab isn't visible: nothing the reader isn't
+// looking at can lazy-load via scroll, and any already-queued/in-flight
+// translation keeps running regardless (processAutoTranslateQueue is a
+// self-sustaining loop, not gated by this timer). Slow it down instead of
+// fully stopping it, so a site's own background JS inserting/swapping images
+// while hidden still gets picked up within half a minute rather than only on
+// return — and do an immediate scan on return either way to catch up fast.
+const AUTO_PERIODIC_SCAN_INTERVAL_MS = 4000;
+const AUTO_PERIODIC_SCAN_INTERVAL_HIDDEN_MS = 25000;
+
+function restartAutoTranslatePeriodicTimer(): void {
+  if (autoTranslatePeriodicTimer !== undefined) {
+    window.clearInterval(autoTranslatePeriodicTimer);
+  }
+  const interval = document.hidden ? AUTO_PERIODIC_SCAN_INTERVAL_HIDDEN_MS : AUTO_PERIODIC_SCAN_INTERVAL_MS;
+  autoTranslatePeriodicTimer = window.setInterval(scheduleAutoTranslateScan, interval);
+}
+
+function handleAutoTranslateVisibilityChange(): void {
+  if (!autoTranslateActive) return;
+  restartAutoTranslatePeriodicTimer();
+  if (!document.hidden) scheduleAutoTranslateScan();
 }
 
 function scheduleAutoTranslateScan(): void {
@@ -881,8 +928,11 @@ function stopAutoTranslate(preserveScannerResume = false): void {
     clearInterval(autoTranslatePeriodicTimer);
     autoTranslatePeriodicTimer = undefined;
   }
+  autoTranslatePendingMutationNodes = new Set();
+  autoTranslateMutationFlushScheduled = false;
   window.removeEventListener('scroll', scheduleAutoTranslateScan);
   window.removeEventListener('resize', scheduleAutoTranslateScan);
+  document.removeEventListener('visibilitychange', handleAutoTranslateVisibilityChange);
   updateAutoTranslateIndicator('stopped');
   if (autoTranslateRemoveUiTimer !== undefined) clearTimeout(autoTranslateRemoveUiTimer);
   autoTranslateRemoveUiTimer = window.setTimeout(() => {
