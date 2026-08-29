@@ -544,6 +544,7 @@ const AUTO_RETRY_MAX = 3;
 // translated fresh in this session.
 const lastTranslateInfo = new WeakMap<HTMLImageElement, { bubbles: BubbleInfo[]; body: TranslateRequest; url: string }>();
 let activeFixPopover: HTMLElement | null = null;
+let activeBubbleMagnifier: HTMLElement | null = null;
 // While a fix-hint re-translate is in flight, don't let auto-translate start
 // new pages — they'd compete for the same backend/GPU capacity and make the
 // fix the user is actively waiting on feel stuck behind background work.
@@ -1632,11 +1633,90 @@ function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null
   targetLayer.style.height = `${pos.height}px`;
 }
 
+// Reading-experience aid: hovering a bubble shows a zoomed crop of just that
+// bubble, magnified relative to its CURRENT on-screen size (not the source
+// image's raw resolution) — so it reads the same whether the page is shown
+// full-width or shrunk into a small reader pane. Implemented as a CSS
+// background-position "window" into the already-loaded translated overlay
+// image, scaled up via background-size — no re-render, no extra request.
+const MAGNIFIER_ZOOM = 2.5;
+const MAGNIFIER_MAX_DIMENSION = 420;
+const MAGNIFIER_MIN_DIMENSION = 140;
+const MAGNIFIER_MAX_ZOOM = 6;
+
+function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, bubble: BubbleInfo): void {
+  const [x1, y1, x2, y2] = bubble.bbox ?? [0, 0, 0, 0];
+  if (x2 <= x1 || y2 <= y1) return;
+
+  const naturalWidth = overlayImg.naturalWidth || 1;
+  const naturalHeight = overlayImg.naturalHeight || 1;
+  const rect = hitEl.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+
+  // Zoom relative to on-screen size, then clamp: never so large it swallows
+  // the viewport, never so small a tiny bubble is pointless to open.
+  let scale = MAGNIFIER_ZOOM;
+  const maxDim = Math.max(rect.width, rect.height) * scale;
+  if (maxDim > MAGNIFIER_MAX_DIMENSION) scale *= MAGNIFIER_MAX_DIMENSION / maxDim;
+  const minDim = Math.min(rect.width, rect.height) * scale;
+  if (minDim < MAGNIFIER_MIN_DIMENSION) scale *= MAGNIFIER_MIN_DIMENSION / minDim;
+  scale = Math.min(scale, MAGNIFIER_MAX_ZOOM);
+
+  const boxWidth = rect.width * scale;
+  const boxHeight = rect.height * scale;
+  // Scale applied to the *source* image so the bubble's natural-pixel span
+  // exactly fills the magnifier box.
+  const bgScale = boxWidth / (x2 - x1);
+
+  if (!activeBubbleMagnifier) {
+    activeBubbleMagnifier = document.createElement('div');
+    activeBubbleMagnifier.className = 'mt-bubble-magnifier';
+    document.body.appendChild(activeBubbleMagnifier);
+  }
+  const magnifier = activeBubbleMagnifier;
+  magnifier.style.width = `${boxWidth}px`;
+  magnifier.style.height = `${boxHeight}px`;
+  magnifier.style.backgroundImage = `url("${overlayImg.src}")`;
+  magnifier.style.backgroundSize = `${naturalWidth * bgScale}px ${naturalHeight * bgScale}px`;
+  magnifier.style.backgroundPosition = `-${x1 * bgScale}px -${y1 * bgScale}px`;
+
+  // Centered above the bubble; flip below if that would clip off the top of
+  // the viewport, and clamp horizontally so it never runs off either edge.
+  const margin = 10;
+  let left = rect.left + rect.width / 2 - boxWidth / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - boxWidth - margin));
+  let top = rect.top - boxHeight - margin;
+  if (top < margin) top = rect.bottom + margin;
+  magnifier.style.left = `${left}px`;
+  magnifier.style.top = `${top}px`;
+  magnifier.style.display = 'block';
+}
+
+function hideBubbleMagnifier(): void {
+  if (activeBubbleMagnifier) activeBubbleMagnifier.style.display = 'none';
+}
+
+// The magnifier is `position: fixed` relative to the bubble's on-screen
+// rect at the moment the hover started — if the page (or an inner
+// scrollable reader pane) scrolls without the mouse actually leaving the
+// hit-target first, its position goes stale relative to whatever's now
+// under the cursor. `capture: true` on window also catches scroll on any
+// nested scrollable container, not just the window itself. Registered once,
+// lazily, the first time any bubble targets are rendered.
+let bubbleMagnifierScrollHandlerRegistered = false;
+function ensureBubbleMagnifierScrollHandler(): void {
+  if (bubbleMagnifierScrollHandlerRegistered) return;
+  bubbleMagnifierScrollHandlerRegistered = true;
+  window.addEventListener('scroll', hideBubbleMagnifier, { passive: true, capture: true });
+}
+
 // Renders one invisible, hoverable hit-target per bubble over the overlay
 // image, positioned by percentage of the bubble's bbox (pixel coords in the
 // source image) so it tracks the displayed size without recomputing pixel
 // offsets on resize. bbox is [x1, y1, x2, y2].
 function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): void {
+  ensureBubbleMagnifierScrollHandler();
+
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1687,10 +1767,13 @@ function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): v
     hit.onmouseenter = () => {
       hit.style.background = 'rgba(59,130,246,0.18)';
       hit.style.outline = '2px solid rgba(59,130,246,0.7)';
+      const overlay = findTranslatedOverlay(parent, overlayId);
+      if (overlay) showBubbleMagnifier(hit, overlay, bubble);
     };
     hit.onmouseleave = () => {
       hit.style.background = 'transparent';
       hit.style.outline = 'none';
+      hideBubbleMagnifier();
     };
     hit.onclick = (ev) => {
       ev.stopPropagation();
@@ -2402,6 +2485,17 @@ function injectAutoTranslateUI(): void {
       display: block !important;
       max-width: none !important;
       opacity: 1 !important;
+    }
+    .mt-bubble-magnifier {
+      position: fixed;
+      display: none;
+      background-repeat: no-repeat;
+      background-color: #fff;
+      border: 2px solid rgba(59,130,246,0.85);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      pointer-events: none;
+      z-index: 2147483647;
     }
   `;
   document.head.appendChild(style);
