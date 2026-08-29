@@ -717,12 +717,34 @@ def _build_generation_config(
         return generation_config
 
     elif provider == "OpenAI-Compatible":
-        return {
+        generation_config = {
             "temperature": temperature,
             "top_p": top_p,
             "top_k": top_k,
             "max_tokens": max_tokens_value,
         }
+        # Best-effort: OpenAI's own "reasoning_effort" (low/medium/high/none)
+        # has become a de facto convention many OpenAI-Compatible gateways
+        # forward straight to the underlying reasoning model — confirmed
+        # working against a real endpoint (b.ai/deepseek-v4-flash-vision-exp):
+        # left unset, that model reasons unconditionally and can burn its
+        # entire max_tokens budget on internal reasoning, returning empty
+        # content; "none" fully disables reasoning (confirmed: 0 reasoning
+        # tokens, clean finish_reason "stop"), "low"/etc. just shrink it.
+        # "none" must be sent explicitly, not omitted — omitting the field
+        # leaves this model's own default (unrestricted reasoning) in
+        # effect, the exact failure this exists to avoid. Only sent at all
+        # when the user explicitly picked a value (i.e. not "Auto" in the
+        # popup) — a self-hosted/strict backend that rejects unrecognized
+        # fields would otherwise break for users who never touched this
+        # setting. "xhigh" isn't a value any known OpenAI-Compatible-shaped
+        # API accepts (this codebase only uses it internally for Claude
+        # Opus), so it's sent as "high" instead.
+        if config.reasoning_effort:
+            generation_config["reasoning_effort"] = (
+                "high" if config.reasoning_effort == "xhigh" else config.reasoning_effort
+            )
+        return generation_config
 
     else:
         raise TranslationError(f"Unknown provider for generation config: {provider}")

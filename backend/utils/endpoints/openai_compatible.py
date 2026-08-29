@@ -104,6 +104,10 @@ def call_openai_compatible_endpoint(
     if top_k is not None:
         payload["top_k"] = top_k
 
+    reasoning_effort = generation_config.get("reasoning_effort")
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
+
     payload = {k: v for k, v in payload.items() if v is not None}
 
     for attempt in range(max_retries + 1):
