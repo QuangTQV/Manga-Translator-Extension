@@ -26,6 +26,7 @@ def call_azure_openai_endpoint(
     timeout: int = 120,
     max_retries: int = 3,
     base_delay: float = 1.0,
+    enable_web_search: bool = False,
 ) -> Optional[str]:
     """
     Calls an Azure OpenAI Chat Completions deployment and handles retries.
@@ -44,6 +45,15 @@ def call_azure_openai_endpoint(
         api_version (Optional[str]): Azure API version; defaults to DEFAULT_AZURE_OPENAI_API_VERSION.
         debug (bool): Whether to print debugging information.
         timeout (int): Request timeout in seconds.
+        enable_web_search (bool): Adds `web_search_options` to the request,
+            Azure's Chat Completions equivalent of OpenAI's web search
+            parameter (Microsoft documents parity between the two APIs'
+            Chat Completion tool surface). Requires the *deployment itself*
+            to be a search-capable model (e.g. a `gpt-4o-search-preview` /
+            `gpt-4o-mini-search-preview` deployment) — sending this to a
+            deployment of a regular (non-search) model will likely be
+            rejected or silently ignored by Azure, since unlike OpenAI's
+            Responses API this isn't a generic tool any model can use.
         max_retries (int): Maximum number of retries for rate limiting errors.
         base_delay (float): Initial delay for retries in seconds.
 
@@ -135,6 +145,9 @@ def call_azure_openai_endpoint(
         top_p = generation_config.get("top_p")
         if top_p is not None:
             payload["top_p"] = top_p
+
+    if enable_web_search:
+        payload["web_search_options"] = {}
 
     for attempt in range(max_retries + 1):
         current_delay = min(base_delay * (2**attempt), 16.0)

@@ -1196,6 +1196,7 @@ def _call_llm_endpoint_impl(
                     system_prompt=system_prompt,
                     debug=debug,
                     base_url=endpoint,
+                    enable_web_search=config.enable_web_search,
                 )
             generation_config = _build_generation_config(
                 provider, model_name, config, debug
@@ -1209,6 +1210,7 @@ def _call_llm_endpoint_impl(
                 api_version=config.azure_openai_api_version or None,
                 system_prompt=system_prompt,
                 debug=debug,
+                enable_web_search=config.enable_web_search,
             )
         elif provider == "Anthropic":
             api_key = config.anthropic_api_key
