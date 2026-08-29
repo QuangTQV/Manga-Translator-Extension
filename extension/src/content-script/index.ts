@@ -16,6 +16,7 @@ const EN_MESSAGES = {
   autoMtDone: 'Auto MT Done',
   stop: 'Stop',
   translatedBadgeTitle: 'Translated by MangaTranslator',
+  translatingBadgeTitle: 'Translating this page…',
   noMangaImagesPage: 'No manga images found on this page.',
   pageAlt: 'Page {page}',
   pagesLabel: 'pages',
@@ -80,6 +81,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     autoMtDone: 'Auto MT xong',
     stop: 'Dung',
     translatedBadgeTitle: 'Da dich bang MangaTranslator',
+    translatingBadgeTitle: 'Dang dich trang nay...',
     noMangaImagesPage: 'Khong tim thay anh manga tren trang nay.',
     pageAlt: 'Trang {page}',
     pagesLabel: 'trang',
@@ -139,6 +141,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     autoMtDone: '自动 MT 完成',
     stop: '停止',
     translatedBadgeTitle: '由 MangaTranslator 翻译',
+    translatingBadgeTitle: '正在翻译此页…',
     noMangaImagesPage: '此页面没有找到漫画图片。',
     pageAlt: '第 {page} 页',
     pagesLabel: '页',
@@ -198,6 +201,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     autoMtDone: 'Auto MT 完了',
     stop: '停止',
     translatedBadgeTitle: 'MangaTranslator で翻訳済み',
+    translatingBadgeTitle: 'このページを翻訳中…',
     noMangaImagesPage: 'このページに漫画画像が見つかりません。',
     pageAlt: 'ページ {page}',
     pagesLabel: 'ページ',
@@ -257,6 +261,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     autoMtDone: 'Auto MT 완료',
     stop: '중지',
     translatedBadgeTitle: 'MangaTranslator로 번역됨',
+    translatingBadgeTitle: '이 페이지 번역 중…',
     noMangaImagesPage: '이 페이지에서 만화 이미지를 찾지 못했습니다.',
     pageAlt: '페이지 {page}',
     pagesLabel: '페이지',
@@ -545,29 +550,23 @@ let activeFixPopover: HTMLElement | null = null;
 // Already in-flight auto-translate calls are left alone (not cancelled).
 let fixHintPending = 0;
 
-// Backend errors that are expected to resolve on their own — the backend's
-// own key/provider rotation and rate-limit/credit cooldown already handles
-// these (see backend/core/services/translation.py:_call_llm_endpoint) — so
-// they shouldn't count as a real failure here. The periodic re-scan will
-// naturally retry once the cooldown clears; there's nothing for the user
-// to fix by clicking a "retry" badge in the meantime.
-function isTransientBackendError(errorMessage: string | undefined): boolean {
-  const text = (errorMessage ?? '').toLowerCase();
-  return (
-    text.includes('rate limited')
-    || text.includes('cooling down')
-    || text.includes('out of credit')
-    || text.includes('insufficient')
-  );
-}
-
 // Records a failed auto-translate attempt. Once retries are exhausted the
 // image would otherwise just sit untranslated forever with nothing but a
 // console.log to show for it (queueAutoTranslateImage refuses to queue it
 // again past AUTO_RETRY_MAX) — so surface it visibly instead, with a badge
 // the user can click to force one more attempt.
-function markAutoTranslateFailure(img: HTMLImageElement, url: string, retries: number, errorMessage?: string): void {
-  if (isTransientBackendError(errorMessage)) return;
+//
+// Rate-limit/cooling-down/out-of-credit errors used to be exempted from
+// counting toward this at all, on the assumption the backend's own key/
+// provider rotation and cooldown would always resolve them before the user
+// needed to do anything — but if every configured key/provider is
+// exhausted at once (e.g. a shared daily quota, not just a per-minute rate
+// limit), the periodic re-scan just keeps retrying forever with nothing
+// ever shown, and the page sits blank with no visible sign anything is
+// wrong. Counting every failure the same way means it still gets several
+// automatic attempts (AUTO_RETRY_MAX), but is guaranteed to eventually
+// surface the retry badge either way.
+function markAutoTranslateFailure(img: HTMLImageElement, url: string, retries: number): void {
   const nextRetries = retries + 1;
   AUTO_RETRY_MAP.set(url, nextRetries);
   if (nextRetries >= AUTO_RETRY_MAX) {
@@ -1023,88 +1022,93 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   if (retries >= AUTO_RETRY_MAX) { console.log('[MT] max retries reached:', url); return; }
 
   updateAutoTranslateCounter();
+  addInProgressBadge(img);
 
-  const pageUrl = window.location.href;
-  const imgData = await fetchImageData(url, pageUrl);
-  if (!autoTranslateActive) return;
-  if (!imgData) {
-    console.log('[MT] image data unavailable:', url);
-    markAutoTranslateFailure(img, url, retries);
-    return;
-  }
-
-  const settings = await loadSettings();
-
-  // Content-addressed cache: blob: URLs (e.g. MangaDex's reader) are
-  // regenerated on every page load, so a URL-keyed cache never hits across
-  // reloads/revisits even for pages already translated. Hash the actual
-  // captured image bytes instead — stable across reloads regardless of URL.
-  const contentKey = contentCacheKey(imgData, settings.config.outputLanguage);
-  const contentCached = translatedContentCache.get(contentKey);
-  if (contentCached) {
-    console.log('[MT] content-cache hit:', url);
-    rememberTranslated(url, contentCached);
-    applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
-    if (isNearViewport(img)) queueAutoTranslateLookahead(img);
-    updateAutoTranslateCounter();
-    return;
-  }
-
-  const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
-  const storyKey = contextMemoryEnabled ? contextMemoryStoryKey(pageUrl) : '';
-  const contextMemoryText = contextMemoryEnabled ? await loadContextMemoryText(storyKey) : '';
-
-  const body = buildTranslateRequest(
-    imgData,
-    settings,
-    settings.config.previousContextEnabled ?? false ? orderedPreviousContextTexts(img) : undefined,
-    contextMemoryText,
-  );
-
-  console.log('[MT] routing translated body through background:', url);
-  const result = await bgTranslateImageWithBody(url, pageUrl, body);
-  if (!autoTranslateActive) return;
-
-  if (result.error) {
-    console.log('[MT] bgTranslateImage error:', result.error);
-    markAutoTranslateFailure(img, url, retries, result.error);
-    return;
-  }
-
-  if (!result.translated_image) {
-    console.log('[MT] no translated_image in result');
-    return;
-  }
-
-  const translatedB64 = result.translated_image;
-  const dataUrl = `data:image/png;base64,${translatedB64}`;
-  const bubbles = (result.bubbles as BubbleInfo[] | undefined) ?? [];
-  lastTranslateInfo.set(img, { bubbles, body, url });
-
-  // Cache it (both the fast within-session URL lookup and the persisted
-  // content-addressed lookup that survives reloads/URL changes)
-  rememberTranslated(url, translatedB64);
-  rememberTranslatedContent(contentKey, translatedB64);
-  await saveTranslatedCacheEntry(url, translatedB64);
-  await saveTranslatedContentCacheEntry(contentKey, translatedB64);
-
-  if (result.ocr_texts?.length) {
-    autoTranslatePreviousPages.push({ img, ocrTexts: result.ocr_texts });
-    if (autoTranslatePreviousPages.length > PREVIOUS_CONTEXT_STORE_LIMIT) {
-      autoTranslatePreviousPages.shift();
+  try {
+    const pageUrl = window.location.href;
+    const imgData = await fetchImageData(url, pageUrl);
+    if (!autoTranslateActive) return;
+    if (!imgData) {
+      console.log('[MT] image data unavailable:', url);
+      markAutoTranslateFailure(img, url, retries);
+      return;
     }
-  }
 
-  if (contextMemoryEnabled && result.memory_note) {
-    void appendContextMemoryNote(storyKey, result.memory_note);
-  }
+    const settings = await loadSettings();
 
-  // Apply to the image element on page
-  applyTranslatedImage(img, dataUrl, url);
-  renderBubbleFixTargets(img, bubbles);
-  if (isNearViewport(img)) queueAutoTranslateLookahead(img);
-  console.log('[MT] applied:', url);
-  updateAutoTranslateCounter();
+    // Content-addressed cache: blob: URLs (e.g. MangaDex's reader) are
+    // regenerated on every page load, so a URL-keyed cache never hits across
+    // reloads/revisits even for pages already translated. Hash the actual
+    // captured image bytes instead — stable across reloads regardless of URL.
+    const contentKey = contentCacheKey(imgData, settings.config.outputLanguage);
+    const contentCached = translatedContentCache.get(contentKey);
+    if (contentCached) {
+      console.log('[MT] content-cache hit:', url);
+      rememberTranslated(url, contentCached);
+      applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
+      if (isNearViewport(img)) queueAutoTranslateLookahead(img);
+      updateAutoTranslateCounter();
+      return;
+    }
+
+    const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
+    const storyKey = contextMemoryEnabled ? contextMemoryStoryKey(pageUrl) : '';
+    const contextMemoryText = contextMemoryEnabled ? await loadContextMemoryText(storyKey) : '';
+
+    const body = buildTranslateRequest(
+      imgData,
+      settings,
+      settings.config.previousContextEnabled ?? false ? orderedPreviousContextTexts(img) : undefined,
+      contextMemoryText,
+    );
+
+    console.log('[MT] routing translated body through background:', url);
+    const result = await bgTranslateImageWithBody(url, pageUrl, body);
+    if (!autoTranslateActive) return;
+
+    if (result.error) {
+      console.log('[MT] bgTranslateImage error:', result.error);
+      markAutoTranslateFailure(img, url, retries);
+      return;
+    }
+
+    if (!result.translated_image) {
+      console.log('[MT] no translated_image in result');
+      return;
+    }
+
+    const translatedB64 = result.translated_image;
+    const dataUrl = `data:image/png;base64,${translatedB64}`;
+    const bubbles = (result.bubbles as BubbleInfo[] | undefined) ?? [];
+    lastTranslateInfo.set(img, { bubbles, body, url });
+
+    // Cache it (both the fast within-session URL lookup and the persisted
+    // content-addressed lookup that survives reloads/URL changes)
+    rememberTranslated(url, translatedB64);
+    rememberTranslatedContent(contentKey, translatedB64);
+    await saveTranslatedCacheEntry(url, translatedB64);
+    await saveTranslatedContentCacheEntry(contentKey, translatedB64);
+
+    if (result.ocr_texts?.length) {
+      autoTranslatePreviousPages.push({ img, ocrTexts: result.ocr_texts });
+      if (autoTranslatePreviousPages.length > PREVIOUS_CONTEXT_STORE_LIMIT) {
+        autoTranslatePreviousPages.shift();
+      }
+    }
+
+    if (contextMemoryEnabled && result.memory_note) {
+      void appendContextMemoryNote(storyKey, result.memory_note);
+    }
+
+    // Apply to the image element on page
+    applyTranslatedImage(img, dataUrl, url);
+    renderBubbleFixTargets(img, bubbles);
+    if (isNearViewport(img)) queueAutoTranslateLookahead(img);
+    console.log('[MT] applied:', url);
+    updateAutoTranslateCounter();
+  } finally {
+    removeInProgressBadge(img);
+  }
 }
 
 // Tracks the most recent overlay id used for each source URL. Some manga
@@ -1127,7 +1131,8 @@ function removeOrphanedOverlayFor(url: string, currentOverlayId: string): void {
         + `.mt-badge[data-mt-for="${previousOverlayId}"], `
         + `.mt-export-btn[data-mt-for="${previousOverlayId}"], `
         + `.mt-fix-hit-layer[data-mt-for="${previousOverlayId}"], `
-        + `.mt-retry-badge[data-mt-for="${previousOverlayId}"]`,
+        + `.mt-retry-badge[data-mt-for="${previousOverlayId}"], `
+        + `.mt-progress-badge[data-mt-for="${previousOverlayId}"]`,
       )
       .forEach((el) => el.remove());
   }
@@ -1138,6 +1143,7 @@ function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: s
   // Add translated marker so we don't re-process
   img.setAttribute('data-mt-translated', 'true');
   removeRetryBadge(img);
+  removeInProgressBadge(img);
 
   const originalUrl = rawUrl ?? resolveMangaUrl(img);
   if (originalUrl) {
@@ -1349,6 +1355,7 @@ function addExportButton(img: HTMLImageElement): void {
 function syncTranslatedDecorations(img: HTMLImageElement): void {
   syncTranslatedOverlayLayout(img);
   syncTranslatedBadgeLayout(img);
+  syncInProgressBadgeLayout(img);
   syncFixHitLayerLayout(img);
   syncExportButtonLayout(img);
 }
@@ -1452,6 +1459,62 @@ function addTranslatedBadge(img: HTMLImageElement): void {
   badge.style.fontFamily = 'Inter, system-ui, sans-serif';
   syncTranslatedBadgeLayout(img, badge);
   scheduleTranslatedDecorationSync(img);
+}
+
+function findInProgressBadge(parent: HTMLElement, overlayId: string): HTMLElement | null {
+  for (const child of Array.from(parent.children)) {
+    if (
+      child instanceof HTMLElement
+      && child.classList.contains('mt-progress-badge')
+      && child.getAttribute('data-mt-for') === overlayId
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+// Shown at the same corner as the "MT"/retry badges (mutually exclusive —
+// a page is either not started, mid-translation, done, or failed) the
+// moment a page actually starts its translate request, not just while
+// queued — so with several pages in flight during auto-translate/batch,
+// the reader can tell which page(s) are currently being worked on versus
+// still waiting their turn in the queue.
+function addInProgressBadge(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') parent.style.position = 'relative';
+
+  const overlayId = getTranslatedOverlayId(img);
+  let badge = findInProgressBadge(parent, overlayId);
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'mt-progress-badge';
+    badge.setAttribute('data-mt-for', overlayId);
+    parent.appendChild(badge);
+  }
+
+  badge.textContent = '···';
+  badge.title = tr('translatingBadgeTitle');
+  syncTranslatedBadgeLayout(img, badge);
+  scheduleTranslatedDecorationSync(img);
+}
+
+function removeInProgressBadge(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const overlayId = getTranslatedOverlayId(img);
+  findInProgressBadge(parent, overlayId)?.remove();
+}
+
+function syncInProgressBadgeLayout(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const overlayId = getTranslatedOverlayId(img);
+  const badge = findInProgressBadge(parent, overlayId);
+  if (badge) syncTranslatedBadgeLayout(img, badge);
 }
 
 function findRetryBadge(parent: HTMLElement, overlayId: string): HTMLElement | null {
@@ -2322,6 +2385,18 @@ function injectAutoTranslateUI(): void {
       font-size: 9px; font-weight: 900; padding: 1px 5px;
       border-radius: 4px; pointer-events: none; z-index: 10;
       font-family: Inter, system-ui, sans-serif;
+    }
+    .mt-progress-badge {
+      position: absolute; top: 4px; right: 4px;
+      background: rgba(59,130,246,0.9); color: white;
+      font-size: 9px; font-weight: 900; padding: 1px 5px;
+      border-radius: 4px; pointer-events: none; z-index: 10;
+      font-family: Inter, system-ui, sans-serif;
+      animation: mt-progress-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes mt-progress-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
     }
     .mt-page-overlay {
       display: block !important;
