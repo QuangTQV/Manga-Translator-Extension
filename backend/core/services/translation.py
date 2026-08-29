@@ -2,6 +2,7 @@ import base64
 import json
 import random
 import re
+import unicodedata
 import threading
 import time
 from dataclasses import replace
@@ -66,6 +67,24 @@ TRANSLATION_PATTERN = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS = 10
+
+
+def _is_vietnamese_output(output_language: Optional[str]) -> bool:
+    """Recognize Vietnamese even when users type its native name.
+
+    The language fields intentionally accept free-form input. Restricting the
+    xưng hô rules to the English label ``Vietnamese`` meant that an otherwise
+    valid setting such as ``Tiếng Việt`` silently lost the project's strongest
+    Vietnamese-localization guidance.
+    """
+    normalized = unicodedata.normalize("NFKD", output_language or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.casefold().replace("đ", "d")
+    return (
+        "vietnamese" in normalized
+        or "tieng viet" in normalized
+        or "viet nam" in normalized
+    )
 
 
 def _build_system_prompt_ocr(
@@ -205,7 +224,7 @@ def _build_system_prompt_translation(
   - **Referents:** Disambiguate callbacks, ongoing beats, or unclear references using prior dialogue."""  # noqa
 
     vietnamese_pronoun_rule = ""
-    if "vietnamese" in (output_language or "").lower():
+    if _is_vietnamese_output(output_language):
         vietnamese_pronoun_rule = """
 - **Vietnamese Pronouns (xưng hô):** Before translating any dialogue, work out for every distinct speaker-listener pair: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship. Then pick ONE pronoun pair for that speaker-listener direction, write it down in the required `PRONOUN MAP:` section (see OUTPUT SCHEMA below), and reuse it for every line between them:
   - **Evidence priority — text over art:** manga art is unreliable for judging age/relationship — character designs routinely draw people who are actually years apart (senpai/kohai, siblings, teacher/student) as visually the same age, and a "young-looking" style can make every character look like a peer regardless of their real age. Rank evidence in this order and let a higher-ranked signal override a lower one when they conflict: (1) explicit address terms/honorifics used in the dialogue itself (-san/-chan/-kun/-senpai, name suffixes, family terms — see the override below), (2) source-language register — self-referential pronouns (e.g. Japanese ore/boku/watashi/atashi), sentence-final particles, keigo/politeness level, blunt vs. formal phrasing, (3) narrative/story context (established roles like teacher, senior, sibling), (4) apparent age/build from the art, used only as a tiebreaker when the above give no signal.
@@ -224,11 +243,11 @@ def _build_system_prompt_translation(
     natural_style_rule = (
         """
 - **Natural Vietnamese:** Write each line the way a Vietnamese person would actually say it out loud, not a word-for-word rendering of the source sentence structure. Reorder clauses, drop redundant subject pronouns/particles the source repeats out of grammatical necessity, and use casual contractions ("ko", "z", "j"... are NOT allowed, but natural spoken phrasing like "à", "đấy", "mà", "đâu" is encouraged where it fits the tone). If your draft reads stiff or robotic, rewrite it more casually before finalizing."""  # noqa
-        if "vietnamese" in (output_language or "").lower()
+        if _is_vietnamese_output(output_language)
         else ""
     )
 
-    is_vietnamese_output = "vietnamese" in (output_language or "").lower()
+    is_vietnamese_output = _is_vietnamese_output(output_language)
 
     core_rules = f"""
 ## CORE RULES
@@ -2215,7 +2234,7 @@ def call_translation_api_batch(
             "and character count make it clearly the same two people continuing the same conversation/scene, "
             "still match them to the earlier entry rather than treating a new physical description as an unmapped "
             "new pair."
-            if "vietnamese" in (output_language or "").lower()
+            if _is_vietnamese_output(output_language)
             else ""
         )
         context_memory_section = (
@@ -2463,7 +2482,7 @@ The target language is {output_language}. Use the appropriate translation approa
                     ocr_texts_output.extend(extracted_texts)
                 return combined_results
 
-            if "vietnamese" in (output_language or "").lower():
+            if _is_vietnamese_output(output_language):
                 final_translations = [_strip_pronoun_tag(t) for t in final_translations]
 
             combined_results = []
@@ -2547,7 +2566,7 @@ For each image, you must perform two steps:
                 response_text, total_elements, provider, debug
             )
 
-            is_vi_output = "vietnamese" in (output_language or "").lower()
+            is_vi_output = _is_vietnamese_output(output_language)
             translations = []
             ocr_texts = []
             for line in raw_lines:
