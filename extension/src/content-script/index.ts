@@ -2712,6 +2712,18 @@ function injectAutoTranslateUI(): void {
       display: block !important;
       max-width: none !important;
       opacity: 1 !important;
+      /* The heaviest thing this extension puts on the page — a full-res
+         translated bitmap per page, often several MB — kept in the DOM for
+         every page ever translated in the session, including ones scrolled
+         far out of view. Tells the browser to skip layout/paint work for
+         instances that are off-screen and automatically resume it once
+         they're scrolled near again; pure rendering hint, no behavior
+         change, nothing else on the page reads or depends on this. Inline
+         width/height (set in applyTranslatedOverlay, right before this
+         class-driven styling ever applies) already gives the browser a
+         real size to lay out with, so no contain-intrinsic-size fallback
+         is needed. */
+      content-visibility: auto;
     }
     .mt-bubble-magnifier {
       position: fixed;
