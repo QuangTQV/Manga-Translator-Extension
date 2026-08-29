@@ -17,6 +17,8 @@ const EN_MESSAGES = {
   stop: 'Stop',
   translatedBadgeTitle: 'Translated by MangaTranslator',
   translatingBadgeTitle: 'Translating this page…',
+  viewOriginalTitle: 'View original (untranslated) page',
+  viewTranslatedTitle: 'View translated page',
   noMangaImagesPage: 'No manga images found on this page.',
   pageAlt: 'Page {page}',
   pagesLabel: 'pages',
@@ -82,6 +84,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     stop: 'Dung',
     translatedBadgeTitle: 'Da dich bang MangaTranslator',
     translatingBadgeTitle: 'Dang dich trang nay...',
+    viewOriginalTitle: 'Xem anh goc (chua dich)',
+    viewTranslatedTitle: 'Xem anh da dich',
     noMangaImagesPage: 'Khong tim thay anh manga tren trang nay.',
     pageAlt: 'Trang {page}',
     pagesLabel: 'trang',
@@ -142,6 +146,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     stop: '停止',
     translatedBadgeTitle: '由 MangaTranslator 翻译',
     translatingBadgeTitle: '正在翻译此页…',
+    viewOriginalTitle: '查看原图（未翻译）',
+    viewTranslatedTitle: '查看翻译后的页面',
     noMangaImagesPage: '此页面没有找到漫画图片。',
     pageAlt: '第 {page} 页',
     pagesLabel: '页',
@@ -202,6 +208,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     stop: '停止',
     translatedBadgeTitle: 'MangaTranslator で翻訳済み',
     translatingBadgeTitle: 'このページを翻訳中…',
+    viewOriginalTitle: '原文（未翻訳）を表示',
+    viewTranslatedTitle: '翻訳済みページを表示',
     noMangaImagesPage: 'このページに漫画画像が見つかりません。',
     pageAlt: 'ページ {page}',
     pagesLabel: 'ページ',
@@ -262,6 +270,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     stop: '중지',
     translatedBadgeTitle: 'MangaTranslator로 번역됨',
     translatingBadgeTitle: '이 페이지 번역 중…',
+    viewOriginalTitle: '원본(번역 전) 페이지 보기',
+    viewTranslatedTitle: '번역된 페이지 보기',
     noMangaImagesPage: '이 페이지에서 만화 이미지를 찾지 못했습니다.',
     pageAlt: '페이지 {page}',
     pagesLabel: '페이지',
@@ -1014,6 +1024,27 @@ async function processAutoTranslateQueue(): Promise<void> {
   autoTranslateProcessing = false;
 }
 
+// The backend's JSON response uses the Python/Pydantic field names verbatim
+// (original_text, translated_text — see backend/schemas.py:BubbleInfo), but
+// every call site here was casting the raw response straight to the
+// camelCase BubbleInfo type with `as`, which doesn't actually rename
+// anything at runtime — bubble.originalText/translatedText silently read as
+// undefined for every bubble, which is why the fix-hint popover's "current
+// translation" label never had anything in it. Normalize once, here.
+function normalizeBubbles(raw: unknown[] | undefined): BubbleInfo[] {
+  if (!raw) return [];
+  return raw.map((item) => {
+    const b = (item ?? {}) as Record<string, unknown>;
+    const bbox = Array.isArray(b.bbox) ? (b.bbox as number[]) : [0, 0, 0, 0];
+    return {
+      bbox: [bbox[0] ?? 0, bbox[1] ?? 0, bbox[2] ?? 0, bbox[3] ?? 0] as [number, number, number, number],
+      confidence: typeof b.confidence === 'number' ? b.confidence : 0,
+      originalText: typeof b.original_text === 'string' ? b.original_text : undefined,
+      translatedText: typeof b.translated_text === 'string' ? b.translated_text : '',
+    };
+  });
+}
+
 async function translateAndApply(img: HTMLImageElement, url: string): Promise<void> {
   console.log('[MT] translateAndApply start:', url);
   if (!autoTranslateActive) { console.log('[MT] not active, returning'); return; }
@@ -1080,7 +1111,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
 
     const translatedB64 = result.translated_image;
     const dataUrl = `data:image/png;base64,${translatedB64}`;
-    const bubbles = (result.bubbles as BubbleInfo[] | undefined) ?? [];
+    const bubbles = normalizeBubbles(result.bubbles);
     lastTranslateInfo.set(img, { bubbles, body, url });
 
     // Cache it (both the fast within-session URL lookup and the persisted
@@ -1133,7 +1164,8 @@ function removeOrphanedOverlayFor(url: string, currentOverlayId: string): void {
         + `.mt-export-btn[data-mt-for="${previousOverlayId}"], `
         + `.mt-fix-hit-layer[data-mt-for="${previousOverlayId}"], `
         + `.mt-retry-badge[data-mt-for="${previousOverlayId}"], `
-        + `.mt-progress-badge[data-mt-for="${previousOverlayId}"]`,
+        + `.mt-progress-badge[data-mt-for="${previousOverlayId}"], `
+        + `.mt-original-toggle-btn[data-mt-for="${previousOverlayId}"]`,
       )
       .forEach((el) => el.remove());
   }
@@ -1157,6 +1189,8 @@ function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: s
   // Add a subtle badge overlay
   addTranslatedBadge(img);
   addExportButton(img);
+  addOriginalToggleButton(img);
+  setOriginalViewActive(img, false);
 }
 
 function applyTranslatedOverlay(img: HTMLImageElement, dataUrl: string): void {
@@ -1353,12 +1387,116 @@ function addExportButton(img: HTMLImageElement): void {
   scheduleTranslatedDecorationSync(img);
 }
 
+function findOriginalToggleButton(parent: HTMLElement, overlayId: string): HTMLElement | null {
+  for (const child of Array.from(parent.children)) {
+    if (
+      child instanceof HTMLElement
+      && child.classList.contains('mt-original-toggle-btn')
+      && child.getAttribute('data-mt-for') === overlayId
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const overlayId = getTranslatedOverlayId(img);
+  const targetBtn = btn ?? findOriginalToggleButton(parent, overlayId);
+  if (!targetBtn) return;
+
+  const pos = getImagePositionWithinParent(img, parent);
+  // Stacked below the export button, same right-aligned column as the
+  // "MT" badge.
+  targetBtn.style.left = `${pos.x + pos.width - 4}px`;
+  targetBtn.style.top = `${pos.y + 40}px`;
+  targetBtn.style.right = 'auto';
+  targetBtn.style.transform = 'translateX(-100%)';
+}
+
+// Lets the reader briefly peek at the raw, untranslated page — to compare
+// art the translated overlay covers, or judge a translation choice against
+// the source. The original <img> element's own src/currentSrc is never
+// rewritten (the translated result is a separate <img> stacked on top —
+// see applyTranslatedOverlay), so "showing the original" is just hiding
+// that overlay; nothing to re-fetch or restore.
+function addOriginalToggleButton(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') parent.style.position = 'relative';
+
+  const overlayId = getTranslatedOverlayId(img);
+  let btn = findOriginalToggleButton(parent, overlayId);
+  if (!btn) {
+    btn = document.createElement('div');
+    btn.className = 'mt-original-toggle-btn';
+    btn.setAttribute('data-mt-for', overlayId);
+    parent.appendChild(btn);
+  }
+
+  btn.textContent = '👁';
+  btn.style.position = 'absolute';
+  btn.style.background = 'rgba(15,23,42,0.85)';
+  btn.style.color = 'white';
+  btn.style.fontSize = '10px';
+  btn.style.lineHeight = '1';
+  btn.style.padding = '2px 5px';
+  btn.style.borderRadius = '4px';
+  btn.style.cursor = 'pointer';
+  btn.style.pointerEvents = 'auto';
+  btn.style.zIndex = '10';
+  btn.style.fontFamily = 'Inter, system-ui, sans-serif';
+
+  const toggleBtn = btn;
+  toggleBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    setOriginalViewActive(img, !toggleBtn.classList.contains('active'));
+  };
+
+  syncOriginalToggleButtonLayout(img, btn);
+  scheduleTranslatedDecorationSync(img);
+}
+
+// showOriginal=false (the default after every fresh translate/fix) also
+// resets any stale hidden state left over from a previous toggle — without
+// this, toggling to "original" and then landing a new translation (e.g. via
+// fix-hint) would leave the new overlay invisible until manually toggled
+// back, since the CSS !important override set below would otherwise
+// persist untouched across re-renders of the same long-lived overlay
+// element.
+function setOriginalViewActive(img: HTMLImageElement, showOriginal: boolean): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const overlayId = getTranslatedOverlayId(img);
+
+  const overlay = findTranslatedOverlay(parent, overlayId);
+  overlay?.style.setProperty('display', showOriginal ? 'none' : 'block', 'important');
+
+  const hitLayer = findFixHitLayer(parent, overlayId);
+  if (hitLayer) hitLayer.style.display = showOriginal ? 'none' : '';
+  if (showOriginal) hideBubbleMagnifier();
+
+  const btn = findOriginalToggleButton(parent, overlayId);
+  if (btn) {
+    btn.classList.toggle('active', showOriginal);
+    btn.style.background = showOriginal ? 'rgba(37,99,235,0.9)' : 'rgba(15,23,42,0.85)';
+    btn.title = tr(showOriginal ? 'viewTranslatedTitle' : 'viewOriginalTitle');
+  }
+}
+
 function syncTranslatedDecorations(img: HTMLImageElement): void {
   syncTranslatedOverlayLayout(img);
   syncTranslatedBadgeLayout(img);
   syncInProgressBadgeLayout(img);
   syncFixHitLayerLayout(img);
   syncExportButtonLayout(img);
+  syncOriginalToggleButtonLayout(img);
 }
 
 function scheduleTranslatedDecorationSync(img: HTMLImageElement): void {
@@ -1671,6 +1809,9 @@ function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, b
   if (!activeBubbleMagnifier) {
     activeBubbleMagnifier = document.createElement('div');
     activeBubbleMagnifier.className = 'mt-bubble-magnifier';
+    const caption = document.createElement('div');
+    caption.className = 'mt-bubble-magnifier-caption';
+    activeBubbleMagnifier.appendChild(caption);
     document.body.appendChild(activeBubbleMagnifier);
   }
   const magnifier = activeBubbleMagnifier;
@@ -1679,6 +1820,17 @@ function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, b
   magnifier.style.backgroundImage = `url("${overlayImg.src}")`;
   magnifier.style.backgroundSize = `${naturalWidth * bgScale}px ${naturalHeight * bgScale}px`;
   magnifier.style.backgroundPosition = `-${x1 * bgScale}px -${y1 * bgScale}px`;
+
+  // The zoomed crop already covers "hard to read" — the original-language
+  // OCR text (when the backend returned one) is shown too, for readers who
+  // want to sanity-check a translation choice against the source line
+  // without leaving the page.
+  const caption = magnifier.querySelector<HTMLElement>('.mt-bubble-magnifier-caption');
+  if (caption) {
+    const originalText = (bubble.originalText ?? '').trim();
+    caption.textContent = originalText;
+    caption.style.display = originalText ? 'block' : 'none';
+  }
 
   // Centered above the bubble; flip below if that would clip off the top of
   // the viewport, and clamp horizontally so it never runs off either edge.
@@ -1950,7 +2102,7 @@ async function submitFixHint(img: HTMLImageElement, bubbleIndex: number, bubble:
 
     const translatedB64 = result.translated_image;
     const dataUrl = `data:image/png;base64,${translatedB64}`;
-    const newBubbles = (result.bubbles as BubbleInfo[] | undefined) ?? info.bubbles;
+    const newBubbles = result.bubbles ? normalizeBubbles(result.bubbles) : info.bubbles;
 
     const settings = await loadSettings();
     const contentKey = contentCacheKey(info.body.image, settings.config.outputLanguage);
@@ -2005,7 +2157,7 @@ async function fixOnePage(page: PageEntry, instruction: string): Promise<boolean
   // the cache and the scanner's own thumbnail — without this the fix was
   // only visible after a full page reload re-applied the (now-updated)
   // cache from scratch.
-  applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles as BubbleInfo[] | undefined, body);
+  applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles ? normalizeBubbles(result.bubbles) : undefined, body);
 
   if (currentShadow) {
     const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
@@ -2496,6 +2648,14 @@ function injectAutoTranslateUI(): void {
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       pointer-events: none;
       z-index: 2147483647;
+    }
+    .mt-bubble-magnifier-caption {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.72); color: #fff;
+      font-size: 12px; line-height: 1.35; padding: 4px 8px;
+      max-height: 45%; overflow-y: auto;
+      font-family: Inter, system-ui, sans-serif;
+      border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;
     }
   `;
   document.head.appendChild(style);
@@ -3365,7 +3525,7 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 
     rememberTranslated(page.rawUrl, translatedB64);
     await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
-    applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles as BubbleInfo[] | undefined, body);
+    applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles ? normalizeBubbles(result.bubbles) : undefined, body);
 
     if (currentShadow) {
       const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);

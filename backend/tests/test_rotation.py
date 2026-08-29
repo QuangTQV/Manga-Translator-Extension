@@ -14,6 +14,7 @@ from core.services.translation import (
     _cooldown_remaining,
     _cooldowns,
     _iter_llm_candidates,
+    _looks_like_a_refusal,
     _starting_offset,
     _weighted_shuffle,
 )
@@ -294,6 +295,77 @@ def test_generic_400_error_without_content_filter_marker_is_not_rotated():
     # burn through the whole rotation chain pretending a different key on
     # the same broken deployment might succeed.
     assert attempts == ["az1"]
+
+
+# ---------------------------------------------------------------------------
+# _looks_like_a_refusal: a "successful" (no exception) response that's
+# actually the provider declining in plain text, not a content_filter error
+# ---------------------------------------------------------------------------
+def test_plain_refusal_sentence_is_detected():
+    assert _looks_like_a_refusal("I'm sorry, but I cannot assist with that request.")
+
+
+def test_refusal_detection_is_case_insensitive():
+    assert _looks_like_a_refusal("I CANNOT ASSIST with that.")
+
+
+def test_long_multiline_translation_is_not_a_refusal():
+    # The real shape of a successful batch response — several numbered
+    # lines, well past the length a flat refusal sentence would ever be.
+    translation = "\n".join(f"{i}: some translated dialogue line here" for i in range(1, 14))
+    assert not _looks_like_a_refusal(translation)
+
+
+def test_dialogue_containing_apologetic_words_is_not_a_refusal():
+    # A character's own line can legitimately contain "sorry" — must not
+    # false-positive on translated *content*, only on the model talking
+    # about itself refusing the request.
+    assert not _looks_like_a_refusal("1: I'm so sorry for what I did to you.")
+
+
+def test_empty_or_none_is_not_a_refusal():
+    assert not _looks_like_a_refusal("")
+    assert not _looks_like_a_refusal(None)
+
+
+def test_refusal_candidate_rotates_to_next_provider_without_cooldown():
+    """The exact bug scenario: Azure's safety layer replies in plain text
+    ("I'm sorry, but I cannot assist with that request.") instead of
+    raising a structured content_filter error — a 200 OK with unusable
+    content. Previously this returned successfully from _call_llm_endpoint,
+    only to fail parsing far downstream with an opaque "All bubbles
+    failed" and no rotation to the configured fallback at all."""
+    config = TranslationConfig(
+        provider="Azure OpenAI", azure_openai_api_key="az1",
+        backup_api_keys=["g2"], model_name="m", rotation_strategy="sequential",
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", api_keys=["g2"], model_name="m"),
+        ],
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        if candidate.provider == "Azure OpenAI":
+            return "I'm sorry, but I cannot assist with that request."
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+    assert _cooldown_remaining("Azure OpenAI", "az1", "m") == 0.0
+
+
+def test_refusal_on_last_candidate_raises_a_clear_error():
+    config = TranslationConfig(
+        provider="Azure OpenAI", azure_openai_api_key="az1", model_name="m",
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        return "I cannot assist with that."
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        with pytest.raises(TranslationError, match="refused"):
+            _call_llm_endpoint(config, [], "prompt")
 
 
 # ---------------------------------------------------------------------------

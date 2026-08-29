@@ -5,9 +5,14 @@ import { expect, test } from './fixtures';
 import { baseSeed, firstKeyMatches, seedSettings } from './storage';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TEST_SITE_URL = `file://${path.resolve(__dirname, 'fixtures/test-site/index.html')}`;
+// A single-image fixture, not the 4-page test-site — auto-translate
+// processes every page on the site concurrently, and racing to hover
+// "whichever page's bubble finished first" (possibly far down the page,
+// needing a large scroll-into-view) made this test flaky. One page removes
+// the race entirely.
+const TEST_SITE_URL = `file://${path.resolve(__dirname, 'fixtures/test-site-single/index.html')}`;
 const FAKE_TRANSLATED_B64 = fs.readFileSync(path.join(__dirname, 'fixtures/test-site/page1.jpg')).toString('base64');
-// page1.jpg (and every test-site fixture image) is 600x850.
+// page1.jpg is 600x850.
 const BUBBLE_BBOX = [40, 30, 300, 180];
 
 // The overlay image is the only "reading surface" the user actually has —
@@ -60,6 +65,10 @@ test('hovering a translated bubble shows a magnified crop; leaving hides it', as
 
   const bgImage = await magnifier.evaluate((el) => getComputedStyle(el).backgroundImage);
   expect(bgImage).toContain('data:image');
+
+  // The original (source-language) OCR text the backend returned should be
+  // shown as a caption, so a reader can cross-check the translation choice.
+  await expect(magnifier.locator('.mt-bubble-magnifier-caption')).toHaveText('げんき？');
 
   // Move off the bubble entirely (not just to another element) so the
   // hit-target's own mouseleave actually fires.

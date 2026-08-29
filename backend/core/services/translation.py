@@ -920,6 +920,53 @@ def _is_content_filter_error(exc: Exception) -> bool:
     return any(marker in text for marker in _CONTENT_FILTER_MARKERS)
 
 
+# Phrases a provider's safety layer uses when it replies in plain text
+# instead of raising a structured error (content_filter, rate limit, etc.)
+# — a "successful" HTTP 200 whose body is a refusal sentence, not usable
+# translation output. Deliberately narrow: only phrases that are near-
+# unambiguous as the MODEL talking about itself, never plausible as a
+# translated dialogue line.
+_REFUSAL_MARKERS = (
+    "i cannot assist",
+    "i can't assist",
+    "i cannot help with that",
+    "i can't help with that",
+    "i'm not able to assist",
+    "i am not able to assist",
+    "i won't be able to help",
+    "as an ai language model",
+    "cannot fulfill this request",
+    "cannot comply with this request",
+    "against my guidelines",
+    "violates my guidelines",
+    "i'm unable to help with that",
+    "i am unable to help with that",
+)
+
+# A real batch-translation response covers every bubble on the page as
+# separate numbered lines, so it's always far longer than this — a
+# refusal is just one flat sentence. Keeps the marker check from ever
+# matching inside legitimate (long, multi-line) translation output.
+_REFUSAL_MAX_LENGTH = 300
+
+
+def _looks_like_a_refusal(text: Optional[str]) -> bool:
+    """True if a "successful" LLM response (no exception, HTTP 200) is
+    actually the provider's safety layer declining in plain text rather
+    than usable translation output — e.g. Azure/OpenAI answering "I'm
+    sorry, but I cannot assist with that request." instead of raising a
+    content_filter error. Nothing to cool down (content-specific, like
+    _is_content_filter_error) — rotates to the next candidate exactly the
+    same way, on the chance a different provider's policy allows it."""
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped or len(stripped) > _REFUSAL_MAX_LENGTH:
+        return False
+    lowered = stripped.lower()
+    return any(marker in lowered for marker in _REFUSAL_MARKERS)
+
+
 def _candidate_key(candidate: TranslationConfig) -> Optional[str]:
     """The API key value a candidate config would actually call with."""
     key_field = _PROVIDER_API_KEY_FIELD.get(candidate.provider)
@@ -1216,6 +1263,29 @@ def _call_llm_endpoint(
                 candidate, parts, prompt_text, debug, system_prompt
             )
             elapsed = time.time() - start
+            if _looks_like_a_refusal(result):
+                # A "successful" call (no exception) whose body is the
+                # provider declining in plain text — nothing downstream
+                # would ever parse a real bubble out of this, so treat it
+                # as a rotatable failure right here instead of letting it
+                # fall through to "All bubbles failed" with no fallback.
+                log_message(
+                    f"LLM call ({candidate.provider} / {candidate.model_name}) "
+                    f"returned a refusal instead of a translation after "
+                    f"{elapsed:.2f}s: {result!r}",
+                    always_print=True,
+                )
+                if not is_last:
+                    log_message(
+                        f"Candidate {idx + 1}/{len(candidates)} ({candidate.provider}) "
+                        f"refused the request — rotating to next key/provider.",
+                        always_print=True,
+                    )
+                    continue
+                raise TranslationError(
+                    f"{candidate.provider} refused the request instead of "
+                    f"translating: {result.strip()}"
+                )
             log_message(
                 f"LLM call ({candidate.provider} / {candidate.model_name}) took {elapsed:.2f}s",
                 always_print=True,
