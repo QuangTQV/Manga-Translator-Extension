@@ -1006,6 +1006,35 @@ def _starting_offset(
     return _next_round_robin_offset(pool_signature) % pool_size
 
 
+def _weighted_shuffle(items: List[Any], weights: List[float]) -> List[Any]:
+    """Weighted-random permutation of `items` (Fisher-Yates-style draw
+    without replacement, each remaining item's draw probability
+    proportional to its weight).
+
+    Used instead of _starting_offset for "random" rotation: picking a
+    single weighted-random starting point and then walking the rest of the
+    fallback chain in fixed original-list order means weight only ever
+    affects whether a candidate is tried *first* — once that pick fails,
+    every later attempt reverts to plain list order regardless of weight.
+    In practice this let several same-provider backup keys (which sort
+    consecutively, since _iter_llm_candidates yields them together) get
+    walked one after another ahead of a much higher-weighted candidate
+    that just happened to sit later in the configured list, whenever they
+    all failed together (e.g. one shared-quota rate limit hitting every
+    key on that provider at once). Weighting the whole draw order instead
+    makes a high-weight candidate consistently more likely to be tried
+    early throughout the *entire* fallback sequence, not just the first
+    attempt."""
+    remaining_items = list(items)
+    remaining_weights = list(weights)
+    order: List[Any] = []
+    while remaining_items:
+        idx = random.choices(range(len(remaining_items)), weights=remaining_weights, k=1)[0]
+        order.append(remaining_items.pop(idx))
+        remaining_weights.pop(idx)
+    return order
+
+
 def _iter_llm_candidates(config: TranslationConfig):
     """Yield TranslationConfig variants to try in order: the config exactly
     as given (so "API key is missing" etc. behave unchanged when no backups/
@@ -1119,20 +1148,32 @@ def _call_llm_endpoint(
             f"in about {soonest:.0f}s."
         )
 
-    # Pick which ready candidate goes first, per config.rotation_strategy
-    # (default round_robin: spread load proactively instead of always
-    # starting from the primary). Rotation-on-failure below still walks the
-    # rest of this (now rotated) order if the chosen starting candidate
-    # fails, so nothing here removes the fallback chain — it only changes
-    # which candidate goes first.
+    # Order the candidates, per config.rotation_strategy. Rotation-on-
+    # failure below always walks whatever order results from here, so
+    # nothing here removes the fallback chain — it only decides the order.
     if len(candidates) > 1:
-        pool_signature = tuple(
-            (c.provider, _candidate_key(c) or "", c.model_name or "") for c in all_candidates
-        )
-        weights = [max(c.candidate_weight, 0.0001) for c in candidates]
-        offset = _starting_offset(config.rotation_strategy, pool_signature, len(candidates), weights)
-        if offset:
-            candidates = candidates[offset:] + candidates[:offset]
+        if config.rotation_strategy == "random":
+            # A single weighted-random starting pick (the old behavior)
+            # only ever biases which candidate is tried *first* — once that
+            # fails, every later attempt reverts to plain configured-list
+            # order regardless of weight. Same-provider backup keys sort
+            # consecutively (_iter_llm_candidates yields them together), so
+            # if they all fail together (e.g. one shared-quota rate limit
+            # hitting every key on that provider at once), a much higher-
+            # weighted candidate sitting later in the list wasn't tried
+            # until every one of them had been walked through first.
+            # Weighting the whole draw order instead keeps a high-weight
+            # candidate more likely to be tried early throughout the
+            # *entire* fallback sequence, not just the first attempt.
+            weights = [max(c.candidate_weight, 0.0001) for c in candidates]
+            candidates = _weighted_shuffle(candidates, weights)
+        else:
+            pool_signature = tuple(
+                (c.provider, _candidate_key(c) or "", c.model_name or "") for c in all_candidates
+            )
+            offset = _starting_offset(config.rotation_strategy, pool_signature, len(candidates))
+            if offset:
+                candidates = candidates[offset:] + candidates[:offset]
 
     # A web-search request only actually searches on a candidate whose
     # provider implements it — reordering here (rather than just hoping

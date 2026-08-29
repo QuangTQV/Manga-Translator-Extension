@@ -12,8 +12,10 @@ from core.config import FallbackProviderConfig, TranslationConfig
 from core.services.translation import (
     _call_llm_endpoint,
     _cooldown_remaining,
+    _cooldowns,
     _iter_llm_candidates,
     _starting_offset,
+    _weighted_shuffle,
 )
 from utils.exceptions import TranslationError
 
@@ -368,3 +370,88 @@ def test_web_search_falls_through_to_incapable_candidate_if_capable_one_fails():
 
     assert result == "1: translated"
     assert attempts == ["Google", "DeepSeek"]
+
+
+# ---------------------------------------------------------------------------
+# _weighted_shuffle: "random" rotation previously only weighted the first
+# pick, then walked the rest of the fallback chain in plain configured-list
+# order regardless of weight — meaning several low-weight same-provider
+# backup keys (which sort consecutively) failing together would all be
+# walked before a much higher-weighted candidate sitting later in the list.
+# _weighted_shuffle biases the whole draw order instead, so a high-weight
+# candidate is tried early throughout the entire sequence, not just the
+# first attempt.
+# ---------------------------------------------------------------------------
+def test_weighted_shuffle_is_a_permutation_of_the_input():
+    items = ["a", "b", "c", "d"]
+    result = _weighted_shuffle(items, [1.0, 1.0, 1.0, 1.0])
+    assert sorted(result) == sorted(items)
+    assert len(result) == len(items)
+
+
+def test_weighted_shuffle_high_weight_item_sorts_earlier_on_average():
+    items = ["low"] * 6 + ["high"]
+    weights = [1.0] * 6 + [20.0]
+    high_positions = []
+    for _ in range(1500):
+        order = _weighted_shuffle(items, weights)
+        high_positions.append(order.index("high"))
+    average_position = sum(high_positions) / len(high_positions)
+    # With 7 items, a uniform-random position would average 3.0. A weight of
+    # 20 against six weight-1 items should land it far earlier than that —
+    # generous slack to keep this non-flaky.
+    assert average_position < 1.0
+
+
+def test_weighted_shuffle_equal_weights_is_roughly_uniform():
+    items = ["a", "b", "c"]
+    first_slot_counts = {"a": 0, "b": 0, "c": 0}
+    for _ in range(3000):
+        first_slot_counts[_weighted_shuffle(items, [1.0, 1.0, 1.0])[0]] += 1
+    for count in first_slot_counts.values():
+        assert 800 < count < 1200  # ~1000 expected each, generous slack
+
+
+def test_random_rotation_prefers_high_weight_candidate_throughout_fallback_chain():
+    # Reproduces the real scenario: 6 same-provider backup keys (weight 1,
+    # all rate-limited together — e.g. one shared-quota exhaustion) plus one
+    # much higher-weighted fallback provider that actually works. Under the
+    # old single-weighted-starting-pick behavior, reaching the working
+    # candidate meant walking through however many of the 6 failing ones
+    # happened to sort before it in the fixed configured order — here,
+    # confirm it's now reached quickly on average instead.
+    config = TranslationConfig(
+        provider="Google", google_api_key="g1",
+        backup_api_keys=["g2", "g3", "g4", "g5", "g6"],
+        api_key_weight=1.0,
+        backup_api_key_weights=[1.0, 1.0, 1.0, 1.0, 1.0],
+        model_name="m", rotation_strategy="random",
+        fallback_providers=[
+            FallbackProviderConfig(provider="DeepSeek", api_keys=["ds1"], model_name="m", api_key_weights=[20.0]),
+        ],
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt, _calls):
+        _calls.append(candidate.provider)
+        if candidate.provider == "DeepSeek":
+            return "1: translated"
+        raise TranslationError(
+            "Google API HTTP Error: Rate limited after 4 attempts: ...", retry_after_seconds=0.001
+        )
+
+    attempts_before_success = []
+    for _ in range(300):
+        _cooldowns.clear()  # each iteration is an independent trial
+        calls = []
+        with patch(
+            "core.services.translation._call_llm_endpoint_impl",
+            side_effect=lambda *a, _calls=calls, **kw: impl(*a, _calls=_calls, **kw),
+        ):
+            _call_llm_endpoint(config, [], "prompt")
+        attempts_before_success.append(len(calls))
+
+    average_attempts = sum(attempts_before_success) / len(attempts_before_success)
+    # 6 failing Google keys + 1 working DeepSeek candidate: uniform-random
+    # ordering would average ~3.5 attempts before reaching it. Weighted 20
+    # against six weight-1 keys should reach it far sooner on average.
+    assert average_attempts < 2.0
