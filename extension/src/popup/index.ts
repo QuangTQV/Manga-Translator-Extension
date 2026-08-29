@@ -574,6 +574,26 @@ function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
   }
   syncMoveButtons(apiKeysList, 'backup-key-row');
 
+  // A disabled provider group is skipped entirely during rotation
+  // (buildProviderRotation filters on group.enabled), so every key under
+  // it is already inert regardless of the key's own checkbox — reflect
+  // that here instead of leaving keys looking active while nothing under
+  // this provider actually runs. Dims + locks the key rows without
+  // touching each key's own stored enabled value, so re-enabling the
+  // provider restores exactly which keys were on before.
+  const syncProviderEnabledStyle = () => {
+    const providerEnabled = enabledCheckbox.checked;
+    row.classList.toggle('provider-disabled', !providerEnabled);
+    // Only lock the per-key enabled checkbox — re-checking one wouldn't do
+    // anything until the provider itself is back on, so leave it visibly
+    // inert. Key/weight text fields stay editable so a key can still be
+    // typed in or adjusted while the provider is temporarily off.
+    for (const checkbox of apiKeysList.querySelectorAll<HTMLInputElement>('.bk-enabled')) {
+      checkbox.disabled = !providerEnabled;
+    }
+  };
+  syncProviderEnabledStyle();
+
   const addKeyBtn = document.createElement('button');
   addKeyBtn.type = 'button';
   addKeyBtn.className = 'btn-add-fallback';
@@ -581,8 +601,11 @@ function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
   addKeyBtn.addEventListener('click', () => {
     apiKeysList.appendChild(createBackupKeyRow());
     syncMoveButtons(apiKeysList, 'backup-key-row');
+    syncProviderEnabledStyle();
     updateDuplicateKeyWarning();
   });
+
+  enabledCheckbox.addEventListener('change', syncProviderEnabledStyle);
 
   for (const el of [providerSelect, modelField, baseUrlField, enabledCheckbox]) {
     el.addEventListener('change', () => { updateDuplicateKeyWarning(); void autoSave(); });
