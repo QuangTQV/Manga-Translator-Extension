@@ -478,7 +478,17 @@ def _build_generation_config(
             )
             generation_config["media_resolution"] = backend_media_resolution
         if is_gemini_3 or is_gemma:
+            # Gemini 3's thinkingLevel enum only accepts minimal/low/medium/
+            # high — "none" (no way to fully disable Gemini 3's thinking)
+            # and "xhigh" (this app's own value, one step above Gemini's
+            # own max) both 400 if sent as-is. Map to the closest level
+            # Gemini 3 actually has instead of forwarding our raw dropdown
+            # value.
             reasoning_effort = config.reasoning_effort or "high"
+            if reasoning_effort == "none":
+                reasoning_effort = "minimal"
+            elif reasoning_effort == "xhigh":
+                reasoning_effort = "high"
             generation_config["thinkingConfig"] = {"thinkingLevel": reasoning_effort}
             log_message(
                 f"Using reasoning effort '{reasoning_effort}' for {model_name}",
@@ -535,7 +545,13 @@ def _build_generation_config(
             if effort == "xhigh" and not xhigh_capable:
                 effort = "high"
             none_capable = gen is not None and gen != "5"
-            if not is_chat and (none_capable or effort != "none"):
+            if effort == "none" and not none_capable:
+                # This generation can't fully disable reasoning — use its
+                # lowest level instead of silently dropping the field
+                # (which would leave the model's own default in effect,
+                # not what the user actually chose).
+                effort = "minimal"
+            if not is_chat:
                 generation_config["reasoning_effort"] = effort
         if is_gpt5_series(model_name) and not is_gpt5_chat_variant(model_name):
             generation_config["verbosity"] = config.verbosity or "low"
@@ -549,11 +565,18 @@ def _build_generation_config(
         }  # top_k not supported by Azure OpenAI Chat Completions
         generation_config["image_detail"] = normalize_image_detail()
         if config.reasoning_effort:
+            # Same GPT-5 model family as the "OpenAI" branch (Azure just
+            # hosts them under a deployment name), so the same per-
+            # generation none/xhigh capability applies.
+            gen = get_gpt5_generation(model_name)
+            xhigh_capable = gen in ("5.2", "5.3", "5.4", "5.5")
+            none_capable = gen is not None and gen != "5"
             effort = config.reasoning_effort
-            if effort == "xhigh":
+            if effort == "xhigh" and not xhigh_capable:
                 effort = "high"
-            if effort != "none":
-                generation_config["reasoning_effort"] = effort
+            if effort == "none" and not none_capable:
+                effort = "minimal"
+            generation_config["reasoning_effort"] = effort
         if is_gpt5_series(model_name) and not is_gpt5_chat_variant(model_name):
             generation_config["verbosity"] = config.verbosity or "low"
         return generation_config
@@ -593,7 +616,15 @@ def _build_generation_config(
             "media_resolution": config.media_resolution,
         }
         if supports_xai_reasoning_parameter(model_name):
-            generation_config["reasoning_effort"] = config.reasoning_effort or "high"
+            # xAI's reasoning_effort only has low/medium/high/xhigh — no
+            # "none" (Grok can't fully disable reasoning on models that
+            # support this parameter at all) and no "minimal". "xhigh" is
+            # left as-is: xAI itself already clamps it to "high" server-side
+            # on models older than Grok 4.6, so no local mapping needed.
+            xai_effort = config.reasoning_effort or "high"
+            if xai_effort in ("none", "minimal"):
+                xai_effort = "low"
+            generation_config["reasoning_effort"] = xai_effort
         return generation_config
 
     elif provider == "DeepSeek":
@@ -700,7 +731,14 @@ def _build_generation_config(
                 generation_config["reasoning_effort"] = reasoning_effort
             elif is_gpt5_1:
                 generation_config["reasoning_effort"] = config.reasoning_effort
-            elif config.reasoning_effort and config.reasoning_effort != "none":
+            elif config.reasoning_effort:
+                # OpenRouter's own reasoning.effort field (built below in
+                # utils/endpoints/openrouter.py) is a unified abstraction
+                # that accepts the full none/minimal/low/medium/high/xhigh
+                # range regardless of underlying model — OpenRouter itself
+                # translates it per-model, so there's no reason to drop
+                # "none" here like the direct-provider branches sometimes
+                # have to.
                 generation_config["reasoning_effort"] = config.reasoning_effort
         elif "gemini" in model_lower or "google/" in model_lower:
             if config.reasoning_effort:
