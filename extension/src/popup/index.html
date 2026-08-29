@@ -378,6 +378,12 @@
         </div>
 
         <div class="field">
+          <label class="label"><span data-i18n="labelMaxTokens">Max Tokens</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
+          <input id="f-max-tokens" class="input" type="number" min="1" step="1" data-i18n-placeholder="placeholderMaxTokens" placeholder="Auto" />
+          <div class="toggle-hint" data-i18n="hintMaxTokens">Maximum tokens the model may generate per request. Leave empty to use the provider's own default (already higher automatically for known reasoning models). Raise this if translation fails with "Empty response" on a reasoning model — it may be running out of budget while thinking, before it ever writes an answer.</div>
+        </div>
+
+        <div class="field">
           <label class="label" data-i18n="labelImageDetail">Image Detail</label>
           <select id="f-image-detail" class="select">
             <option value="auto" data-i18n="imageDetailAuto">Auto</option>

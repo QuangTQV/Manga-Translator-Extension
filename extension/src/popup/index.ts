@@ -43,6 +43,7 @@ const tempVal = qs<HTMLSpanElement>('val-temp');
 const topPVal = qs<HTMLSpanElement>('val-topp');
 const topKVal = qs<HTMLSpanElement>('val-topk');
 const reasoningEffortSelect = qs<HTMLSelectElement>('f-reasoning-effort');
+const maxTokensInput = qs<HTMLInputElement>('f-max-tokens');
 const imageDetailSelect = qs<HTMLSelectElement>('f-image-detail');
 const rotationStrategySelect = qs<HTMLSelectElement>('f-rotation-strategy');
 const cooldownSecondsInput = qs<HTMLInputElement>('f-cooldown-seconds');
@@ -229,6 +230,7 @@ async function loadAndBind(): Promise<void> {
   topPSlider.value = String(settings.config.topP);
   topKSlider.value = String(settings.config.topK);
   reasoningEffortSelect.value = settings.config.reasoningEffort ?? '';
+  maxTokensInput.value = settings.config.maxTokens != null ? String(settings.config.maxTokens) : '';
   imageDetailSelect.value = settings.config.imageDetail || 'auto';
   rotationStrategySelect.value = settings.config.rotationStrategy || 'round_robin';
   updateRotationWeightVisibility();
@@ -283,6 +285,7 @@ function bind(): void {
     el.addEventListener('change', () => { void autoSave(); });
   }
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
+  maxTokensInput.addEventListener('change', () => { void autoSave(); });
   imageDetailSelect.addEventListener('change', () => { void autoSave(); });
   rotationStrategySelect.addEventListener('change', () => { updateRotationWeightVisibility(); void autoSave(); });
   cooldownSecondsInput.addEventListener('change', () => { void autoSave(); });
@@ -692,6 +695,10 @@ function collectAllSettings(): AppSettings {
       topP: parseFloat(topPSlider.value),
       topK: parseInt(topKSlider.value, 10),
       reasoningEffort: reasoningEffortSelect.value || undefined,
+      maxTokens: (() => {
+        const parsed = parseInt(maxTokensInput.value, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+      })(),
       imageDetail: imageDetailSelect.value || 'auto',
       rotationStrategy: (rotationStrategySelect.value || 'round_robin') as TranslateConfig['rotationStrategy'],
       cooldownSeconds: Math.max(0, parseFloat(cooldownSecondsInput.value)) || 15,
