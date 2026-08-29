@@ -1642,10 +1642,23 @@ function addInProgressBadge(img: HTMLImageElement): void {
     badge = document.createElement('div');
     badge.className = 'mt-progress-badge';
     badge.setAttribute('data-mt-for', overlayId);
+    // The bobbing/bounce animations live on this inner wrapper, not the
+    // outer badge div — syncTranslatedBadgeLayout() repositions the outer
+    // div via inline `transform: translateX(...)` on every scroll/layout
+    // sync, which would otherwise fight a `transform`-based CSS animation
+    // on that same element (visible as flicker, then the animation getting
+    // stuck once syncs stop firing).
+    const dots = document.createElement('div');
+    dots.className = 'mt-progress-dots';
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement('span');
+      dot.className = 'mt-progress-dot';
+      dots.appendChild(dot);
+    }
+    badge.appendChild(dots);
     parent.appendChild(badge);
   }
 
-  badge.textContent = '···';
   badge.title = tr('translatingBadgeTitle');
   syncTranslatedBadgeLayout(img, badge);
   scheduleTranslatedDecorationSync(img);
@@ -2698,15 +2711,29 @@ function injectAutoTranslateUI(): void {
     }
     .mt-progress-badge {
       position: absolute; top: 4px; right: 4px;
-      background: rgba(59,130,246,0.9); color: white;
-      font-size: 9px; font-weight: 900; padding: 1px 5px;
-      border-radius: 4px; pointer-events: none; z-index: 2147483001;
-      font-family: Inter, system-ui, sans-serif;
-      animation: mt-progress-pulse 1.2s ease-in-out infinite;
+      background: rgba(59,130,246,0.9);
+      padding: 5px 8px;
+      border-radius: 10px; pointer-events: none; z-index: 2147483001;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
     }
-    @keyframes mt-progress-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.45; }
+    .mt-progress-dots {
+      display: flex; align-items: center; gap: 3px;
+      animation: mt-progress-float 2s ease-in-out infinite;
+    }
+    .mt-progress-dot {
+      width: 4px; height: 4px; border-radius: 50%;
+      background: #fff;
+      animation: mt-progress-bounce 1.2s ease-in-out infinite;
+    }
+    .mt-progress-dot:nth-child(2) { animation-delay: 0.15s; }
+    .mt-progress-dot:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes mt-progress-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+      30% { transform: translateY(-3px); opacity: 1; }
+    }
+    @keyframes mt-progress-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-2px); }
     }
     .mt-page-overlay {
       display: block !important;
