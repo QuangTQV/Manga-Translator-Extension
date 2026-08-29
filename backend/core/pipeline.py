@@ -14,7 +14,6 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from core.caching import get_cache
 from core.config import MangaTranslatorConfig, PreprocessingConfig, RenderingConfig
 from core.scaling import scale_font_size, scale_length, scale_scalar
 from utils.exceptions import (
@@ -714,8 +713,6 @@ def translate_and_render(
         )
     else:
         processing_scale = 1.0
-
-    get_cache().set_current_image(pil_image_processed, verbose)
 
     original_cv_image = pil_to_cv2(pil_image_processed)
 

@@ -23,7 +23,6 @@ class UnifiedCache:
         self._manga_ocr_cache = LRUCache(max_size=20)
         self._upscale_cache = LRUCache(max_size=20)
         self._inpaint_cache = LRUCache(max_size=20)
-        self._current_image_hash = None
 
     def _hash_image(self, image: Image.Image) -> str:
         """Compute strict SHA256 hash of PIL Image pixel data.
@@ -611,33 +610,6 @@ class UnifiedCache:
             self._upscale_cache.cache.clear()
             self._inpaint_cache.cache.clear()
         log_message("All caches cleared", always_print=True)
-
-    def set_current_image(self, image: Image.Image, verbose: bool = False) -> None:
-        """Set the current image being processed and clear caches if different.
-
-        Args:
-            image: The current image being processed
-            verbose: Whether to print verbose logging
-        """
-        image_hash = self._hash_image(image)
-
-        with self._lock:
-            if self._current_image_hash is None:
-                self._current_image_hash = image_hash
-                log_message("Cache initialized for new image", verbose=verbose)
-            elif self._current_image_hash != image_hash:
-                log_message(
-                    "Different image detected - clearing all caches", verbose=verbose
-                )
-                self._yolo_cache.cache.clear()
-                self._sam_cache.cache.clear()
-                self._translation_cache.cache.clear()
-                self._manga_ocr_cache.cache.clear()
-                self._upscale_cache.cache.clear()
-                self._inpaint_cache.cache.clear()
-                self._current_image_hash = image_hash
-            else:
-                log_message("Same image detected - reusing caches", verbose=verbose)
 
     def get_cache_stats(self) -> dict:
         """Get statistics about cache sizes.
