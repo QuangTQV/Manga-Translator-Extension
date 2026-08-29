@@ -6,6 +6,28 @@ import numpy as np
 # Markdown-like style pattern: ***bold italic***, **bold**, *italic*
 STYLE_PATTERN = re.compile(r"(\*{1,3})(.*?)(\1)")
 
+# Style <-> flag-set mapping, used to resolve markers nested inside one
+# another (e.g. "**bold *and italic* text**") to their combined style —
+# STYLE_PATTERN alone only sees one marker length at a time and can't
+# express "bold AND italic" from nesting, just from an explicit `***`.
+_MARKER_LEN_TO_FLAGS = {
+    1: frozenset({"italic"}),
+    2: frozenset({"bold"}),
+    3: frozenset({"italic", "bold"}),
+}
+_FLAGS_TO_STYLE = {
+    frozenset(): "regular",
+    frozenset({"italic"}): "italic",
+    frozenset({"bold"}): "bold",
+    frozenset({"italic", "bold"}): "bold_italic",
+}
+_STYLE_TO_MARKER = {
+    "regular": "",
+    "italic": "*",
+    "bold": "**",
+    "bold_italic": "***",
+}
+
 
 def is_rtl_script(text: str) -> bool:
     """Check if text contains dominant RTL script characters (Arabic, Hebrew, etc.)."""
@@ -106,6 +128,11 @@ def parse_styled_segments(text: str) -> List[Tuple[str, str]]:
     """
     Parses text with markdown-like style markers into segments.
 
+    Handles markers nested inside one another (e.g. "**bold *and italic*
+    text**", which an LLM will sometimes write instead of the explicit
+    "***and italic***") by resolving to the combined style rather than
+    leaving the inner markers as literal, unparsed asterisks.
+
     Args:
         text (str): Input text potentially containing ***bold italic***, **bold**, *italic*.
 
@@ -113,7 +140,14 @@ def parse_styled_segments(text: str) -> List[Tuple[str, str]]:
         List[Tuple[str, str]]: List of (segment_text, style_name) tuples.
                                style_name is one of "regular", "italic", "bold", "bold_italic".
     """
-    segments = []
+    segments = _parse_styled_segments_with_flags(text, frozenset())
+    return [(txt, style) for txt, style in segments if txt]
+
+
+def _parse_styled_segments_with_flags(
+    text: str, inherited_flags: frozenset
+) -> List[Tuple[str, str]]:
+    segments: List[Tuple[str, str]] = []
     last_end = 0
     for match in STYLE_PATTERN.finditer(text):
         start, end = match.span()
@@ -121,23 +155,16 @@ def parse_styled_segments(text: str) -> List[Tuple[str, str]]:
         content = match.group(2)
 
         if start > last_end:
-            segments.append((text[last_end:start], "regular"))
+            segments.append((text[last_end:start], _FLAGS_TO_STYLE[inherited_flags]))
 
-        style = "regular"
-        if len(marker) == 3:
-            style = "bold_italic"
-        elif len(marker) == 2:
-            style = "bold"
-        elif len(marker) == 1:
-            style = "italic"
-
-        segments.append((content, style))
+        combined_flags = inherited_flags | _MARKER_LEN_TO_FLAGS[len(marker)]
+        segments.extend(_parse_styled_segments_with_flags(content, combined_flags))
         last_end = end
 
     if last_end < len(text):
-        segments.append((text[last_end:], "regular"))
+        segments.append((text[last_end:], _FLAGS_TO_STYLE[inherited_flags]))
 
-    return [(txt, style) for txt, style in segments if txt]
+    return segments
 
 
 # Kinsoku Shori (禁則処理) - CJK line-breaking rules
@@ -219,32 +246,22 @@ def tokenize_styled_text(
     preserved as single, unbreakable tokens.
 
     Returns: List[Tuple[str, bool]] where each tuple is (token_text, is_styled).
-    - Styled tokens are split into per-word tokens (CJK-aware), each wrapped
-      with the same markers, to allow wrapping at word/character boundaries
-      while preserving style.
+    - Styled tokens are split into per-word tokens (CJK-aware), each
+      individually re-wrapped with markers for its own resolved style, to
+      allow wrapping at word/character boundaries while preserving style.
+      Building on parse_styled_segments()'s already-flattened (non-nested)
+      segments — rather than re-scanning for markers here directly — means
+      a nested span (e.g. "**bold *and italic* text**") is flattened to its
+      combined style BEFORE being split into words: each word gets wrapped
+      with markers for its own resolved style, so wherever a line break
+      lands, no marker pair is ever split apart across two word tokens.
     - Plain text outside markers is split with CJK awareness into word/character tokens.
     """
     tokens: List[Tuple[str, bool]] = []
-    last_end = 0
-    for match in STYLE_PATTERN.finditer(text):
-        start, end = match.span()
-        if start > last_end:
-            preceding = text[last_end:start]
-            for w in _split_with_cjk_awareness(preceding, detach_trailing_ellipsis):
-                tokens.append((w, False))
-
-        marker = match.group(1)
-        content = match.group(2)
-        if content:
-            for w in _split_with_cjk_awareness(content, detach_trailing_ellipsis):
-                tokens.append((f"{marker}{w}{marker}", True))
-
-        last_end = end
-
-    if last_end < len(text):
-        trailing = text[last_end:]
-        for w in _split_with_cjk_awareness(trailing, detach_trailing_ellipsis):
-            tokens.append((w, False))
+    for segment_text, style in parse_styled_segments(text):
+        marker = _STYLE_TO_MARKER[style]
+        for w in _split_with_cjk_awareness(segment_text, detach_trailing_ellipsis):
+            tokens.append((f"{marker}{w}{marker}" if marker else w, bool(marker)))
 
     return tokens
 
