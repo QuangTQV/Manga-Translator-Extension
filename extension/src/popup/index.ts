@@ -49,6 +49,7 @@ const rotationStrategySelect = qs<HTMLSelectElement>('f-rotation-strategy');
 const cooldownSecondsInput = qs<HTMLInputElement>('f-cooldown-seconds');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
+const expandInstructionsBtn = qs<HTMLButtonElement>('btn-expand-instructions');
 const suggestInstructionsBtn = qs<HTMLButtonElement>('btn-suggest-instructions');
 const suggestWebSearchToggle = qs<HTMLInputElement>('f-suggest-web-search');
 const suggestStoryTitleInput = qs<HTMLInputElement>('f-suggest-story-title');
@@ -135,6 +136,12 @@ function renderLanguageSelects(): void {
   updateSourceAutoStyle();
 }
 
+function setInstructionsExpandedState(expanded: boolean): void {
+  instructionsInput.classList.toggle('textarea-expanded', expanded);
+  expandInstructionsBtn.classList.toggle('active', expanded);
+  expandInstructionsBtn.title = t(uiLanguage, expanded ? 'titleCollapseInstructions' : 'titleExpandInstructions');
+}
+
 function applyI18n(): void {
   document.documentElement.lang = uiLanguage;
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
@@ -147,6 +154,7 @@ function applyI18n(): void {
   });
   setHealthState(healthState);
   setAutoButtonState(autoBtn.classList.contains('active'));
+  setInstructionsExpandedState(instructionsInput.classList.contains('textarea-expanded'));
 }
 
 function applyExtensionEnabledState(): void {
@@ -358,6 +366,10 @@ function bind(): void {
       setStatus(t(uiLanguage, 'statusCacheCleared'), 'ok');
       clearCacheBtn.disabled = false;
     }
+  });
+
+  expandInstructionsBtn.addEventListener('click', () => {
+    setInstructionsExpandedState(!instructionsInput.classList.contains('textarea-expanded'));
   });
 
   suggestInstructionsBtn.addEventListener('click', async () => {

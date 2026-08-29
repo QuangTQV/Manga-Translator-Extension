@@ -68,9 +68,11 @@
     #f-source.lang-auto {
       color: #fbbf24; border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.08);
     }
-    .textarea { resize: none; min-height: 54px; font-family: inherit; line-height: 1.4; }
+    .textarea { resize: none; min-height: 54px; font-family: inherit; line-height: 1.4; transition: min-height 0.15s; }
+    .textarea-expanded { min-height: 260px; resize: vertical; }
     .llm-fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .model-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .header-buttons { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .btn-fetch-models {
       font-size: 10px; font-weight: 700; padding: 4px 10px;
       background: rgba(59,130,246,0.15); color: #60a5fa;
@@ -78,6 +80,15 @@
       cursor: pointer; transition: all 0.15s;
       overflow-wrap: anywhere;
     }
+    .btn-icon-expand {
+      font-size: 12px; line-height: 1; padding: 4px 7px;
+      background: rgba(59,130,246,0.15); color: #60a5fa;
+      border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
+      cursor: pointer; transition: all 0.15s;
+      flex: 0 0 auto;
+    }
+    .btn-icon-expand:hover { background: rgba(59,130,246,0.28); }
+    .btn-icon-expand.active { background: rgba(59,130,246,0.35); color: #93c5fd; }
     .btn-fetch-models:hover { background: rgba(59,130,246,0.25); }
     .btn-fetch-models:disabled { opacity: 0.4; cursor: not-allowed; }
     .toggle-hint { font-size: 10px; color: #4a5e80; line-height: 1.35; }
@@ -290,7 +301,10 @@
         <div class="field">
           <div class="model-picker-header">
             <label class="label"><span data-i18n="labelSpecialInstructions">Story Notes</span> <span style="font-weight:400;text-transform:none;color:#4a5e80" data-i18n="labelOptional">(optional)</span></label>
-            <button id="btn-suggest-instructions" class="btn-fetch-models" type="button" data-i18n="btnSuggestInstructions" title="Analyzes pages already scanned on the active tab, or searches by title alone if you enter one and enable web search below">Suggest</button>
+            <div class="header-buttons">
+              <button id="btn-expand-instructions" class="btn-icon-expand" type="button" title="Expand for easier reading/editing">⤢</button>
+              <button id="btn-suggest-instructions" class="btn-fetch-models" type="button" data-i18n="btnSuggestInstructions" title="Analyzes pages already scanned on the active tab, or searches by title alone if you enter one and enable web search below">Suggest</button>
+            </div>
           </div>
           <div class="suggest-options">
             <input id="f-suggest-story-title" class="input" type="text" data-i18n-placeholder="placeholderStoryTitle" placeholder="Story title (optional) — helps web search" />
