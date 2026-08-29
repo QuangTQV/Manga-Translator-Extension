@@ -2483,6 +2483,7 @@ def generate_character_notes(
     images_b64: List[str],
     output_language: str,
     debug: bool = False,
+    story_title: Optional[str] = None,
 ) -> str:
     """One-off LLM call: look at a handful of sample manga pages and draft
     Special Instructions text (cast, apparent relationships, suggested
@@ -2491,8 +2492,23 @@ def generate_character_notes(
     This is a single explicit, user-triggered call — not something that
     runs automatically per page — so it doesn't touch the translation
     cache or per-page pipeline at all.
+
+    When config.enable_web_search is set (the caller turned on the "search
+    the internet" option), the prompt also asks the model to use its
+    provider's own built-in search tool to look up the story by name and
+    ground the character/relationship notes in canonical sources (wikis,
+    official summaries) instead of guessing purely from a handful of
+    sample panels — the actual search call itself happens inside each
+    utils/endpoints/<provider>.py module, gated on
+    config.enable_web_search; this function only adjusts the prompt.
+
+    Sample pages are normally required (there'd be nothing to draft notes
+    from otherwise), but when the caller has both a story title and web
+    search on, images_b64 may be empty — the model can draft purely from
+    search results before any page has even been scanned yet.
     """
-    if not images_b64:
+    can_search_without_images = config.enable_web_search and bool((story_title or "").strip())
+    if not images_b64 and not can_search_without_images:
         raise TranslationError("No sample images provided.")
 
     parts = [
@@ -2501,33 +2517,91 @@ def generate_character_notes(
     ]
 
     system_prompt = (
-        "You are a manga localization consultant. You will be shown several "
-        "sample pages from the SAME manga/comic. Your job is only to draft "
+        "You are a manga localization consultant. Your job is only to draft "
         "concise notes a translator can paste into a style-guide field — "
-        "you are not transcribing or translating any dialogue."
+        "you are not transcribing or translating any dialogue. "
+        + (
+            "You will be shown several sample pages from the SAME manga/comic."
+            if images_b64
+            else "No sample pages are available yet — draft notes purely from "
+            "web search results for the story named below."
+        )
     )
+
+    web_search_rule = ""
+    if config.enable_web_search:
+        title_hint = (
+            f'The user identified the story as "{story_title.strip()}" — search '
+            "for that title specifically."
+            if story_title and story_title.strip()
+            else "The user did not provide a title — first try to identify the "
+            "story from any visible title text, character names, or distinctive "
+            "details in the sample pages, then search for it. If you genuinely "
+            "can't identify it, skip the search and fall back to reasoning from "
+            "the images alone."
+        )
+        art_caveat = (
+            " Use search results (official synopses, wikis, character pages) "
+            "to correct or fill in names, genders, and relationships you "
+            "can't tell for certain from the art alone — official sources "
+            "are more reliable than a visual guess from a few panels."
+            if images_b64
+            else " Use search results (official synopses, wikis, character "
+            "pages) as the sole basis for names, genders, and relationships, "
+            "since there are no sample pages to look at."
+        )
+        web_search_rule = f"""
+## WEB SEARCH
+You have a web search tool available — use it. {title_hint}{art_caveat}
+- **Stay spoiler-free:** these notes are a translation style guide, not a
+  plot summary. Only pull in facts relevant to *how a character should be
+  addressed/spoken* (name, gender, age, established relationship to other
+  named characters, personality/register) — never events, twists, deaths,
+  or relationship reveals."""
+        web_search_rule += (
+            " No sample pages are available to anchor \"how far the reader has "
+            "gotten\" — since there's no way to tell what's already been read, "
+            "stick to durable, early-established facts (main cast, core "
+            "relationships, overall tone) and skip anything that reads like a "
+            "later-story development, even if a source presents it as basic "
+            "background."
+            if not images_b64
+            else " If a source's synopsis covers the whole series, extract only "
+            "the character/tone facts and leave out plot developments.\n- If "
+            "search results conflict with what a sample page actually shows "
+            "(e.g. a scene contradicts a wiki summary), trust the sample page "
+            "— it's the actual content being translated."
+        )
+        web_search_rule += "\n"
+
+    if images_b64:
+        basis = "these sample pages" + (" and web search results" if config.enable_web_search else "")
+        page_specific_bullets = """
+- Overall tone/register of the dialogue (casual/formal, blunt/polite, any
+  recurring verbal tics).
+- Any recurring proper nouns, titles, or made-up terms worth keeping
+  consistent."""
+    else:
+        basis = "web search results"
+        page_specific_bullets = ""
 
     prompt_text = f"""
 ## TASK
-Based only on these sample pages, draft short notes to guide translation
-into {output_language}, covering only what you can actually tell from the
-art/context (do not invent details you can't support):
+Based on {basis}, draft short notes to guide translation
+into {output_language}, covering only what you can actually support (do not
+invent details you can't back up):
 - Main recurring characters you can identify (by appearance if no name is
   visible) and their apparent age/gender.
 - Apparent relationships between characters (siblings, friends, romantic,
   boss/subordinate, family, strangers, etc.) and, if {output_language}
   uses relationship-based pronouns/register (e.g. Vietnamese xưng hô,
-  Japanese pronoun choice), what pairing you'd suggest for each pair.
-- Overall tone/register of the dialogue (casual/formal, blunt/polite, any
-  recurring verbal tics).
-- Any recurring proper nouns, titles, or made-up terms worth keeping
-  consistent.
-
+  Japanese pronoun choice), what pairing you'd suggest for each pair.{page_specific_bullets}
+{web_search_rule}
 ## OUTPUT
 Plain bullet points only, no headers, no preamble, no closing remarks —
-ready to be pasted directly into a "special instructions" field. If the
-sample pages don't give you enough to say anything useful for a bullet,
-omit it rather than guessing.
+ready to be pasted directly into a "special instructions" field. If you
+don't have enough to say anything useful for a bullet, omit it rather than
+guessing.
 """
 
     result = _call_llm_endpoint(

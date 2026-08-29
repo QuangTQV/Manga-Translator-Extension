@@ -307,8 +307,14 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
     A single explicit, user-triggered LLM call — not part of the
     per-page translation pipeline or cache. The user is expected to
     review/edit the result before saving it.
+
+    Sample pages are normally required, but not when the caller has both a
+    story title and web search on — in that case there's nothing to look
+    at visually yet, and the notes can be drafted purely from search
+    results.
     """
-    if not req.images:
+    can_search_without_images = req.enable_web_search and bool((req.story_title or "").strip())
+    if not req.images and not can_search_without_images:
         raise HTTPException(status_code=400, detail="No sample images provided.")
 
     sample_images = req.images[:SUGGEST_INSTRUCTIONS_MAX_IMAGES]
@@ -355,6 +361,7 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
         outside_text_enabled=False,
         models_dir=settings.models_dir,
         fonts_base_dir=settings.fonts_base_dir,
+        enable_web_search=req.enable_web_search,
     )
 
     try:
@@ -363,6 +370,7 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
             config.translation,
             prepared_images,
             req.output_language,
+            story_title=req.story_title,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate suggestion: {e}")

@@ -49,6 +49,8 @@ const cooldownSecondsInput = qs<HTMLInputElement>('f-cooldown-seconds');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
 const suggestInstructionsBtn = qs<HTMLButtonElement>('btn-suggest-instructions');
+const suggestWebSearchToggle = qs<HTMLInputElement>('f-suggest-web-search');
+const suggestStoryTitleInput = qs<HTMLInputElement>('f-suggest-story-title');
 const llmInstructionsInput = qs<HTMLTextAreaElement>('f-llm-instructions');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
 const uiLanguageSelect = qs<HTMLSelectElement>('f-ui-language');
@@ -364,7 +366,11 @@ function bind(): void {
       const injected = await ensureContentScript(tab.id);
       if (!injected) throw new Error(t(uiLanguage, 'errorInjectContent'));
 
-      const result = await chrome.tabs.sendMessage(tab.id, { type: 'SUGGEST_FROM_SCAN' } as never) as { ok: boolean; error?: string };
+      const result = await chrome.tabs.sendMessage(tab.id, {
+        type: 'SUGGEST_FROM_SCAN',
+        enableWebSearch: suggestWebSearchToggle.checked,
+        storyTitle: suggestStoryTitleInput.value.trim() || undefined,
+      } as never) as { ok: boolean; error?: string };
       if (!result?.ok) {
         throw new Error(result?.error || t(uiLanguage, 'errorNoScanFound'));
       }

@@ -135,6 +135,8 @@ class SuggestInstructionsRequest(BaseModel):
     cooldown_seconds: Optional[float] = None
     api_key_weight: Optional[float] = None
     backup_api_key_weights: Optional[List[float]] = None
+    enable_web_search: bool = False  # let the model use its provider's built-in web search to look up the story
+    story_title: Optional[str] = None  # user-supplied title, to search for when enable_web_search is set
 
 
 class SuggestInstructionsResponse(BaseModel):

@@ -310,6 +310,8 @@ interface SuggestInstructionsBody {
   fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
   rotation_strategy?: string;
   cooldown_seconds?: number;
+  enable_web_search?: boolean;
+  story_title?: string;
 }
 
 async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<{ suggestion?: string; error?: string }> {

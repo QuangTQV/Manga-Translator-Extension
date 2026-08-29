@@ -301,6 +301,7 @@ def _build_config(
     cooldown_seconds: float | None = None,
     api_key_weight: float | None = None,
     backup_api_key_weights: list[float] | None = None,
+    enable_web_search: bool = False,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -404,7 +405,7 @@ def _build_config(
         media_resolution_bubbles="high",
         media_resolution_context="high",
         image_detail=image_detail,
-        enable_web_search=False,
+        enable_web_search=enable_web_search,
         enable_code_execution=False,
     )
 

@@ -347,11 +347,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   }
   if (msg.type === 'SUGGEST_FROM_SCAN') {
     void (async () => {
+      const { enableWebSearch, storyTitle } = msg as { enableWebSearch?: boolean; storyTitle?: string };
       const images = Array.from(imageCache.values())
         .map(extractBase64FromDataUrl)
         .filter((b64): b64 is string => Boolean(b64))
         .slice(0, SUGGEST_INSTRUCTIONS_MAX_IMAGES);
-      const result = await runSuggestInstructions(images);
+      const result = await runSuggestInstructions(images, enableWebSearch, storyTitle);
       send(result);
     })();
     return true;
@@ -2321,7 +2322,13 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
   });
 }
 
-function bgSuggestInstructions(images: string[], outputLanguage: string, settings: AppSettings): Promise<{ suggestion?: string; error?: string }> {
+function bgSuggestInstructions(
+  images: string[],
+  outputLanguage: string,
+  settings: AppSettings,
+  enableWebSearch?: boolean,
+  storyTitle?: string,
+): Promise<{ suggestion?: string; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 2 minutes' }), 120_000);
     const rotation = buildProviderRotation(settings);
@@ -2345,6 +2352,8 @@ function bgSuggestInstructions(images: string[], outputLanguage: string, setting
           fallback_providers: rotation.fallback_providers,
           rotation_strategy: settings.config.rotationStrategy,
           cooldown_seconds: settings.config.cooldownSeconds,
+          enable_web_search: enableWebSearch ?? false,
+          story_title: storyTitle,
         },
       },
       (resp: unknown) => {
@@ -2372,8 +2381,13 @@ async function appendSpecialInstructions(suggestion: string): Promise<void> {
  * suggest button (which asks this tab's content script for whatever
  * sample images are already loaded, since the popup itself has no image
  * data of its own). */
-async function runSuggestInstructions(images: string[]): Promise<{ ok: boolean; error?: string }> {
-  if (images.length === 0) {
+async function runSuggestInstructions(
+  images: string[],
+  enableWebSearch?: boolean,
+  storyTitle?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const canSearchWithoutImages = Boolean(enableWebSearch && storyTitle?.trim());
+  if (images.length === 0 && !canSearchWithoutImages) {
     const error = tr('suggestNoImagesReady');
     toast(error, true);
     return { ok: false, error };
@@ -2386,7 +2400,7 @@ async function runSuggestInstructions(images: string[]): Promise<{ ok: boolean; 
     return { ok: false, error };
   }
 
-  const result = await bgSuggestInstructions(images, settings.config.outputLanguage, settings);
+  const result = await bgSuggestInstructions(images, settings.config.outputLanguage, settings, enableWebSearch, storyTitle);
   if (result.error) {
     toast(result.error, true);
     return { ok: false, error: result.error };
