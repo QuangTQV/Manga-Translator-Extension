@@ -77,12 +77,14 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Page scanner | Finds manga/comic images on the active page and lets you choose which pages to translate. |
 | Auto-translate | Watches the current reading page and translates images as you scroll. |
 | Bubble translation | Detects speech bubbles, removes original text, translates, and renders text back into the image. |
+| Hover-to-magnify | Hover a translated bubble for a sharp zoomed-in crop with the original text as a caption, so you can cross-check the translation at a glance. A per-page button toggles between the translated and original image. |
 | Story Notes | Per-story notes (glossary, character relationships, tone) the model always follows; a "Suggest" button drafts them from your already-scanned pages. Separate from General LLM Instructions, which apply to every story. |
 | Vietnamese pronoun accuracy | For Vietnamese output, automatically reasons about each speaker pair's relationship (age, gender, family ties, honorifics like "onii-chan") to pick the correct pronouns (anh/em, tao/mày, etc.) and keeps them consistent across a page — no configuration needed. |
 | Context Memory | Optional: the model writes a one-sentence summary each page and reuses it on later pages of the same story, keeping characters/events consistent for cheaper than sending prior pages' full text/images. |
 | Fix a translation | Click a translated bubble and describe what's wrong to re-translate just that page with the correction applied to that bubble. To fix the same mistake across several pages at once (e.g. a character name), select the already-translated pages in the scanner, describe it once, and apply it to all of them. |
 | Export | Download a single translated page as a PNG from its overlay, or export every translated page in the scanner as a ZIP in one click. |
-| Retry indicator | A page that fails auto-translate after every configured key/provider is exhausted shows a small red badge — click it to retry immediately. Rate-limit/cooldown failures don't count toward this, since the backend's own rotation already handles those. |
+| Translation progress | A small animated marker shows which page(s) are actively being translated right now, distinct from ones still waiting in the auto-translate queue. |
+| Retry indicator | A page that fails auto-translate 3 times in a row shows a small red badge — click it to retry immediately. |
 | Outside-bubble text | Handles SFX/narration outside speech bubbles with lightweight cleanup by default. |
 | Optional Flux | Lets advanced users download Flux Klein 4B for heavier inpainting without shipping it in the default release. |
 | Provider support | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter, and OpenAI-compatible endpoints. |
