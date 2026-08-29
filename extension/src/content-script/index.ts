@@ -1041,6 +1041,7 @@ function normalizeBubbles(raw: unknown[] | undefined): BubbleInfo[] {
       confidence: typeof b.confidence === 'number' ? b.confidence : 0,
       originalText: typeof b.original_text === 'string' ? b.original_text : undefined,
       translatedText: typeof b.translated_text === 'string' ? b.translated_text : '',
+      highResCrop: typeof b.high_res_crop === 'string' && b.high_res_crop ? b.high_res_crop : undefined,
     };
   });
 }
@@ -1218,7 +1219,16 @@ function applyTranslatedOverlay(img: HTMLImageElement, dataUrl: string): void {
 
   overlay.src = dataUrl;
   overlay.style.position = 'absolute';
-  overlay.style.zIndex = '9';
+  // A small z-index (this used to be '9') only wins against a manga site's
+  // OWN sibling elements in the same local stacking context if the site
+  // never bothers with one either — lazy-load placeholders, ad overlays,
+  // and "click to continue" layers routinely do, silently covering (and
+  // eating pointer events meant for) the overlay/badges/hit-targets below
+  // while the page still looked fine otherwise. Every per-bubble decoration
+  // (overlay, badges, buttons, the fix-hit-layer) uses a z-index this high
+  // for the same reason, ordered relative to each other the same way the
+  // old small values were.
+  overlay.style.zIndex = '2147483000';
   overlay.style.pointerEvents = 'none';
   overlay.style.display = 'block';
   overlay.style.maxWidth = 'none';
@@ -1369,7 +1379,7 @@ function addExportButton(img: HTMLImageElement): void {
   btn.style.borderRadius = '4px';
   btn.style.cursor = 'pointer';
   btn.style.pointerEvents = 'auto';
-  btn.style.zIndex = '10';
+  btn.style.zIndex = '2147483001';
   btn.style.fontFamily = 'Inter, system-ui, sans-serif';
 
   const exportBtn = btn;
@@ -1449,7 +1459,7 @@ function addOriginalToggleButton(img: HTMLImageElement): void {
   btn.style.borderRadius = '4px';
   btn.style.cursor = 'pointer';
   btn.style.pointerEvents = 'auto';
-  btn.style.zIndex = '10';
+  btn.style.zIndex = '2147483001';
   btn.style.fontFamily = 'Inter, system-ui, sans-serif';
 
   const toggleBtn = btn;
@@ -1594,7 +1604,7 @@ function addTranslatedBadge(img: HTMLImageElement): void {
   badge.style.padding = '1px 5px';
   badge.style.borderRadius = '4px';
   badge.style.pointerEvents = 'none';
-  badge.style.zIndex = '10';
+  badge.style.zIndex = '2147483001';
   badge.style.fontFamily = 'Inter, system-ui, sans-serif';
   syncTranslatedBadgeLayout(img, badge);
   scheduleTranslatedDecorationSync(img);
@@ -1719,7 +1729,7 @@ function addRetryNeededBadge(img: HTMLImageElement, url: string): void {
   badge.style.borderRadius = '4px';
   badge.style.cursor = 'pointer';
   badge.style.pointerEvents = 'auto';
-  badge.style.zIndex = '11';
+  badge.style.zIndex = '2147483002';
   badge.style.fontFamily = 'Inter, system-ui, sans-serif';
 
   const retryBadge = badge;
@@ -1777,10 +1787,16 @@ function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null
 // full-width or shrunk into a small reader pane. Implemented as a CSS
 // background-position "window" into the already-loaded translated overlay
 // image, scaled up via background-size — no re-render, no extra request.
-const MAGNIFIER_ZOOM = 2.5;
+const MAGNIFIER_ZOOM = 2.0;
 const MAGNIFIER_MAX_DIMENSION = 420;
 const MAGNIFIER_MIN_DIMENSION = 140;
-const MAGNIFIER_MAX_ZOOM = 6;
+const MAGNIFIER_MAX_ZOOM = 4;
+// Cropping exactly to the bbox packs the bubble edge-to-edge into the box —
+// magnified, that reads as squished/distorted rather than "zoomed in".
+// Padding the crop with a bit of surrounding art gives it breathing room
+// and makes the (often oval/irregular) bubble shape look natural instead
+// of stretched to fill a rectangle.
+const MAGNIFIER_PADDING_FRACTION = 0.15;
 
 function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, bubble: BubbleInfo): void {
   const [x1, y1, x2, y2] = bubble.bbox ?? [0, 0, 0, 0];
@@ -1791,57 +1807,116 @@ function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, b
   const rect = hitEl.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return;
 
+  // The backend renders each bubble's text at several times the final
+  // resolution before downscaling it back down for the page — sharper
+  // than blowing up a crop of the already-downscaled page image, which is
+  // all the fallback path below has to work with. When present, skip the
+  // padding too: it's a standalone crop already matching the bubble
+  // exactly, not a window into the full page that benefits from a little
+  // surrounding context.
+  const highResSrc = bubble.highResCrop
+    ? `data:image/png;base64,${bubble.highResCrop}`
+    : null;
+
+  const bboxWidth = x2 - x1;
+  const bboxHeight = y2 - y1;
+  const padX = highResSrc ? 0 : bboxWidth * MAGNIFIER_PADDING_FRACTION;
+  const padY = highResSrc ? 0 : bboxHeight * MAGNIFIER_PADDING_FRACTION;
+  const cropX1 = Math.max(0, x1 - padX);
+  const cropY1 = Math.max(0, y1 - padY);
+  const cropX2 = Math.min(naturalWidth, x2 + padX);
+  const cropY2 = Math.min(naturalHeight, y2 + padY);
+  const cropWidth = cropX2 - cropX1;
+  const cropHeight = cropY2 - cropY1;
+
+  // What the padded crop's footprint would be at the page's current
+  // on-screen display scale (before any magnifier-specific zoom) — the
+  // basis the zoom/clamp math below scales up from.
+  const onScreenCropWidth = rect.width * (cropWidth / bboxWidth);
+  const onScreenCropHeight = rect.height * (cropHeight / bboxHeight);
+
   // Zoom relative to on-screen size, then clamp: never so large it swallows
   // the viewport, never so small a tiny bubble is pointless to open.
   let scale = MAGNIFIER_ZOOM;
-  const maxDim = Math.max(rect.width, rect.height) * scale;
+  const maxDim = Math.max(onScreenCropWidth, onScreenCropHeight) * scale;
   if (maxDim > MAGNIFIER_MAX_DIMENSION) scale *= MAGNIFIER_MAX_DIMENSION / maxDim;
-  const minDim = Math.min(rect.width, rect.height) * scale;
+  const minDim = Math.min(onScreenCropWidth, onScreenCropHeight) * scale;
   if (minDim < MAGNIFIER_MIN_DIMENSION) scale *= MAGNIFIER_MIN_DIMENSION / minDim;
   scale = Math.min(scale, MAGNIFIER_MAX_ZOOM);
 
-  const boxWidth = rect.width * scale;
-  const boxHeight = rect.height * scale;
-  // Scale applied to the *source* image so the bubble's natural-pixel span
-  // exactly fills the magnifier box.
-  const bgScale = boxWidth / (x2 - x1);
+  const boxWidth = onScreenCropWidth * scale;
+  const boxHeight = onScreenCropHeight * scale;
+  // Scale applied to the *source* image so the padded crop's natural-pixel
+  // span exactly fills the magnifier box.
+  const bgScale = boxWidth / cropWidth;
 
   if (!activeBubbleMagnifier) {
     activeBubbleMagnifier = document.createElement('div');
     activeBubbleMagnifier.className = 'mt-bubble-magnifier';
+    const image = document.createElement('div');
+    image.className = 'mt-bubble-magnifier-image';
     const caption = document.createElement('div');
     caption.className = 'mt-bubble-magnifier-caption';
+    // Image first, caption second — flex-column stacks the caption below
+    // the crop, never on top of it (an earlier version absolutely-
+    // positioned the caption over the image's bottom edge, which covered
+    // up whatever translated text happened to sit there).
+    activeBubbleMagnifier.appendChild(image);
     activeBubbleMagnifier.appendChild(caption);
     document.body.appendChild(activeBubbleMagnifier);
   }
   const magnifier = activeBubbleMagnifier;
+  // Pin the OUTER box's width too, not just the image child's — otherwise
+  // an unconstrained flex container grows to fit the caption's longest
+  // unwrapped line (often much wider than the crop itself), leaving the
+  // image sitting in a mostly-empty oversized box instead of the caption
+  // wrapping to the crop's actual width.
   magnifier.style.width = `${boxWidth}px`;
-  magnifier.style.height = `${boxHeight}px`;
-  magnifier.style.backgroundImage = `url("${overlayImg.src}")`;
-  magnifier.style.backgroundSize = `${naturalWidth * bgScale}px ${naturalHeight * bgScale}px`;
-  magnifier.style.backgroundPosition = `-${x1 * bgScale}px -${y1 * bgScale}px`;
+  const image = magnifier.querySelector<HTMLElement>('.mt-bubble-magnifier-image')!;
+  image.style.width = `${boxWidth}px`;
+  image.style.height = `${boxHeight}px`;
+  if (highResSrc) {
+    image.style.backgroundImage = `url("${highResSrc}")`;
+    image.style.backgroundSize = '100% 100%';
+    image.style.backgroundPosition = '0 0';
+  } else {
+    image.style.backgroundImage = `url("${overlayImg.src}")`;
+    image.style.backgroundSize = `${naturalWidth * bgScale}px ${naturalHeight * bgScale}px`;
+    image.style.backgroundPosition = `-${cropX1 * bgScale}px -${cropY1 * bgScale}px`;
+  }
 
   // The zoomed crop already covers "hard to read" — the original-language
   // OCR text (when the backend returned one) is shown too, for readers who
   // want to sanity-check a translation choice against the source line
   // without leaving the page.
-  const caption = magnifier.querySelector<HTMLElement>('.mt-bubble-magnifier-caption');
-  if (caption) {
-    const originalText = (bubble.originalText ?? '').trim();
-    caption.textContent = originalText;
-    caption.style.display = originalText ? 'block' : 'none';
-  }
+  const caption = magnifier.querySelector<HTMLElement>('.mt-bubble-magnifier-caption')!;
+  const originalText = (bubble.originalText ?? '').trim();
+  caption.textContent = originalText;
+  caption.style.display = originalText ? 'block' : 'none';
 
   // Centered above the bubble; flip below if that would clip off the top of
   // the viewport, and clamp horizontally so it never runs off either edge.
+  // Measured AFTER content is set — the caption's height varies with how
+  // much original text there is, so the box's total height isn't just
+  // boxHeight once a caption is showing.
+  magnifier.style.left = '0px';
+  magnifier.style.top = '0px';
+  magnifier.style.display = 'flex';
+  const totalHeight = magnifier.getBoundingClientRect().height;
+
   const margin = 10;
   let left = rect.left + rect.width / 2 - boxWidth / 2;
   left = Math.max(margin, Math.min(left, window.innerWidth - boxWidth - margin));
-  let top = rect.top - boxHeight - margin;
+  let top = rect.top - totalHeight - margin;
   if (top < margin) top = rect.bottom + margin;
+  // A very tall bubble (or one near the bottom of a tall page) can still
+  // overflow below the viewport even after flipping — clamp the same way
+  // `left` already is. If the box is simply taller than the viewport, this
+  // pins it to the top so as much of it as possible stays visible, rather
+  // than positioning it mostly (or entirely) off-screen.
+  top = Math.max(margin, Math.min(top, window.innerHeight - totalHeight - margin));
   magnifier.style.left = `${left}px`;
   magnifier.style.top = `${top}px`;
-  magnifier.style.display = 'block';
 }
 
 function hideBubbleMagnifier(): void {
@@ -1891,7 +1966,7 @@ function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): v
   }
   layer.style.position = 'absolute';
   layer.style.pointerEvents = 'none';
-  layer.style.zIndex = '12';
+  layer.style.zIndex = '2147483003';
   layer.innerHTML = '';
 
   const naturalWidth = img.naturalWidth || 1;
@@ -2618,14 +2693,14 @@ function injectAutoTranslateUI(): void {
       position: absolute; top: 4px; right: 4px;
       background: rgba(34,197,94,0.85); color: white;
       font-size: 9px; font-weight: 900; padding: 1px 5px;
-      border-radius: 4px; pointer-events: none; z-index: 10;
+      border-radius: 4px; pointer-events: none; z-index: 2147483001;
       font-family: Inter, system-ui, sans-serif;
     }
     .mt-progress-badge {
       position: absolute; top: 4px; right: 4px;
       background: rgba(59,130,246,0.9); color: white;
       font-size: 9px; font-weight: 900; padding: 1px 5px;
-      border-radius: 4px; pointer-events: none; z-index: 10;
+      border-radius: 4px; pointer-events: none; z-index: 2147483001;
       font-family: Inter, system-ui, sans-serif;
       animation: mt-progress-pulse 1.2s ease-in-out infinite;
     }
@@ -2641,21 +2716,25 @@ function injectAutoTranslateUI(): void {
     .mt-bubble-magnifier {
       position: fixed;
       display: none;
-      background-repeat: no-repeat;
+      flex-direction: column;
       background-color: #fff;
-      border: 2px solid rgba(59,130,246,0.85);
-      border-radius: 6px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.6);
+      border-radius: 16px;
+      box-shadow: 0 14px 36px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.08);
       pointer-events: none;
       z-index: 2147483647;
+      overflow: hidden;
+    }
+    .mt-bubble-magnifier-image {
+      flex: 0 0 auto;
+      background-repeat: no-repeat;
     }
     .mt-bubble-magnifier-caption {
-      position: absolute; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.72); color: #fff;
+      flex: 0 1 auto;
+      background: rgba(0,0,0,0.85); color: #fff;
       font-size: 12px; line-height: 1.35; padding: 4px 8px;
-      max-height: 45%; overflow-y: auto;
+      max-height: 120px; overflow-y: auto;
       font-family: Inter, system-ui, sans-serif;
-      border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;
     }
   `;
   document.head.appendChild(style);

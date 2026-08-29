@@ -1345,6 +1345,11 @@ def translate_and_render(
                     if "bbox" in info and "color" in info and "mask" in info
                 }
                 log_message("Rendering translations...", verbose=verbose)
+                # Populated by render_text_skia (keyed by bubble_id = str(i+1))
+                # with each bubble's pre-downscale supersampled render, when
+                # supersampling is on — sharper than cropping the final page
+                # image, for the extension's hover-to-magnify UI.
+                high_res_crops: Dict[str, Any] = {}
                 if len(translated_texts) == len(sorted_bubble_data):
                     for i, bubble in enumerate(sorted_bubble_data):
                         bubble["translation"] = translated_texts[i]
@@ -1519,6 +1524,7 @@ def translate_and_render(
                                     config=render_config,
                                     verbose=verbose,
                                     bubble_id=str(i + 1),
+                                    high_res_crops=high_res_crops,
                                     rotation_deg=rotation_deg,
                                     vertical_stack=vertical_stack,
                                     text_color_rgb=text_color_rgb,
@@ -1552,6 +1558,7 @@ def translate_and_render(
                                             config=render_config,
                                             verbose=verbose,
                                             bubble_id=str(i + 1),
+                                            high_res_crops=high_res_crops,
                                             rotation_deg=forced_stack_rotation,
                                             vertical_stack=True,
                                             text_color_rgb=text_color_rgb,
@@ -1612,6 +1619,7 @@ def translate_and_render(
                                     config=render_config,
                                     verbose=verbose,
                                     bubble_id=str(i + 1),
+                                    high_res_crops=high_res_crops,
                                     rotation_deg=rotation_deg,
                                     vertical_stack=vertical_stack,
                                     text_color_rgb=text_color_rgb,
@@ -1699,6 +1707,7 @@ def translate_and_render(
                                             config=render_config,
                                             verbose=verbose,
                                             bubble_id=str(i + 1),
+                                            high_res_crops=high_res_crops,
                                             rotation_deg=rotation_deg,
                                             vertical_stack=vertical_stack,
                                             raise_on_safe_error=False,
@@ -1737,6 +1746,7 @@ def translate_and_render(
                                             config=render_config,
                                             verbose=verbose,
                                             bubble_id=str(i + 1),
+                                            high_res_crops=high_res_crops,
                                             rotation_deg=rotation_deg,
                                             vertical_stack=vertical_stack,
                                             raise_on_safe_error=False,
@@ -1774,6 +1784,13 @@ def translate_and_render(
                         if success:
                             pil_cleaned_image = rendered_image
                             final_image_to_save = pil_cleaned_image
+                            # bubbles_out already has this bubble's entry (appended
+                            # above, before rendering) — backfill the high-res crop
+                            # now that rendering has actually happened.
+                            if bubbles_out is not None and not is_invalid_translation:
+                                crop = high_res_crops.get(str(i + 1))
+                                if crop is not None:
+                                    bubbles_out[-1]["high_res_crop_pil"] = crop
                         else:
                             log_message(
                                 f"Failed to render bubble {bbox}", verbose=verbose

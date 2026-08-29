@@ -84,12 +84,18 @@ def _build_bubble_info(bubbles: list[dict]) -> list:
 
     results = []
     for b in bubbles:
+        high_res_crop_pil = b.get("high_res_crop_pil")
         results.append(
             BubbleInfo(
                 bbox=b.get("bbox", []),
                 confidence=float(b.get("confidence", 0.0)),
                 original_text=b.get("ocr_text"),
                 translated_text=b.get("translation", ""),
+                high_res_crop=(
+                    image_to_base64_raw(high_res_crop_pil)
+                    if high_res_crop_pil is not None
+                    else None
+                ),
             )
         )
     return results

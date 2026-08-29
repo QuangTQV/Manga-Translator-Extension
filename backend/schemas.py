@@ -9,6 +9,7 @@ class BubbleInfo(BaseModel):
     confidence: float
     original_text: Optional[str] = None
     translated_text: str
+    high_res_crop: Optional[str] = None  # raw base64 PNG, pre-downscale supersampled render of just this bubble — sharper than cropping the final page image, for UI magnifiers. None when supersampling was off.
 
 
 class FallbackProviderConfig(BaseModel):

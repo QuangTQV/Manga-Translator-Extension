@@ -42,6 +42,7 @@ def render_text_skia(
     text_color_rgb: Optional[Tuple[int, int, int]] = None,
     text_background_color: Optional[Tuple[int, int, int]] = None,
     layout_only: bool = False,
+    high_res_crops: Optional[dict] = None,
 ) -> Image.Image:
     """
     Fits and renders text within a bounding box using Skia and HarfBuzz.
@@ -70,6 +71,10 @@ def render_text_skia(
         bubble_color_bgr: Background color of the bubble (BGR tuple). Used to determine text color.
         config: RenderingConfig object containing all rendering parameters. If None, uses defaults.
         verbose: Whether to print detailed logs.
+        high_res_crops: Optional dict to populate with this bubble's pre-downscale
+            supersampled render (keyed by bubble_id), for callers that want a sharper
+            crop than the final (downscaled) page image — e.g. a UI magnifier. Only
+            populated when supersampling is actually enabled; left untouched otherwise.
 
     Returns:
         Modified PIL Image object with rendered text.
@@ -406,6 +411,9 @@ def render_text_skia(
             scaled_pil_result = skia_surface_to_pil(scaled_surface)
         except RenderingError as e:
             raise RenderingError(f"Scaled conversion failed: {e}") from e
+
+        if high_res_crops is not None and bubble_id:
+            high_res_crops[bubble_id] = scaled_pil_result
 
         # Downscale using LANCZOS for high quality
         downscaled_result = scaled_pil_result.resize(

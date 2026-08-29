@@ -102,6 +102,44 @@ def _build_adaptive_shrink_mask(
     return shrunk
 
 
+def _sample_ink_color_bgr(text_pixels_bgr: np.ndarray, is_black_bubble: bool) -> tuple:
+    """Estimate a bubble's text ink color from the BGR pixels sampled at its
+    (eroded) text mask.
+
+    A plain median over every sampled pixel skews toward the background
+    color: manga text (often small/thin) is heavily anti-aliased, so most
+    sampled pixels are partial ink/background blends rather than pure ink —
+    naively median-ing them all renders translated text visibly paler than
+    the source. Keep only pixels near the ink-side extreme of the observed
+    luminance *range* (darkest for text on a light bubble, brightest for
+    text on a black one) before taking the median — much closer to the
+    true ink color than a plain median over the whole sample.
+
+    Deliberately a range-based cutoff (fraction of min..max), not a
+    percentile-of-count one: a heavily anti-aliased bubble can have far
+    fewer "pure ink" pixels than blended ones (a thin stroke's edges
+    outnumber its core), so a fixed top/bottom-25%-by-count split would
+    still land inside the blended majority and filter nothing.
+    """
+    luminance = (
+        text_pixels_bgr[:, 0] * 0.114
+        + text_pixels_bgr[:, 1] * 0.587
+        + text_pixels_bgr[:, 2] * 0.299
+    )
+    lum_min = float(luminance.min())
+    lum_max = float(luminance.max())
+    span = lum_max - lum_min
+    if is_black_bubble:
+        cutoff = lum_max - 0.3 * span
+        core_pixels_bgr = text_pixels_bgr[luminance >= cutoff]
+    else:
+        cutoff = lum_min + 0.3 * span
+        core_pixels_bgr = text_pixels_bgr[luminance <= cutoff]
+    if core_pixels_bgr.size == 0:
+        core_pixels_bgr = text_pixels_bgr
+    return tuple(np.median(core_pixels_bgr, axis=0).astype(int))
+
+
 def process_single_bubble(
     base_mask,
     img_gray,
@@ -364,9 +402,7 @@ def process_single_bubble(
                         text_pixels_bgr = image_bgr[text_mask == 255]
 
                     if text_pixels_bgr.size > 0:
-                        sampled_bgr = tuple(
-                            np.median(text_pixels_bgr, axis=0).astype(int)
-                        )
+                        sampled_bgr = _sample_ink_color_bgr(text_pixels_bgr, is_black_bubble)
                         hsv = cv2.cvtColor(
                             np.uint8([[sampled_bgr]]), cv2.COLOR_BGR2HSV
                         )[0][0]

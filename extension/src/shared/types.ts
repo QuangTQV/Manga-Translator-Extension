@@ -170,6 +170,10 @@ export interface BubbleInfo {
   confidence: number;
   originalText?: string;
   translatedText: string;
+  // Raw base64 PNG (no data: prefix) — the pre-downscale supersampled
+  // render of just this bubble, sharper than cropping the final page
+  // image. Undefined when the backend had supersampling off.
+  highResCrop?: string;
 }
 
 // A user-supplied correction, applied on a re-translate of the whole page.

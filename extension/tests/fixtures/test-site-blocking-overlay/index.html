@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MangaTranslator test site (with a site overlay sibling)</title>
+<style>
+  body { margin: 0; padding: 20px; background: #111; font-family: sans-serif; }
+  .page-wrapper { position: relative; }
+  img { display: block; margin: 0 0 16px; max-width: 600px; }
+  /* Simulates a real manga site's own lazy-load placeholder / ad overlay /
+     "click to continue" layer — a sibling of the image, in the SAME local
+     stacking context, with a z-index real sites commonly use (hundreds to
+     low thousands). It intentionally does NOT cover the whole page, only
+     the image area, matching how these report: the translated image still
+     renders fine, but hover/click/badges on it stop working. */
+  .site-overlay {
+    position: absolute; inset: 0; z-index: 999;
+    background: transparent;
+  }
+</style>
+</head>
+<body>
+  <div class="page-wrapper">
+    <img src="../test-site/page1.jpg" alt="page 1">
+    <div class="site-overlay"></div>
+  </div>
+</body>
+</html>

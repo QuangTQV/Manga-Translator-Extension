@@ -254,6 +254,7 @@ def _build_system_prompt_translation(
 - **Reading Context:** The {input_type} are presented in a {direction} reading order. Do not reorder them.
 {source_language_rule}
 - **Cohesion:** Treat the input lines as a continuous narrative. Ensure the translation flows logically and naturally as a cohesive whole.{cohesion_visual}
+- **Index Integrity:** Cohesion is about tone and flow, never about which numbered item a line belongs to. Item `i`'s transcription/translation must come only from crop `i` itself — never from a similar-looking line you recall from a different crop or from the full-page reference image. Plain rectangular narration/caption boxes in different panels often look nearly identical; do not let that similarity, or the narrative logic of the page, cause you to swap which numbered item a piece of text is attached to. Before writing item `i`, re-check that the text you're about to write is actually what appears in crop `i`, not just narratively where it "should" go next.
 - **Fidelity:** Focus on intent; translate functionally rather than literally.
 - **Conciseness:** Keep translations idiomatic and concise.{natural_style_rule}
 - **Emphasis:** If the source text is visually emphasized (bold, slanted, etc.), mirror that emphasis using the STYLING GUIDE.
