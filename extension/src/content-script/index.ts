@@ -1544,10 +1544,39 @@ function syncTranslatedDecorations(img: HTMLImageElement): void {
   syncOriginalToggleButtonLayout(img);
 }
 
+// Several decorations (overlay, badge, export button, toggle button, ...)
+// are each added to the same <img> within a few ms of one another during a
+// single translateAndApply()/applyTranslatedImage() call — every one of
+// them used to independently schedule its own rAF+250ms+1000ms full
+// 6-decoration resync, so one page finishing translation could fire the
+// same (identical, redundant) sync pass half a dozen times. Route every
+// caller through one shared pending set instead, flushed at most once per
+// animation frame regardless of how many images/decorations requested a
+// sync in between — same rAF+250ms+1000ms schedule per request, just
+// deduplicated across overlapping requests instead of stacking.
+const pendingDecorationSyncImages = new Set<HTMLImageElement>();
+let decorationSyncFlushScheduled = false;
+
+function flushDecorationSync(): void {
+  decorationSyncFlushScheduled = false;
+  const images = Array.from(pendingDecorationSyncImages);
+  pendingDecorationSyncImages.clear();
+  for (const img of images) {
+    if (img.isConnected) syncTranslatedDecorations(img);
+  }
+}
+
+function requestDecorationSyncFlush(img: HTMLImageElement): void {
+  pendingDecorationSyncImages.add(img);
+  if (decorationSyncFlushScheduled) return;
+  decorationSyncFlushScheduled = true;
+  window.requestAnimationFrame(flushDecorationSync);
+}
+
 function scheduleTranslatedDecorationSync(img: HTMLImageElement): void {
-  window.requestAnimationFrame(() => syncTranslatedDecorations(img));
-  window.setTimeout(() => syncTranslatedDecorations(img), 250);
-  window.setTimeout(() => syncTranslatedDecorations(img), 1000);
+  requestDecorationSyncFlush(img);
+  window.setTimeout(() => requestDecorationSyncFlush(img), 250);
+  window.setTimeout(() => requestDecorationSyncFlush(img), 1000);
 }
 
 function urlsMatch(a: string | null | undefined, b: string): boolean {
