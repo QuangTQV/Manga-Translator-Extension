@@ -72,6 +72,45 @@ test.describe('popup — LLM Config tab', () => {
     await expect(reloaded.locator('#provider-groups-list .backup-key-row input.bk-weight').first()).toHaveValue('7');
   });
 
+  test('a provider group\'s own reasoning effort persists across a popup reload, independent of the general setting', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+
+    await seedSettings(
+      worker,
+      baseSeed({
+        config: {
+          reasoningEffort: 'high',
+          providerGroups: [{
+            provider: 'Google', enabled: true,
+            apiKeys: [{ key: 'key-1', enabled: true }],
+          }],
+        },
+      }),
+      firstKeyMatches('key-1'),
+    );
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'LLM Config' }).click();
+
+    // Left unset, the row's own select starts on "use general setting" (the
+    // blank option), not mirroring the general dropdown's current value.
+    const rowSelect = popup.locator('#provider-groups-list .fallback-provider-row select.fb-reasoning-effort').first();
+    await expect(rowSelect).toHaveValue('');
+    await expect(popup.locator('#f-reasoning-effort')).toHaveValue('high');
+
+    await rowSelect.selectOption('none');
+    await popup.waitForTimeout(300);
+
+    const reloaded = await context.newPage();
+    await reloaded.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await reloaded.getByRole('button', { name: 'LLM Config' }).click();
+    await expect(reloaded.locator('#provider-groups-list .fallback-provider-row select.fb-reasoning-effort').first()).toHaveValue('none');
+    // The general setting is untouched by editing the per-group override.
+    await expect(reloaded.locator('#f-reasoning-effort')).toHaveValue('high');
+  });
+
   test('duplicate-key warning fires for same provider+model+key, not for a different model', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });

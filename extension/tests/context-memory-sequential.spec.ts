@@ -6,10 +6,13 @@ import { baseSeed, firstKeyMatches, seedSettings } from './storage';
 // routinely starts before an earlier one has finished writing its note
 // (see content-script's autoTranslateSequentialForContextMemory), so this
 // toggle forces one-page-at-a-time translation while Context Memory is on.
-// Defaults to true: a silently-broken Context Memory (parallel, no note
-// ever seen) is worse than an unexpectedly slower one.
+// Defaults to false: parallel auto-translate speed is the popup's default
+// expectation everywhere else, and a page occasionally missing the most
+// recent Context Memory note is a soft quality cost, not a correctness
+// break — slowing every page down by default to avoid it would surprise
+// users who never asked for it.
 test.describe('popup — Translate tab Context Memory sequential toggle', () => {
-  test('defaults to on for a fresh profile even though not explicitly seeded', async ({ context, extensionId }) => {
+  test('defaults to off for a fresh profile even though not explicitly seeded', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
 
@@ -19,7 +22,7 @@ test.describe('popup — Translate tab Context Memory sequential toggle', () => 
         config: {
           providerGroups: [{ provider: 'Google', enabled: true, apiKeys: [{ key: 'key-1', enabled: true }] }],
           contextMemoryEnabled: true,
-          // contextMemorySequential deliberately omitted — must fall back to true.
+          // contextMemorySequential deliberately omitted — must fall back to false.
         },
       }),
       firstKeyMatches('key-1'),
@@ -29,10 +32,10 @@ test.describe('popup — Translate tab Context Memory sequential toggle', () => 
     await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
 
     await expect(popup.locator('#f-context-memory')).toBeChecked();
-    await expect(popup.locator('#f-context-memory-sequential')).toBeChecked();
+    await expect(popup.locator('#f-context-memory-sequential')).not.toBeChecked();
   });
 
-  test('turning it off persists across a popup reload', async ({ context, extensionId }) => {
+  test('turning it on persists across a popup reload', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
 
@@ -42,7 +45,7 @@ test.describe('popup — Translate tab Context Memory sequential toggle', () => 
         config: {
           providerGroups: [{ provider: 'Google', enabled: true, apiKeys: [{ key: 'key-1', enabled: true }] }],
           contextMemoryEnabled: true,
-          contextMemorySequential: true,
+          contextMemorySequential: false,
         },
       }),
       firstKeyMatches('key-1'),
@@ -52,13 +55,13 @@ test.describe('popup — Translate tab Context Memory sequential toggle', () => 
     await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
 
     const sequentialToggle = popup.locator('#f-context-memory-sequential');
-    await expect(sequentialToggle).toBeChecked();
+    await expect(sequentialToggle).not.toBeChecked();
     // The visible control is a CSS toggle-switch built on a zero-size
     // <input>, which Playwright's pointer-based check()/uncheck() can't
     // click even with force — set the DOM state directly and fire the same
     // 'change' event the app's own click handling would produce.
     await sequentialToggle.evaluate((el: HTMLInputElement) => {
-      el.checked = false;
+      el.checked = true;
       el.dispatchEvent(new Event('change', { bubbles: true }));
     });
     // autoSave() also fires on blur/tab-switch; give the async write a beat.
@@ -66,7 +69,7 @@ test.describe('popup — Translate tab Context Memory sequential toggle', () => 
 
     const reloaded = await context.newPage();
     await reloaded.goto(`chrome-extension://${extensionId}/popup/index.html`);
-    await expect(reloaded.locator('#f-context-memory-sequential')).not.toBeChecked();
+    await expect(reloaded.locator('#f-context-memory-sequential')).toBeChecked();
     // Context Memory itself stays on — only the sequential-processing choice changed.
     await expect(reloaded.locator('#f-context-memory')).toBeChecked();
   });

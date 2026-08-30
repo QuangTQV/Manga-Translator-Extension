@@ -625,7 +625,7 @@ async function startAutoTranslate(): Promise<void> {
 
   preTranslateEnabled = settings.config.preTranslate ?? false;
   autoTranslateSequentialForContextMemory =
-    (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+    (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? false);
   autoTranslatePreviousPages = [];
 
   // Load already-translated URLs from cache
@@ -2427,7 +2427,7 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
       }
       const settings = await loadSettings();
       const sequentialForContextMemory =
-        (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+        (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? false);
       const workerCount = sequentialForContextMemory ? 1 : Math.min(AUTO_MAX_CONCURRENT, pages.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
       closeFixHintPopover();
@@ -2965,7 +2965,7 @@ function bgSuggestInstructions(
           temperature: settings.config.temperature,
           top_p: settings.config.topP,
           top_k: settings.config.topK,
-          reasoning_effort: settings.config.reasoningEffort || undefined,
+          reasoning_effort: rotation.reasoning_effort,
           api_key_weight: rotation.api_key_weight,
           backup_api_keys: rotation.backup_api_keys,
           backup_api_key_weights: rotation.backup_api_key_weights,
@@ -3603,7 +3603,7 @@ function bindScanner(shadow: ShadowRoot): void {
       }
     }
     const sequentialForContextMemory =
-      (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+      (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? false);
     const workerCount = sequentialForContextMemory ? 1 : Math.min(AUTO_MAX_CONCURRENT, chosen.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
@@ -3685,11 +3685,12 @@ function buildProviderRotation(settings: AppSettings): {
   api_key_weight?: number;
   backup_api_keys?: string[];
   backup_api_key_weights?: number[];
-  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string }[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string; reasoning_effort?: string }[];
+  reasoning_effort?: string;
 } {
   const groups = (settings.config.providerGroups ?? []).filter((g) => g.enabled !== false);
   const [first, ...rest] = groups;
-  if (!first) return { provider: 'Google' };
+  if (!first) return { provider: 'Google', reasoning_effort: settings.config.reasoningEffort || undefined };
   const [primary, ...backups] = first.apiKeys.filter((k) => k.enabled);
   const fallbackProviders = rest.map((g) => {
     const keys = g.apiKeys.filter((k) => k.enabled);
@@ -3699,6 +3700,7 @@ function buildProviderRotation(settings: AppSettings): {
       base_url: g.baseUrl,
       api_keys: keys.map((k) => k.key),
       api_key_weights: keys.map((k) => k.weight ?? 1),
+      reasoning_effort: g.reasoningEffort || undefined,
     };
   });
   return {
@@ -3710,6 +3712,11 @@ function buildProviderRotation(settings: AppSettings): {
     backup_api_keys: backups.length ? backups.map((k) => k.key) : undefined,
     backup_api_key_weights: backups.length ? backups.map((k) => k.weight ?? 1) : undefined,
     fallback_providers: fallbackProviders.length ? fallbackProviders : undefined,
+    // Group 0 is the "primary" slot in the wire format, so its own override
+    // (when set) becomes the request's top-level reasoning_effort; every
+    // fallback provider without its own override inherits this same value,
+    // not the raw general setting — see the reasoning_effort field above.
+    reasoning_effort: first.reasoningEffort || settings.config.reasoningEffort || undefined,
   };
 }
 
@@ -3735,7 +3742,7 @@ function buildTranslateRequest(
     max_tokens: settings.config.maxTokens,
     translation_mode: settings.config.translationMode,
     ocr_method: settings.config.ocrMethod,
-    reasoning_effort: settings.config.reasoningEffort || undefined,
+    reasoning_effort: rotation.reasoning_effort,
     special_instructions: settings.config.specialInstructions || undefined,
     llm_instructions: settings.config.llmInstructions || undefined,
     font_dir: settings.config.fontDir || undefined,

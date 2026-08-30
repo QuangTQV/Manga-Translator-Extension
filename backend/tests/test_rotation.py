@@ -78,6 +78,36 @@ def test_same_key_different_model_is_not_deduped():
     assert {c.model_name for c in candidates} == {"gemini-3.1-flash", "gemini-3.1-pro"}
 
 
+def test_fallback_provider_with_own_reasoning_effort_overrides_primary():
+    """A fallback provider with its own reasoning_effort must use it instead
+    of whatever the primary/general config set."""
+    config = TranslationConfig(
+        provider="Google", google_api_key="key-A", model_name="m", reasoning_effort="high",
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", model_name="m2", api_keys=["key-B"], reasoning_effort="none"),
+        ],
+    )
+    candidates = list(_iter_llm_candidates(config))
+    by_model = {c.model_name: c.reasoning_effort for c in candidates}
+    assert by_model["m"] == "high"
+    assert by_model["m2"] == "none"
+
+
+def test_fallback_provider_without_own_reasoning_effort_inherits_primary():
+    """A fallback provider that doesn't set its own reasoning_effort must
+    inherit the primary/general config's value, not run with none set."""
+    config = TranslationConfig(
+        provider="Google", google_api_key="key-A", model_name="m", reasoning_effort="high",
+        fallback_providers=[
+            FallbackProviderConfig(provider="Google", model_name="m2", api_keys=["key-B"]),
+        ],
+    )
+    candidates = list(_iter_llm_candidates(config))
+    by_model = {c.model_name: c.reasoning_effort for c in candidates}
+    assert by_model["m"] == "high"
+    assert by_model["m2"] == "high"
+
+
 def test_fallback_provider_missing_key_field_is_skipped():
     """A fallback provider whose name doesn't map to a known API-key field
     (e.g. a typo, or a provider that requires config this test doesn't

@@ -25,6 +25,7 @@ class FallbackProviderConfig:
     azure_openai_api_version: str = ""
     azure_openai_is_v1: bool = False
     openai_compatible_url: str = ""
+    reasoning_effort: Optional[str] = None  # overrides the primary config's reasoning_effort for this fallback; unset inherits it
 
 
 @dataclass

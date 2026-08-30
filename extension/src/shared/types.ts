@@ -24,6 +24,7 @@ export interface ProviderGroupConfig {
   apiKeys: BackupApiKeyEntry[];
   baseUrl?: string; // Azure endpoint, or OpenAI-Compatible URL
   enabled?: boolean;
+  reasoningEffort?: string; // overrides TranslateConfig.reasoningEffort for this provider/model only; unset inherits it
 }
 
 // Backup API Keys (and each fallback provider's own apiKeys) used to be
@@ -69,6 +70,7 @@ function normalizeOneProviderGroup(item: unknown): ProviderGroupConfig | null {
     apiKeys: normalizeApiKeys(obj),
     baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : undefined,
     enabled: obj.enabled !== false,
+    reasoningEffort: typeof obj.reasoningEffort === 'string' ? obj.reasoningEffort : undefined,
   };
 }
 
@@ -150,7 +152,7 @@ export interface TranslateConfig {
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
   contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
-  contextMemorySequential?: boolean; // translate one page at a time instead of in parallel while Context Memory is on, so a later page always sees the immediately preceding page's note (parallel workers would otherwise often start before it's written) — default true
+  contextMemorySequential?: boolean; // translate one page at a time instead of in parallel while Context Memory is on, so a later page always sees the immediately preceding page's note (parallel workers would otherwise often start before it's written) — default false (parallel speed by default; a page missing recent context is a soft cost, not a correctness one)
   providerGroups: ProviderGroupConfig[]; // every provider tried in rotation, in list order — no entry is distinguished as "primary"; the backend round-robins the starting candidate across all of them (and all their keys) equally
   rotationStrategy?: 'round_robin' | 'random' | 'sequential'; // which key/provider a request tries first — round_robin (default) spreads load evenly, random picks any ready one, sequential always starts at the first configured entry
   cooldownSeconds?: number; // how long a rate-limited key/provider is skipped before being retried (default 15s)
@@ -246,7 +248,7 @@ export interface TranslateRequest {
   context_memory?: string;
   backup_api_keys?: string[];
   backup_api_key_weights?: number[]; // same order as backup_api_keys
-  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string }[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string; reasoning_effort?: string }[];
   fix_hint?: { bubble_index?: number; original_text?: string; instruction: string };
   rotation_strategy?: string;
   cooldown_seconds?: number;
@@ -311,7 +313,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     preTranslate: false,
     previousContextEnabled: false,
     contextMemoryEnabled: false,
-    contextMemorySequential: true,
+    contextMemorySequential: false,
     rotationStrategy: 'round_robin',
     cooldownSeconds: 15,
   },
