@@ -174,9 +174,76 @@ def _build_fallback_provider_configs(
                 azure_openai_api_version=azure_api_version,
                 azure_openai_is_v1=azure_is_v1,
                 openai_compatible_url=openai_compatible_url,
+                reasoning_effort=fb.get("reasoning_effort") or None,
             )
         )
     return built
+
+
+def build_test_key_config(
+    provider: str,
+    model_name: str | None,
+    api_key: str | None,
+    base_url: str | None,
+    reasoning_effort: str | None = None,
+) -> TranslationConfig:
+    """Builds a minimal TranslationConfig for a single (provider, model,
+    key) combo — used only by the popup's "Test API Key" button, a plain
+    text ping with no image/detection/rendering involved, so this skips
+    everything _build_config() sets up for the real translate pipeline
+    and just reuses its Azure/OpenAI-Compatible URL normalization and key
+    injection.
+
+    reasoning_effort is whatever the caller's row actually has configured
+    (its own override, else the general setting, else unset) — the same
+    value a real translate request would send — not forced to a fixed
+    value: some OpenAI-Compatible-shaped backends (e.g. deepseek-v4-flash-
+    vision-exp via b.ai) need "none" sent explicitly to avoid burning the
+    whole token budget on unconstrained reasoning, but others (e.g.
+    glm-5.3-flash) reject "none" outright with a 400 — always-thinking
+    models that only accept low/high/max. Forcing one fixed value here
+    would falsely fail a perfectly valid key on whichever kind of model
+    doesn't accept it; using the row's actual setting means a real
+    config problem shows up as a real test failure instead. max_tokens is
+    kept moderate (not the real pipeline's up-to-16384) since the prompt
+    itself is trivial, but higher than a bare handful of tokens so an
+    always-thinking model left on its own default still has room to
+    answer."""
+    resolved_model = (model_name or "").strip() or _get_default_model(provider)
+
+    azure_endpoint = azure_api_version = ""
+    azure_is_v1 = False
+    openai_compatible_url = ""
+    if provider == "OpenAI-Compatible":
+        normalized = _normalize_openai_compatible_base_url(base_url)
+        if not normalized:
+            raise ValueError("Base URL is required for OpenAI-Compatible")
+        if not (model_name or "").strip():
+            raise ValueError("Model name is required for OpenAI-Compatible")
+        openai_compatible_url = normalized
+    elif provider == "Azure OpenAI":
+        endpoint, deployment, api_version, is_v1 = _normalize_azure_openai_endpoint(base_url)
+        if not endpoint:
+            raise ValueError("Azure OpenAI endpoint is required")
+        azure_endpoint = endpoint
+        azure_api_version = api_version or ""
+        azure_is_v1 = is_v1
+        resolved_model = (model_name or "").strip() or deployment or ""
+        if not resolved_model:
+            raise ValueError("Azure OpenAI deployment name is required")
+
+    translation = TranslationConfig(
+        provider=provider,
+        model_name=resolved_model,
+        max_tokens=1024,
+        reasoning_effort=reasoning_effort,
+        azure_openai_endpoint=azure_endpoint,
+        azure_openai_api_version=azure_api_version,
+        azure_openai_is_v1=azure_is_v1,
+        openai_compatible_url=openai_compatible_url,
+    )
+    _inject_api_keys(translation, provider, api_key)
+    return translation
 
 
 def _resolve_font_dir(

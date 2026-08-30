@@ -24,6 +24,7 @@ export interface ProviderGroupConfig {
   apiKeys: BackupApiKeyEntry[];
   baseUrl?: string; // Azure endpoint, or OpenAI-Compatible URL
   enabled?: boolean;
+  reasoningEffort?: string; // overrides TranslateConfig.reasoningEffort for this provider/model only; unset inherits it
 }
 
 // Backup API Keys (and each fallback provider's own apiKeys) used to be
@@ -69,6 +70,7 @@ function normalizeOneProviderGroup(item: unknown): ProviderGroupConfig | null {
     apiKeys: normalizeApiKeys(obj),
     baseUrl: typeof obj.baseUrl === 'string' ? obj.baseUrl : undefined,
     enabled: obj.enabled !== false,
+    reasoningEffort: typeof obj.reasoningEffort === 'string' ? obj.reasoningEffort : undefined,
   };
 }
 
@@ -246,7 +248,7 @@ export interface TranslateRequest {
   context_memory?: string;
   backup_api_keys?: string[];
   backup_api_key_weights?: number[]; // same order as backup_api_keys
-  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string }[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; api_key_weights?: number[]; base_url?: string; reasoning_effort?: string }[];
   fix_hint?: { bubble_index?: number; original_text?: string; instruction: string };
   rotation_strategy?: string;
   cooldown_seconds?: number;

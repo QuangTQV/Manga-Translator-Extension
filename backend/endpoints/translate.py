@@ -12,6 +12,8 @@ from PIL import Image
 from schemas import (
     SuggestInstructionsRequest,
     SuggestInstructionsResponse,
+    TestApiKeyRequest,
+    TestApiKeyResponse,
     TranslateBatchItem,
     TranslateBatchItemResponse,
     TranslateBatchRequest,
@@ -19,9 +21,10 @@ from schemas import (
     TranslateRequest,
     TranslateResponse,
 )
-from core.services.translation import generate_character_notes
+from core.services.translation import generate_character_notes, test_api_key
 from pipeline.wrapper import (
     _build_config,
+    build_test_key_config,
     image_to_base64_raw,
     translate_image_base64,
 )
@@ -382,6 +385,23 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
         raise HTTPException(status_code=500, detail=f"Failed to generate suggestion: {e}")
 
     return SuggestInstructionsResponse(suggestion=suggestion)
+
+
+@router.post("/test-key", response_model=TestApiKeyResponse)
+async def test_key(req: TestApiKeyRequest) -> TestApiKeyResponse:
+    """Ping one (provider, model, key) combo with a minimal text-only
+    request — the popup's "Test API Key" button. Bypasses the pipeline
+    concurrency slot entirely (no GPU/detection/rendering involved), so
+    testing several keys at once never queues behind real translate work."""
+    try:
+        config = build_test_key_config(req.provider, req.model_name, req.api_key, req.base_url, req.reasoning_effort)
+    except ValueError as e:
+        return TestApiKeyResponse(ok=False, error=str(e))
+
+    start = time.time()
+    ok, error = await asyncio.to_thread(test_api_key, config)
+    elapsed_ms = (time.time() - start) * 1000
+    return TestApiKeyResponse(ok=ok, error=error, latency_ms=elapsed_ms if ok else None)
 
 
 @router.get("/health")

@@ -72,7 +72,8 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Khu vực | Chức năng |
 | --- | --- |
 | LLM của bạn | Sử dụng provider, API key, model và Base URL do người dùng cấu hình. |
-| Xoay tua provider/key | Khi bị rate limit, tự động thử lần lượt các API key dự phòng cùng provider, rồi chuyển sang các provider dự phòng đã cấu hình. Kiểu xoay tua có thể cấu hình (tuần tự/ngẫu nhiên/round-robin); ở chế độ Ngẫu nhiên, mỗi key có thể đặt trọng số riêng để tăng tỉ lệ được chọn. Thời gian cooldown của key bị rate-limit sẽ dùng header `Retry-After` thật do provider trả về nếu có, thay vì đoán cố định — nhờ đó key được thử lại đúng thời điểm. |
+| Xoay tua provider/key | Khi bị rate limit, tự động thử lần lượt các API key dự phòng cùng provider, rồi chuyển sang các provider dự phòng đã cấu hình. Kiểu xoay tua có thể cấu hình (tuần tự/ngẫu nhiên/round-robin); ở chế độ Ngẫu nhiên, mỗi key có thể đặt trọng số riêng để tăng tỉ lệ được chọn. Thời gian cooldown của key bị rate-limit sẽ dùng header `Retry-After` thật do provider trả về nếu có, thay vì đoán cố định — nhờ đó key được thử lại đúng thời điểm. Mỗi provider/model trong danh sách cũng có thể tự đặt riêng Mức độ suy luận, không set thì dùng mặc định theo cấu hình chung. |
+| Test API Key | Nút "Test" cạnh mỗi API key (và "Test tất cả key" cho từng provider) gửi 1 request tối thiểu để kiểm tra key/model/URL đó có hoạt động không, không tốn 1 lượt dịch thật — nếu fail có thể xem đầy đủ lỗi từ provider. |
 | Cache prompt | Phần system prompt dịch (giống hệt nhau ở mọi trang trong cùng 1 lượt quét/auto-translate) được cache phía server trên Anthropic qua `cache_control`, giảm tới ~90% chi phí input cho các trang sau. Provider tương thích OpenAI và Gemini đã tự động cache prompt đủ điều kiện, không cần cấu hình. |
 | Trình quét trang | Tìm ảnh manga/comic trên trang hiện tại và cho phép chọn trang cần dịch. |
 | Tự động dịch | Theo dõi trang đọc hiện tại và dịch ảnh khi bạn cuộn. |

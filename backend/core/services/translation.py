@@ -1153,6 +1153,8 @@ def _iter_llm_candidates(config: TranslationConfig):
             extra_fields["azure_openai_is_v1"] = fb.azure_openai_is_v1
         elif fb.provider == "OpenAI-Compatible":
             extra_fields["openai_compatible_url"] = fb.openai_compatible_url
+        if fb.reasoning_effort:
+            extra_fields["reasoning_effort"] = fb.reasoning_effort
         fb_model = fb.model_name or config.model_name
         for i, fb_key in enumerate(fb.api_keys or []):
             if not fb_key or (fb.provider, fb_key, fb_model) in seen:
@@ -1354,11 +1356,25 @@ def _call_llm_endpoint_impl(
     prompt_text: str,
     debug: bool = False,
     system_prompt: Optional[str] = None,
+    max_retries: Optional[int] = None,
+    timeout: Optional[int] = None,
 ) -> Optional[str]:
-    """Internal helper to dispatch API calls based on provider."""
+    """Internal helper to dispatch API calls based on provider.
+
+    max_retries/timeout override each call_*_endpoint's own defaults
+    (3-5 retries, 120-3600s request timeout depending on provider) —
+    left None for the real translate/OCR path so those defaults still
+    apply; test_api_key() passes max_retries=0 and a short timeout so a
+    bad key/URL/unreachable host fails fast instead of working through a
+    30+s backoff or (for some providers) an hour-long hang."""
     provider = config.provider
     model_name = config.model_name
     api_parts = parts + [{"text": prompt_text}]
+    extra_call_kwargs: Dict[str, Any] = {}
+    if max_retries is not None:
+        extra_call_kwargs["max_retries"] = max_retries
+    if timeout is not None:
+        extra_call_kwargs["timeout"] = timeout
 
     try:
         if provider == "Google":
@@ -1376,6 +1392,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "OpenAI":
             api_key = config.openai_api_key
@@ -1392,6 +1409,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "Azure OpenAI":
             endpoint = config.azure_openai_endpoint
@@ -1416,6 +1434,7 @@ def _call_llm_endpoint_impl(
                     debug=debug,
                     base_url=endpoint,
                     enable_web_search=config.enable_web_search,
+                    **extra_call_kwargs,
                 )
             generation_config = _build_generation_config(
                 provider, model_name, config, debug
@@ -1430,6 +1449,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "Anthropic":
             api_key = config.anthropic_api_key
@@ -1446,6 +1466,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "xAI":
             api_key = config.xai_api_key
@@ -1462,6 +1483,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "DeepSeek":
             api_key = config.deepseek_api_key
@@ -1477,6 +1499,7 @@ def _call_llm_endpoint_impl(
                 generation_config=generation_config,
                 system_prompt=system_prompt,
                 debug=debug,
+                **extra_call_kwargs,
             )
         elif provider == "Z.ai":
             api_key = config.zai_api_key
@@ -1493,6 +1516,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "Moonshot AI":
             api_key = config.moonshot_api_key
@@ -1509,6 +1533,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "OpenRouter":
             api_key = config.openrouter_api_key
@@ -1525,6 +1550,7 @@ def _call_llm_endpoint_impl(
                 system_prompt=system_prompt,
                 debug=debug,
                 enable_web_search=config.enable_web_search,
+                **extra_call_kwargs,
             )
         elif provider == "OpenAI-Compatible":
             base_url = config.openai_compatible_url
@@ -1542,6 +1568,7 @@ def _call_llm_endpoint_impl(
                 generation_config=generation_config,
                 system_prompt=system_prompt,
                 debug=debug,
+                **extra_call_kwargs,
             )
         else:
             raise TranslationError(
@@ -1550,6 +1577,23 @@ def _call_llm_endpoint_impl(
 
     except (ValueError, RuntimeError):
         raise
+
+
+def test_api_key(config: TranslationConfig, debug: bool = False) -> tuple[bool, Optional[str]]:
+    """Single, non-rotating LLM call for the popup's "Test API Key" button
+    — deliberately bypasses _call_llm_endpoint's key/provider rotation so a
+    failure is reported against exactly the one key under test, not
+    silently retried against a different one that happens to work."""
+    try:
+        result = _call_llm_endpoint_impl(
+            config, parts=[], prompt_text="Reply with exactly: OK", debug=debug,
+            max_retries=0, timeout=20,
+        )
+        if not result or not result.strip():
+            return False, "Empty response from provider"
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 def _parse_llm_response_unified(

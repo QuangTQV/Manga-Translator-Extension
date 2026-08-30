@@ -133,6 +133,7 @@ Translate a single image.
 | `api_keys` | `string[]` | Keys to try for this provider, in order |
 | `api_key_weights` | `float[]?` | Relative pick weight per key (same order as `api_keys`), used only under `"random"` rotation |
 | `base_url` | `string?` | Azure endpoint, or OpenAI-Compatible URL |
+| `reasoning_effort` | `string?` | Overrides the top-level `reasoning_effort` for this fallback provider only; omit to inherit it |
 
 #### `FixHintConfig`
 
@@ -259,6 +260,39 @@ Drafts Story Notes text (cast, relationships, tone) from a handful of sample pag
 ```json
 { "suggestion": "Main characters: ... Tone: ..." }
 ```
+
+---
+
+### `POST /test-key`
+
+Pings one `(provider, model, key)` combo with a minimal text-only request — the popup's "Test API Key" button. Not part of the translate flow; always returns `200 OK` with an `ok` flag rather than an HTTP error status, since a failed key/URL is an expected outcome here, not a server error. A single attempt only, no retry-on-rate-limit, so it reports back quickly even for an unreachable URL.
+
+**Request body:**
+```json
+{
+  "provider": "OpenAI-Compatible",
+  "model_name": "deepseek-v4-flash-vision-exp",
+  "api_key": "<key to test>",
+  "base_url": "https://api.b.ai/v1",
+  "reasoning_effort": null
+}
+```
+
+**Fields:**
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `provider` | `string` | **required** | LLM provider |
+| `model_name` | `string?` | `null` | Model name (or Azure deployment name); falls back to that provider's default model if omitted |
+| `api_key` | `string?` | `null` | The key to test |
+| `base_url` | `string?` | `null` | Azure endpoint, or OpenAI-Compatible URL — required for those two providers |
+| `reasoning_effort` | `string?` | `null` | Same value the real translate request for this row would send — not forced to a fixed value, since backends disagree on which values (if any) they accept |
+
+**Response `200 OK`:**
+```json
+{ "ok": false, "error": "OpenAI-Compatible API HTTP Error: Status 401: ... (Check API key if provided)", "latency_ms": null }
+```
+
+`latency_ms` is only set when `ok` is `true`.
 
 ---
 

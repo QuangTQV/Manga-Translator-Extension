@@ -176,6 +176,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       return;
     }
+
+    if (message.type === 'TEST_API_KEY') {
+      const { body } = message as { type: string; body: TestApiKeyBody };
+      sendResponse(await fetchTestApiKey(body));
+      return;
+    }
   })();
 
   return true;
@@ -307,7 +313,7 @@ interface SuggestInstructionsBody {
   top_k: number;
   reasoning_effort?: string;
   backup_api_keys?: string[];
-  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string }[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string; reasoning_effort?: string }[];
   rotation_strategy?: string;
   cooldown_seconds?: number;
   enable_web_search?: boolean;
@@ -342,6 +348,47 @@ async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { error: `Suggest instructions error: ${msg}` };
+  }
+}
+
+interface TestApiKeyBody {
+  provider: string;
+  model_name?: string;
+  api_key?: string;
+  base_url?: string;
+  reasoning_effort?: string;
+}
+
+interface TestApiKeyResult {
+  ok: boolean;
+  error?: string;
+  latency_ms?: number;
+}
+
+async function fetchTestApiKey(body: TestApiKeyBody): Promise<TestApiKeyResult> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const endpoint = `${backendUrl.replace(/\/$/, '')}/test-key`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+        else detail = JSON.stringify(errBody).slice(0, 200);
+      } catch { /* ignore */ }
+      return { ok: false, error: detail };
+    }
+    return (await res.json()) as TestApiKeyResult;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Could not reach backend: ${msg}` };
   }
 }
 

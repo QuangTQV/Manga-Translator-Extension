@@ -72,7 +72,8 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | 模块 | 功能 |
 | --- | --- |
 | 自带 LLM | 使用用户配置的 provider、API key、model 和 Base URL。 |
-| Provider/密钥轮换 | 遇到限流时自动依次尝试同一 provider 的备用密钥，再切换到已配置的备用 provider。轮换顺序可配置（轮询/随机/顺序）；随机模式下每个密钥可设置权重以提高被选中的概率。被限流密钥的冷却时间会优先使用 provider 返回的真实 `Retry-After` 响应头（如果有），而不是固定猜测值，从而在正确的时间重试。 |
+| Provider/密钥轮换 | 遇到限流时自动依次尝试同一 provider 的备用密钥，再切换到已配置的备用 provider。轮换顺序可配置（轮询/随机/顺序）；随机模式下每个密钥可设置权重以提高被选中的概率。被限流密钥的冷却时间会优先使用 provider 返回的真实 `Retry-After` 响应头（如果有），而不是固定猜测值，从而在正确的时间重试。列表中每个 provider/model 也可单独覆盖推理强度，不设置则使用通用设置。 |
+| 测试 API Key | 每个 API key 旁的"测试"按钮（以及每个 provider 的"测试全部密钥"）会发送一个最小请求，确认该 key/model/URL 是否真的可用，不消耗实际翻译额度——测试失败时可查看 provider 返回的完整错误信息。 |
 | Prompt 缓存 | 翻译用的 system prompt 在同一批次/自动翻译过程中每页完全相同，通过 `cache_control` 在 Anthropic 端缓存，可将后续每页的输入成本降低约 90%。OpenAI 兼容和 Gemini provider 已自动缓存符合条件的 prompt，无需配置。 |
 | 页面扫描器 | 在当前页面查找 manga/comic 图片，并让你选择要翻译的页面。 |
 | 自动翻译 | 监听当前阅读页，在滚动时自动翻译图片。 |

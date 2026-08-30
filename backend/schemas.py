@@ -21,6 +21,7 @@ class FallbackProviderConfig(BaseModel):
     api_keys: List[str] = []
     api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as api_keys), used only when rotation_strategy is "random"
     base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
+    reasoning_effort: Optional[str] = None  # overrides the top-level reasoning_effort for this fallback provider; unset inherits it
 
 
 class FixHintConfig(BaseModel):
@@ -142,3 +143,20 @@ class SuggestInstructionsRequest(BaseModel):
 
 class SuggestInstructionsResponse(BaseModel):
     suggestion: str
+
+
+class TestApiKeyRequest(BaseModel):
+    """One (provider, model, key) combo to ping — the popup's "Test API
+    Key" button, not part of the translate flow."""
+
+    provider: str
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
+    reasoning_effort: Optional[str] = None  # same value the real translate request for this row would send
+
+
+class TestApiKeyResponse(BaseModel):
+    ok: bool
+    error: Optional[str] = None
+    latency_ms: Optional[float] = None

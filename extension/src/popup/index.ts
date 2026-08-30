@@ -579,6 +579,22 @@ function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
   baseUrlField.placeholder = t(uiLanguage, 'labelBaseUrl');
   baseUrlField.value = data?.baseUrl ?? '';
 
+  const reasoningEffortField = document.createElement('select');
+  reasoningEffortField.className = 'select fb-reasoning-effort';
+  reasoningEffortField.title = t(uiLanguage, 'titlePerGroupReasoningEffort');
+  const reasoningEffortOptions: [string, string][] = [
+    ['', t(uiLanguage, 'reasoningInherit')],
+    ['none', 'None'], ['minimal', 'Minimal'], ['low', 'Low'],
+    ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'X-High'],
+  ];
+  for (const [value, label] of reasoningEffortOptions) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    reasoningEffortField.appendChild(opt);
+  }
+  reasoningEffortField.value = data?.reasoningEffort ?? '';
+
   const apiKeysList = document.createElement('div');
   apiKeysList.className = 'fb-api-keys-list';
   for (const entry of data?.apiKeys ?? []) {
@@ -617,14 +633,38 @@ function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
     updateDuplicateKeyWarning();
   });
 
+  const testAllBtn = document.createElement('button');
+  testAllBtn.type = 'button';
+  testAllBtn.className = 'btn-test-all';
+  testAllBtn.textContent = t(uiLanguage, 'btnTestAllKeys');
+  testAllBtn.addEventListener('click', () => {
+    void (async () => {
+      testAllBtn.disabled = true;
+      try {
+        const keyRows = Array.from(apiKeysList.querySelectorAll<HTMLDivElement>('.backup-key-row'))
+          .filter((kr) => kr.querySelector<HTMLInputElement>('.bk-enabled')?.checked !== false);
+        await Promise.all(keyRows.map((kr) => {
+          const kf = kr.querySelector<HTMLInputElement>('.bk-key');
+          const btn = kr.querySelector<HTMLButtonElement>('.btn-test-key');
+          const status = kr.querySelector<HTMLSpanElement>('.bk-test-status');
+          const errBtn = kr.querySelector<HTMLButtonElement>('.btn-view-error');
+          const errBox = kr.querySelector<HTMLDivElement>('.bk-error-detail');
+          return (kf && btn && status && errBtn && errBox) ? runKeyTest(kr, kf, btn, status, errBtn, errBox) : Promise.resolve(false);
+        }));
+      } finally {
+        testAllBtn.disabled = false;
+      }
+    })();
+  });
+
   enabledCheckbox.addEventListener('change', syncProviderEnabledStyle);
 
-  for (const el of [providerSelect, modelField, baseUrlField, enabledCheckbox]) {
+  for (const el of [providerSelect, modelField, baseUrlField, reasoningEffortField, enabledCheckbox]) {
     el.addEventListener('change', () => { updateDuplicateKeyWarning(); void autoSave(); });
   }
   providerSelect.addEventListener('input', () => updateDuplicateKeyWarning());
 
-  row.append(header, providerSelect, modelField, baseUrlField, apiKeysList, addKeyBtn);
+  row.append(header, providerSelect, modelField, baseUrlField, reasoningEffortField, apiKeysList, addKeyBtn, testAllBtn);
   return row;
 }
 
@@ -642,6 +682,7 @@ function collectProviderGroups(): ProviderGroupConfig[] {
     const provider = rowEl.querySelector<HTMLSelectElement>('.fb-provider')?.value ?? '';
     const modelName = rowEl.querySelector<HTMLInputElement>('.fb-model')?.value.trim() ?? '';
     const baseUrl = rowEl.querySelector<HTMLInputElement>('.fb-base-url')?.value.trim() ?? '';
+    const reasoningEffort = rowEl.querySelector<HTMLSelectElement>('.fb-reasoning-effort')?.value ?? '';
     const enabled = rowEl.querySelector<HTMLInputElement>('.fb-enabled')?.checked ?? true;
     const apiKeys: BackupApiKeyEntry[] = [];
     for (const keyRowEl of Array.from(rowEl.querySelectorAll<HTMLDivElement>('.fb-api-keys-list .backup-key-row'))) {
@@ -653,7 +694,7 @@ function collectProviderGroups(): ProviderGroupConfig[] {
       apiKeys.push({ key, enabled: keyEnabled, ...(weight !== undefined ? { weight } : {}) });
     }
     if (!provider || apiKeys.length === 0) continue; // skip incomplete rows
-    rows.push({ provider, modelName: modelName || undefined, apiKeys, baseUrl: baseUrl || undefined, enabled });
+    rows.push({ provider, modelName: modelName || undefined, apiKeys, baseUrl: baseUrl || undefined, enabled, reasoningEffort: reasoningEffort || undefined });
   }
   return rows;
 }
@@ -682,6 +723,28 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   weightField.title = t(uiLanguage, 'hintKeyWeight');
   weightField.value = String(data?.weight ?? 1);
 
+  const testBtn = document.createElement('button');
+  testBtn.type = 'button';
+  testBtn.className = 'btn-test-key';
+  testBtn.textContent = t(uiLanguage, 'btnTestKey');
+  testBtn.title = t(uiLanguage, 'hintTestKey');
+
+  const testStatus = document.createElement('span');
+  testStatus.className = 'bk-test-status';
+
+  const errorDetailBtn = document.createElement('button');
+  errorDetailBtn.type = 'button';
+  errorDetailBtn.className = 'btn-view-error';
+  errorDetailBtn.textContent = '🔍';
+  errorDetailBtn.title = t(uiLanguage, 'btnViewError');
+
+  const errorDetailBox = document.createElement('div');
+  errorDetailBox.className = 'bk-error-detail';
+
+  errorDetailBtn.addEventListener('click', () => { errorDetailBox.classList.toggle('visible'); });
+
+  testBtn.addEventListener('click', () => { void runKeyTest(row, keyField, testBtn, testStatus, errorDetailBtn, errorDetailBox); });
+
   const [upBtn, downBtn] = createMoveButtons(row, 'backup-key-row');
 
   const removeBtn = document.createElement('button');
@@ -702,10 +765,85 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   for (const el of [enabledCheckbox, keyField, weightField]) {
     el.addEventListener('change', () => { syncDisabledStyle(); updateDuplicateKeyWarning(); void autoSave(); });
   }
-  keyField.addEventListener('input', () => updateDuplicateKeyWarning());
+  keyField.addEventListener('input', () => {
+    updateDuplicateKeyWarning();
+    testStatus.className = 'bk-test-status'; testStatus.textContent = ''; testStatus.title = '';
+    errorDetailBtn.classList.remove('visible');
+    errorDetailBox.classList.remove('visible'); errorDetailBox.textContent = '';
+  });
 
-  row.append(enabledCheckbox, keyField, weightField, upBtn, downBtn, removeBtn);
+  row.append(enabledCheckbox, keyField, weightField, testBtn, testStatus, errorDetailBtn, upBtn, downBtn, removeBtn, errorDetailBox);
   return row;
+}
+
+// Reads the enclosing provider group's current provider/model/base URL at
+// test time (not creation time) — the user may edit them after adding a
+// key row, and a test should always ping against whatever is configured
+// right now.
+function readGroupProviderFields(keyRow: HTMLElement): { provider: string; modelName: string; baseUrl: string; reasoningEffort: string } {
+  const groupRow = keyRow.closest<HTMLDivElement>('.fallback-provider-row');
+  // Same value a real translate request for this row would send: its own
+  // override if set, else the general Reasoning Effort setting, else Auto
+  // (unset) — never forced to a fixed value here, since backends disagree
+  // on which values (if any) they accept.
+  const ownReasoningEffort = groupRow?.querySelector<HTMLSelectElement>('.fb-reasoning-effort')?.value ?? '';
+  return {
+    provider: groupRow?.querySelector<HTMLSelectElement>('.fb-provider')?.value ?? '',
+    modelName: groupRow?.querySelector<HTMLInputElement>('.fb-model')?.value.trim() ?? '',
+    baseUrl: groupRow?.querySelector<HTMLInputElement>('.fb-base-url')?.value.trim() ?? '',
+    reasoningEffort: ownReasoningEffort || reasoningEffortSelect.value || '',
+  };
+}
+
+function testApiKeyValue(provider: string, modelName: string, baseUrl: string, apiKey: string, reasoningEffort: string): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: 'TEST_API_KEY', body: { provider, model_name: modelName || undefined, api_key: apiKey, base_url: baseUrl || undefined, reasoning_effort: reasoningEffort || undefined } },
+      (resp: unknown) => {
+        const lastError = chrome.runtime.lastError;
+        if (lastError) { resolve({ ok: false, error: lastError.message }); return; }
+        resolve((resp as { ok: boolean; error?: string }) ?? { ok: false, error: 'no response' });
+      },
+    );
+  });
+}
+
+async function runKeyTest(
+  keyRow: HTMLDivElement,
+  keyField: HTMLInputElement,
+  testBtn: HTMLButtonElement,
+  statusEl: HTMLSpanElement,
+  errorBtn: HTMLButtonElement,
+  errorBox: HTMLDivElement,
+): Promise<boolean> {
+  const key = keyField.value.trim();
+  errorBtn.classList.remove('visible');
+  errorBox.classList.remove('visible');
+  errorBox.textContent = '';
+  if (!key) {
+    statusEl.className = 'bk-test-status';
+    statusEl.textContent = '';
+    statusEl.title = '';
+    return false;
+  }
+  const { provider, modelName, baseUrl, reasoningEffort } = readGroupProviderFields(keyRow);
+  testBtn.disabled = true;
+  statusEl.className = 'bk-test-status pending';
+  statusEl.textContent = '…';
+  statusEl.title = t(uiLanguage, 'testKeyPending');
+  try {
+    const result = await testApiKeyValue(provider, modelName, baseUrl, key, reasoningEffort);
+    statusEl.className = `bk-test-status ${result.ok ? 'ok' : 'fail'}`;
+    statusEl.textContent = result.ok ? '✓' : '✗';
+    statusEl.title = result.ok ? t(uiLanguage, 'testKeyOk') : (result.error || t(uiLanguage, 'testKeyFail'));
+    if (!result.ok) {
+      errorBox.textContent = result.error || t(uiLanguage, 'testKeyFail');
+      errorBtn.classList.add('visible');
+    }
+    return result.ok;
+  } finally {
+    testBtn.disabled = false;
+  }
 }
 
 async function autoSave(): Promise<boolean> {

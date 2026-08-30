@@ -86,3 +86,79 @@ test('reordering a provider group above the default changes which one is sent as
   expect(fallback?.api_keys).toEqual(['google-key-1']);
   expect(fallback?.api_key_weights).toEqual([2]);
 });
+
+test('a per-provider-group reasoning effort overrides the general setting; a group without one inherits it', async ({ context, extensionId }) => {
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+
+  // General reasoning effort is "high". The primary group (Azure) overrides
+  // it to "none"; the fallback group (Google) sets no override of its own,
+  // so its wire entry must carry no reasoning_effort field at all — the
+  // backend fills that in from the request's own top-level value, not from
+  // whatever the popup's general dropdown happened to say.
+  await seedSettings(
+    worker,
+    baseSeed({
+      config: {
+        reasoningEffort: 'high',
+        providerGroups: [
+          {
+            provider: 'Azure OpenAI', modelName: 'gpt-5-nano', enabled: true, reasoningEffort: 'none',
+            baseUrl: 'https://res.openai.azure.com/openai/deployments/gpt-5-nano/chat/completions?api-version=2024-10-01',
+            apiKeys: [{ key: 'azure-key-1', enabled: true }],
+          },
+          {
+            provider: 'Google', enabled: true,
+            apiKeys: [{ key: 'google-key-1', enabled: true }],
+          },
+        ],
+      },
+    }),
+    firstKeyMatches('azure-key-1'),
+  );
+
+  let capturedBody: any = null;
+  await context.route('**/translate', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    capturedBody = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        translated_image: FAKE_TRANSLATED_IMAGE_B64,
+        bubbles: [],
+        processing_time_seconds: 0.1,
+        source_language: 'Japanese',
+        target_language: 'English',
+        provider: capturedBody?.provider,
+        ocr_texts: [],
+        memory_note: null,
+      }),
+    });
+  });
+
+  const mangaPage = await context.newPage();
+  await mangaPage.goto(TEST_SITE_URL);
+
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+  await mangaPage.bringToFront();
+  await popup.locator('#btn-scan').click();
+  await mangaPage.waitForTimeout(1500);
+
+  const cdp = await context.newCDPSession(mangaPage);
+  await cdp.send('DOM.enable');
+  await clickScannerAction(mangaPage, cdp, 'select-all');
+  await mangaPage.waitForTimeout(150);
+  await clickScannerAction(mangaPage, cdp, 'translate');
+  await mangaPage.waitForTimeout(2000);
+
+  expect(capturedBody).toBeTruthy();
+  expect(capturedBody.provider).toBe('Azure OpenAI');
+  expect(capturedBody.reasoning_effort).toBe('none');
+
+  const fallback = capturedBody.fallback_providers?.[0];
+  expect(fallback?.provider).toBe('Google');
+  expect(fallback?.reasoning_effort).toBeUndefined();
+});
