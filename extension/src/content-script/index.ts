@@ -862,6 +862,7 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
 
   const cached = translatedCache.get(url);
   if (cached) {
+    touchTranslatedCache(translatedCache, url);
     applyTranslatedImage(img, `data:image/png;base64,${cached}`, url);
     if (isNearViewport(img)) queueAutoTranslateLookahead(img);
     return;
@@ -875,8 +876,10 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
 }
 
 function queueAutoTranslateImage(img: HTMLImageElement, url: string, priority = false): boolean {
-  if (translatedCache.has(url)) {
-    applyTranslatedImage(img, `data:image/png;base64,${translatedCache.get(url)!}`, url);
+  const cached = translatedCache.get(url);
+  if (cached) {
+    touchTranslatedCache(translatedCache, url);
+    applyTranslatedImage(img, `data:image/png;base64,${cached}`, url);
     return false;
   }
 
@@ -2481,6 +2484,20 @@ function mapByteSize(map: Map<string, string>): number {
   return total;
 }
 
+// Map preserves insertion order, and eviction always drops the oldest
+// (first) entry — without this, a page the reader just scrolled back to and
+// re-viewed (a cache hit) stays at its original insertion position and can
+// still be evicted before an older page nobody has touched since, which is
+// backwards for a cache whose whole point is "don't re-translate what the
+// reader still cares about". Re-inserting on every hit turns the plain
+// insertion-order FIFO into an actual least-recently-used order.
+function touchTranslatedCache(map: Map<string, string>, key: string): void {
+  const value = map.get(key);
+  if (value === undefined) return;
+  map.delete(key);
+  map.set(key, value);
+}
+
 // Map preserves insertion order, so the oldest entry is always first —
 // evicts oldest-first until the map's total value size is back under
 // maxBytes, returning the evicted keys so callers can also drop the
@@ -2549,7 +2566,23 @@ async function contentCacheKey(base64: string, outputLanguage: string): Promise<
 // ~160MB combined ceiling the write-time budget already enforces.
 const MAX_CACHE_STORAGE_BYTES = 250 * 1024 * 1024;
 
-async function loadTranslatedCache(): Promise<void> {
+// Every successful translation is already written straight into
+// translatedCache/translatedContentCache in memory (rememberTranslated),
+// so re-reading and JSON-parsing the entire chrome.storage.local area
+// (routinely tens to hundreds of MB of base64 image data) is only actually
+// needed once per page load, to hydrate whatever an earlier session already
+// persisted — not on every single startAutoTranslate()/scanner-open call
+// within the same page lifetime. Memoized as a shared promise (not just a
+// boolean flag) so two calls racing before the first one finishes still
+// share the same in-flight load instead of both reading storage.
+let translatedCacheLoadPromise: Promise<void> | null = null;
+
+function loadTranslatedCache(): Promise<void> {
+  if (!translatedCacheLoadPromise) translatedCacheLoadPromise = loadTranslatedCacheFromStorage();
+  return translatedCacheLoadPromise;
+}
+
+async function loadTranslatedCacheFromStorage(): Promise<void> {
   try {
     const bytesInUse = await chrome.storage.local.getBytesInUse(null);
     if (bytesInUse > MAX_CACHE_STORAGE_BYTES) {
@@ -2615,6 +2648,7 @@ async function saveTranslatedContentCacheEntry(contentKey: string, b64: string):
 async function clearTranslatedCache(): Promise<void> {
   translatedCache = new Map();
   translatedContentCache = new Map();
+  translatedCacheLoadPromise = null; // storage is about to be wiped too — a later loadTranslatedCache() should be allowed to run again, not skip on stale memoized state
   try {
     // Deliberately avoid chrome.storage.local.get(null) here — after heavy
     // use the cache can hold hundreds of MB to gigabytes of base64 image
@@ -3716,6 +3750,7 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
   // Check cache first
   if (translatedCache.has(page.rawUrl)) {
     const cached = translatedCache.get(page.rawUrl)!;
+    touchTranslatedCache(translatedCache, page.rawUrl);
     const dataUrl = `data:image/png;base64,${cached}`;
     applyTranslatedImageToPage(page.rawUrl, dataUrl);
     if (currentShadow) {
