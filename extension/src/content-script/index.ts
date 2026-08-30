@@ -1114,6 +1114,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     const contentCached = translatedContentCache.get(contentKey);
     if (contentCached) {
       console.log('[MT] content-cache hit:', url);
+      touchTranslatedCache(translatedContentCache, contentKey);
       rememberTranslated(url, contentCached);
       applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
       if (isNearViewport(img)) queueAutoTranslateLookahead(img);
@@ -2630,7 +2631,14 @@ async function loadTranslatedCacheFromStorage(): Promise<void> {
     if (keysToPrune.length > 0) {
       await chrome.storage.local.remove(keysToPrune);
     }
-  } catch { /* ignore */ }
+  } catch {
+    // A genuine failure here (not the deliberate "too large, skip" path
+    // above, which returns normally rather than throwing) shouldn't be
+    // memoized as "done" — without this, the maps would stay unhydrated
+    // for the rest of the page's lifetime instead of the next caller
+    // getting a real retry.
+    translatedCacheLoadPromise = null;
+  }
 }
 
 async function saveTranslatedCacheEntry(url: string, b64: string): Promise<void> {
@@ -2646,6 +2654,11 @@ async function saveTranslatedContentCacheEntry(contentKey: string, b64: string):
 }
 
 async function clearTranslatedCache(): Promise<void> {
+  // If a load is still in flight, let it finish writing into the maps
+  // first — otherwise it can resolve AFTER the reset below and silently
+  // resurrect the very data this function is about to erase.
+  if (translatedCacheLoadPromise) await translatedCacheLoadPromise;
+
   translatedCache = new Map();
   translatedContentCache = new Map();
   translatedCacheLoadPromise = null; // storage is about to be wiped too — a later loadTranslatedCache() should be allowed to run again, not skip on stale memoized state
