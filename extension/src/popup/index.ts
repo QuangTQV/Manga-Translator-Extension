@@ -230,7 +230,7 @@ async function loadAndBind(): Promise<void> {
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
-  contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? true;
+  contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? false;
 
   renderProviderGroups(settings.config.providerGroups ?? []);
   updateDuplicateKeyWarning();

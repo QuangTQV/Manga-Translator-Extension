@@ -625,7 +625,7 @@ async function startAutoTranslate(): Promise<void> {
 
   preTranslateEnabled = settings.config.preTranslate ?? false;
   autoTranslateSequentialForContextMemory =
-    (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+    (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? false);
   autoTranslatePreviousPages = [];
 
   // Load already-translated URLs from cache
@@ -2427,7 +2427,7 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
       }
       const settings = await loadSettings();
       const sequentialForContextMemory =
-        (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+        (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? false);
       const workerCount = sequentialForContextMemory ? 1 : Math.min(AUTO_MAX_CONCURRENT, pages.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
       closeFixHintPopover();
@@ -3603,7 +3603,7 @@ function bindScanner(shadow: ShadowRoot): void {
       }
     }
     const sequentialForContextMemory =
-      (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? true);
+      (settings.config.contextMemoryEnabled ?? false) && (settings.config.contextMemorySequential ?? false);
     const workerCount = sequentialForContextMemory ? 1 : Math.min(AUTO_MAX_CONCURRENT, chosen.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
