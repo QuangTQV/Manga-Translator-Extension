@@ -363,8 +363,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   if (msg.type === 'SUGGEST_FROM_SCAN') {
     void (async () => {
       const { enableWebSearch, storyTitle } = msg as { enableWebSearch?: boolean; storyTitle?: string };
-      const images = Array.from(imageCache.values())
-        .map(extractBase64FromDataUrl)
+      const images = currentPages
+        .map((p) => fullResBase64For(p.rawUrl))
         .filter((b64): b64 is string => Boolean(b64))
         .slice(0, SUGGEST_INSTRUCTIONS_MAX_IMAGES);
       const result = await runSuggestInstructions(images, enableWebSearch, storyTitle);
@@ -393,6 +393,12 @@ let currentShadow: ShadowRoot | null = null;
 let totalChapterPages = 0;
 let seenUrls = new Set<string>();
 let imageCache = new Map<string, string>();
+// Small resized copies for the scanner grid specifically — imageCache holds
+// full-resolution images (needed for translation and the lightbox/hover
+// zoom preview), which a grid of ~160px cards has no use for; decoding and
+// compositing dozens of full-size manga pages just to show them shrunk via
+// CSS is unnecessary memory/CPU cost. See makeThumbnailDataUrl().
+let thumbnailCache = new Map<string, string>();
 let uiLanguage: UiLanguage = 'en';
 
 function tr(key: ContentMessageKey, vars: Record<string, string | number> = {}): string {
@@ -481,6 +487,18 @@ const SUGGEST_INSTRUCTIONS_MAX_IMAGES = 8;
 function extractBase64FromDataUrl(src: string): string | null {
   const match = /^data:image\/[\w+.-]+;base64,([A-Za-z0-9+/]+=*)$/.exec(src);
   return match ? match[1] : null;
+}
+
+// A full-resolution sample image for a scanned page, for LLM calls that need
+// to actually read it (Suggest Story Notes) — never the small scanner-grid
+// thumbnail. Checks translatedCache first (already raw base64, no re-fetch
+// needed) since loadOne()/the scanner-open rehydrate no longer mirror an
+// already-translated page's bytes into imageCache.
+function fullResBase64For(rawUrl: string): string | null {
+  const translated = translatedCache.get(rawUrl);
+  if (translated) return translated;
+  const cached = imageCache.get(rawUrl);
+  return cached ? extractBase64FromDataUrl(cached) : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1089,7 +1107,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     // regenerated on every page load, so a URL-keyed cache never hits across
     // reloads/revisits even for pages already translated. Hash the actual
     // captured image bytes instead — stable across reloads regardless of URL.
-    const contentKey = contentCacheKey(imgData, settings.config.outputLanguage);
+    const contentKey = await contentCacheKey(imgData, settings.config.outputLanguage);
     const contentCached = translatedContentCache.get(contentKey);
     if (contentCached) {
       console.log('[MT] content-cache hit:', url);
@@ -2210,7 +2228,7 @@ async function submitFixHint(img: HTMLImageElement, bubbleIndex: number, bubble:
     const newBubbles = result.bubbles ? normalizeBubbles(result.bubbles) : info.bubbles;
 
     const settings = await loadSettings();
-    const contentKey = contentCacheKey(info.body.image, settings.config.outputLanguage);
+    const contentKey = await contentCacheKey(info.body.image, settings.config.outputLanguage);
     rememberTranslated(info.url, translatedB64);
     rememberTranslatedContent(contentKey, translatedB64);
     await saveTranslatedCacheEntry(info.url, translatedB64);
@@ -2250,7 +2268,9 @@ async function fixOnePage(page: PageEntry, instruction: string): Promise<boolean
 
   const translatedB64 = result.translated_image;
   const translatedDataUrl = `data:image/png;base64,${translatedB64}`;
-  imageCache.set(page.rawUrl, translatedDataUrl);
+  // Not mirrored into imageCache — zoomSrcFor/fullResBase64For/renderCard
+  // all check translatedCache (and thumbnailCache, set just below) first,
+  // so a copy here would just be a second full-size copy of the same bytes.
   rememberTranslated(page.rawUrl, translatedB64);
   await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
 
@@ -2267,7 +2287,11 @@ async function fixOnePage(page: PageEntry, instruction: string): Promise<boolean
   if (currentShadow) {
     const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
     const imgEl = card?.querySelector<HTMLImageElement>('.mts-thumb');
-    if (imgEl) imgEl.src = translatedDataUrl;
+    if (imgEl) {
+      const thumb = await makeThumbnailDataUrl(translatedDataUrl);
+      thumbnailCache.set(page.rawUrl, thumb);
+      imgEl.src = thumb;
+    }
   }
 
   return true;
@@ -2472,12 +2496,18 @@ function cacheStorageKey(url: string): string {
 // than its URL, so sites that mint a new blob: URL on every page load
 // (e.g. MangaDex's reader) still get cache hits when revisiting a page
 // already translated in an earlier session.
-function contentCacheKey(base64: string, outputLanguage: string): string {
-  let hash = 0;
-  for (let i = 0; i < base64.length; i++) {
-    hash = ((hash << 5) - hash + base64.charCodeAt(i)) | 0;
-  }
-  return `content_${base64.length}_${outputLanguage}_${Math.abs(hash).toString(36)}`;
+//
+// Uses SubtleCrypto (native, off the JS main thread) instead of a manual
+// char-by-char loop — a multi-MB base64 string (a full translated page,
+// routinely several MB) made the old loop a genuine main-thread stall right
+// at the start of every single translate attempt, the exact moment
+// auto-translate is trying to stay responsive. Same effective cache-key
+// semantics, just computed without blocking the page.
+async function contentCacheKey(base64: string, outputLanguage: string): Promise<string> {
+  const bytes = new TextEncoder().encode(base64);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  return `content_${base64.length}_${outputLanguage}_${hex}`;
 }
 
 // Byte-count-only check (no values pulled into memory) before the eager
@@ -2952,16 +2982,18 @@ async function openScanner(): Promise<void> {
 
   seenUrls = new Set(pages.map((p) => p.rawUrl));
   imageCache = new Map();
+  thumbnailCache = new Map();
   currentPages = pages;
   totalChapterPages = pages.length;
 
-  // Rehydrate from translated cache
+  // Load already-translated URLs from the persisted cache — populates
+  // translatedCache itself (checked directly by renderCard's "already
+  // translated" badge and by zoomSrcFor's lightbox/hover preview), so
+  // there's no need to also mirror the full-size bytes into imageCache
+  // here; loadThumbnailsInBackground() below generates each card's
+  // thumbnail lazily (reading translatedCache directly, no re-fetch, for
+  // pages already translated).
   await loadTranslatedCache();
-  for (const [url, b64] of translatedCache) {
-    if (!imageCache.has(url)) {
-      imageCache.set(url, `data:image/png;base64,${b64}`);
-    }
-  }
 
   const container = createScannerRoot();
   currentShadow = container.attachShadow({ mode: 'closed' });
@@ -2994,6 +3026,41 @@ function bgFetchImage(url: string, pageUrl: string): Promise<string> {
 }
 
 const THUMBNAIL_CONCURRENT = 8;
+const THUMBNAIL_MAX_WIDTH = 320; // ~2x a grid card's widest column (minmax(160px, 1fr)), covers retina displays
+
+// Downscales a full-size page image (routinely 1200-3000px wide, several MB)
+// down to a small JPEG for the scanner grid — createImageBitmap's native
+// resize decoder avoids ever materializing a full-resolution bitmap just to
+// immediately shrink it. Falls back to the untouched source on any failure
+// (unsupported format, decode error, etc.) rather than leaving the card
+// blank.
+async function makeThumbnailDataUrl(sourceDataUrl: string, maxWidth = THUMBNAIL_MAX_WIDTH): Promise<string> {
+  try {
+    const sourceBlob = await (await fetch(sourceDataUrl)).blob();
+    const bitmap = await createImageBitmap(sourceBlob, { resizeWidth: maxWidth, resizeQuality: 'medium' });
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return sourceDataUrl;
+      ctx.drawImage(bitmap, 0, 0);
+      return await new Promise<string>((resolve) => {
+        canvas.toBlob((outBlob) => {
+          if (!outBlob) { resolve(sourceDataUrl); return; }
+          const fr = new FileReader();
+          fr.onloadend = () => resolve(fr.result as string);
+          fr.onerror = () => resolve(sourceDataUrl);
+          fr.readAsDataURL(outBlob);
+        }, 'image/jpeg', 0.82);
+      });
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    return sourceDataUrl;
+  }
+}
 
 async function loadThumbnailsInBackground(): Promise<void> {
   if (!currentShadow) return;
@@ -3002,11 +3069,29 @@ async function loadThumbnailsInBackground(): Promise<void> {
 
   async function loadOne(page: PageEntry): Promise<void> {
     if (!currentShadow) return;
-    if (imageCache.has(page.rawUrl)) return;
+    if (thumbnailCache.has(page.rawUrl)) return;
     const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
     if (!card) return;
-    const thumb = await bgFetchImage(page.rawUrl, pageUrl);
-    imageCache.set(page.rawUrl, thumb);
+
+    // Already translated — the bytes are already local (translatedCache),
+    // so use them directly instead of a network re-fetch of the untranslated
+    // source, and skip imageCache: zoomSrcFor reads translatedCache
+    // directly for its lightbox/hover preview, so mirroring the same
+    // full-size bytes into imageCache here would just be a second full-size
+    // copy of data already reachable through translatedCache.
+    const translatedB64 = translatedCache.get(page.rawUrl);
+    let full: string;
+    if (translatedB64) {
+      full = `data:image/png;base64,${translatedB64}`;
+    } else {
+      // Full-resolution fetch — still needed for translation and the
+      // lightbox/hover zoom preview (see zoomSrcFor) for a not-yet-translated
+      // page. Only the grid's own <img> gets the shrunk copy.
+      full = await bgFetchImage(page.rawUrl, pageUrl);
+      imageCache.set(page.rawUrl, full);
+    }
+    const thumb = await makeThumbnailDataUrl(full);
+    thumbnailCache.set(page.rawUrl, thumb);
     const img = card.querySelector<HTMLImageElement>('.mts-thumb');
     if (img && !card.classList.contains('selected')) {
       img.src = thumb;
@@ -3082,7 +3167,7 @@ function collectAllImages(): PageEntry[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function renderCard(p: PageEntry): string {
-  const src = imageCache.get(p.rawUrl) ?? p.thumb;
+  const src = thumbnailCache.get(p.rawUrl) ?? imageCache.get(p.rawUrl) ?? p.thumb;
   const wasTranslated = translatedCache.has(p.rawUrl);
   return `
     <button class="mts-card${p.fetched ? '' : ' fetched-late'}${wasTranslated ? ' translated-cached' : ''}" data-index="${p.index}" type="button">
@@ -3323,9 +3408,7 @@ function bindScanner(shadow: ShadowRoot): void {
     if (chosen.length === 0) return;
 
     const images = chosen
-      .map((p) => imageCache.get(p.rawUrl))
-      .filter((src): src is string => Boolean(src))
-      .map(extractBase64FromDataUrl)
+      .map((p) => fullResBase64For(p.rawUrl))
       .filter((b64): b64 is string => Boolean(b64))
       .slice(0, SUGGEST_INSTRUCTIONS_MAX_IMAGES);
 
@@ -3605,12 +3688,15 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
   if (translatedCache.has(page.rawUrl)) {
     const cached = translatedCache.get(page.rawUrl)!;
     const dataUrl = `data:image/png;base64,${cached}`;
-    imageCache.set(page.rawUrl, dataUrl);
     applyTranslatedImageToPage(page.rawUrl, dataUrl);
     if (currentShadow) {
       const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
       const img = card?.querySelector<HTMLImageElement>('.mts-thumb');
-      if (img) img.src = dataUrl;
+      if (img) {
+        const thumb = await makeThumbnailDataUrl(dataUrl);
+        thumbnailCache.set(page.rawUrl, thumb);
+        img.src = thumb;
+      }
     }
     if (statusEl) { statusEl.textContent = tr('cached'); statusEl.className = 'mts-card-status done'; }
     return true;
@@ -3656,7 +3742,6 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 
     const translatedB64 = result.translated_image;
     const translatedDataUrl = `data:image/png;base64,${translatedB64}`;
-    imageCache.set(page.rawUrl, translatedDataUrl);
 
     rememberTranslated(page.rawUrl, translatedB64);
     await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
@@ -3665,7 +3750,11 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
     if (currentShadow) {
       const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
       const img = card?.querySelector<HTMLImageElement>('.mts-thumb');
-      if (img) img.src = translatedDataUrl;
+      if (img) {
+        const thumb = await makeThumbnailDataUrl(translatedDataUrl);
+        thumbnailCache.set(page.rawUrl, thumb);
+        img.src = thumb;
+      }
     }
 
     const bubbles = result.bubbles?.length ?? 0;
@@ -3846,6 +3935,7 @@ function closeScanner(resumeAutoTranslate = true): void {
   currentShadow = null;
   seenUrls = new Set();
   imageCache = new Map();
+  thumbnailCache = new Map();
   currentPages = [];
   totalChapterPages = 0;
 
