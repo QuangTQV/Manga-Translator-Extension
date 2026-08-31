@@ -201,6 +201,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'ACCOUNT_LOGOUT') {
+      const { token } = message as { type: string; token: string };
+      sendResponse(await accountLogout(token));
+      return;
+    }
+
     if (message.type === 'ACCOUNT_GOOGLE_LOGIN') {
       sendResponse(await accountGoogleLogin());
       return;
@@ -503,6 +509,17 @@ async function accountSetPlan(token: string, plan: string): Promise<AccountResul
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ plan }),
+  });
+}
+
+// Revokes the token server-side (core/accounts.py:revoke_token) so a
+// "logout" actually invalidates the credential, not just clears it out of
+// local extension storage — best-effort from the popup's point of view
+// (it clears local state regardless of whether this succeeds).
+async function accountLogout(token: string): Promise<AccountResult> {
+  return accountApiCall('/account/logout', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
   });
 }
 

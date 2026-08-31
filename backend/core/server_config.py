@@ -10,14 +10,57 @@ not per-account. Plain SQLAlchemy Core, same as core/accounts.py.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 from dataclasses import dataclass
 from typing import Optional
 
 import sqlalchemy as sa
+from cryptography.fernet import Fernet, InvalidToken
 
+from config import settings
 from core.db import get_engine, metadata
 
 _SINGLETON_ID = 1
+
+
+class SecretKeyNotConfiguredError(Exception):
+    """Raised by set_shared_llm_config() when saving a non-empty api_key
+    but config.py's secret_key (env MT_SECRET_KEY) isn't set — refuses to
+    store the key unencrypted rather than silently doing so."""
+
+
+class SecretKeyMismatchError(Exception):
+    """Raised when a stored, encrypted api_key can't be decrypted with the
+    currently configured secret_key — almost always means MT_SECRET_KEY
+    changed after the key was saved. Re-saving the Owner LLM config (with
+    the new secret_key already in place) fixes it."""
+
+
+def _fernet() -> Fernet:
+    if not settings.secret_key:
+        raise SecretKeyNotConfiguredError(
+            "MT_SECRET_KEY must be set to store the shared LLM api_key encrypted"
+        )
+    # Fernet needs a 32-byte urlsafe-base64 key; derive one deterministically
+    # from whatever string the operator set MT_SECRET_KEY to, rather than
+    # requiring them to generate/paste a Fernet-formatted key themselves.
+    key_bytes = hashlib.sha256(settings.secret_key.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(key_bytes))
+
+
+def _encrypt(plaintext: str) -> str:
+    return _fernet().encrypt(plaintext.encode("utf-8")).decode("ascii")
+
+
+def _decrypt(ciphertext: str) -> str:
+    try:
+        return _fernet().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+    except InvalidToken as e:
+        raise SecretKeyMismatchError(
+            "Stored shared LLM api_key could not be decrypted — MT_SECRET_KEY "
+            "may have changed since it was saved. Re-save the Owner LLM config."
+        ) from e
 
 _server_config_table = sa.Table(
     "server_llm_config",
@@ -25,7 +68,10 @@ _server_config_table = sa.Table(
     sa.Column("id", sa.Integer, primary_key=True),
     sa.Column("provider", sa.String(64), nullable=False),
     sa.Column("model_name", sa.String(256), nullable=True),
-    sa.Column("api_key", sa.String(512), nullable=True),
+    # Text, not a bounded varchar: this stores the Fernet-encrypted
+    # ciphertext (see _encrypt), which runs noticeably longer than the
+    # plaintext key it wraps.
+    sa.Column("api_key", sa.Text, nullable=True),
     sa.Column("base_url", sa.String(512), nullable=True),
 )
 
@@ -62,7 +108,8 @@ def ensure_schema() -> None:
 def _row_to_config(row) -> SharedLlmConfig:
     return SharedLlmConfig(
         provider=row.provider, model_name=row.model_name,
-        api_key=row.api_key, base_url=row.base_url,
+        api_key=_decrypt(row.api_key) if row.api_key else None,
+        base_url=row.base_url,
     )
 
 
@@ -86,12 +133,13 @@ def set_shared_llm_config(
 ) -> SharedLlmConfig:
     if not provider:
         raise ValueError("provider is required")
+    stored_api_key = _encrypt(api_key) if api_key else None
     engine = get_engine()
     with engine.begin() as conn:
         existing = conn.execute(
             sa.select(_server_config_table.c.id).where(_server_config_table.c.id == _SINGLETON_ID)
         ).first()
-        values = dict(provider=provider, model_name=model_name, api_key=api_key, base_url=base_url)
+        values = dict(provider=provider, model_name=model_name, api_key=stored_api_key, base_url=base_url)
         if existing:
             conn.execute(
                 _server_config_table.update()

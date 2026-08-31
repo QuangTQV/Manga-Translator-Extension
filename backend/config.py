@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     # this. Deliberately an env var, not "whoever signs up first" (which
     # would let anyone on a public signup race to grab admin).
     admin_email: str = ""
+    # Encrypts the shared LLM api_key (core/server_config.py) at rest
+    # instead of storing it in Postgres in the clear — a database leak
+    # alone then doesn't hand over a live, billable provider key. Any
+    # string works as input (turned into a valid Fernet key via SHA-256,
+    # see core/server_config.py); empty by default, in which case saving
+    # a shared LLM config raises a clear error rather than silently
+    # storing the key unencrypted. Changing this value after a key has
+    # already been saved makes that stored key undecryptable — treat it
+    # like any other production secret (set once, back it up).
+    secret_key: str = ""
 
     # CORS
     cors_origins: list[str] = [

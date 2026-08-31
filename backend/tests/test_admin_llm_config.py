@@ -26,6 +26,7 @@ from core.accounts import _accounts_table, register_account  # noqa: E402
 from core.db import get_engine  # noqa: E402
 from core.server_config import (  # noqa: E402
     SchemaMismatchError,
+    SecretKeyNotConfiguredError,
     _server_config_table,
     ensure_schema,
     get_shared_llm_config,
@@ -40,6 +41,11 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _clean_tables(monkeypatch):
     monkeypatch.setattr(settings, "admin_email", "")
+    # set_shared_llm_config() encrypts api_key at rest and refuses to do so
+    # without this — most tests here aren't about the encryption itself,
+    # so give them a working default and let the dedicated tests below
+    # override it.
+    monkeypatch.setattr(settings, "secret_key", "test-secret-key-not-for-prod")
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(_accounts_table.delete())
@@ -80,6 +86,50 @@ def test_set_shared_llm_config_twice_updates_the_same_row_not_a_second_one():
 def test_set_shared_llm_config_requires_provider():
     with pytest.raises(ValueError):
         set_shared_llm_config("", "model", "key", None)
+
+
+def test_api_key_is_encrypted_at_rest_not_stored_in_the_clear():
+    set_shared_llm_config("Google", "gemini-3.1-flash-lite-preview", "super-secret-key", None)
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(sa.select(_server_config_table.c.api_key)).first()
+    assert row.api_key != "super-secret-key"
+    assert "super-secret-key" not in row.api_key
+    # ... but round-trips back to plaintext through the real accessor.
+    assert get_shared_llm_config().api_key == "super-secret-key"
+
+
+def test_set_shared_llm_config_without_secret_key_configured_refuses_to_store_the_key(monkeypatch):
+    monkeypatch.setattr(settings, "secret_key", "")
+    with pytest.raises(SecretKeyNotConfiguredError):
+        set_shared_llm_config("Google", "model", "some-key", None)
+
+
+def test_set_shared_llm_config_without_secret_key_still_works_with_no_key(monkeypatch):
+    # Provider/model/base_url with no api_key at all doesn't touch
+    # encryption, so it shouldn't need MT_SECRET_KEY either.
+    monkeypatch.setattr(settings, "secret_key", "")
+    config = set_shared_llm_config("Google", "model", None, None)
+    assert config.api_key is None
+
+
+def test_get_shared_llm_config_raises_if_secret_key_changed_after_saving(monkeypatch):
+    set_shared_llm_config("Google", "model", "super-secret-key", None)
+    monkeypatch.setattr(settings, "secret_key", "a-completely-different-secret")
+    from core.server_config import SecretKeyMismatchError
+    with pytest.raises(SecretKeyMismatchError):
+        get_shared_llm_config()
+
+
+def test_admin_get_endpoint_surfaces_secret_key_mismatch_as_500(monkeypatch):
+    monkeypatch.setattr(settings, "admin_email", "owner@example.com")
+    account = register_account("owner@example.com")
+    headers = {"Authorization": f"Bearer {account.token}"}
+    client.post("/admin/llm-config", json={"provider": "Google", "api_key": "a-key"}, headers=headers)
+
+    monkeypatch.setattr(settings, "secret_key", "a-completely-different-secret")
+    resp = client.get("/admin/llm-config", headers=headers)
+    assert resp.status_code == 500
 
 
 def test_ensure_schema_rejects_a_pre_existing_incompatible_server_llm_config_table():

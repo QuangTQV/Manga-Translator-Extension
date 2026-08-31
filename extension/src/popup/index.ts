@@ -1129,6 +1129,19 @@ async function handleAccountUpgradeDemo(): Promise<void> {
 }
 
 async function handleAccountLogout(): Promise<void> {
+  // Revoke the token server-side first, while it's still known — a logout
+  // that only cleared local storage would leave the old token usable
+  // forever if it ever leaked. Best-effort: local state is cleared either
+  // way, since the point of clicking "logout" is to stop using this
+  // token locally regardless of backend reachability.
+  const token = settings.accountToken;
+  if (token) {
+    try {
+      await accountMessage('ACCOUNT_LOGOUT', { token });
+    } catch {
+      // ignore — still proceed to clear local state below
+    }
+  }
   settings.accountToken = undefined;
   settings.accountEmail = undefined;
   await autoSave();

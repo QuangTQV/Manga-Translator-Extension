@@ -128,3 +128,25 @@ def test_account_plan_change_updates_quota():
     assert resp.status_code == 200
     assert resp.json()["plan"] == "paid"
     assert resp.json()["quota"] > 50
+
+
+def test_account_logout_revokes_the_token():
+    reg = client.post("/account/register", json={"email": "logout-me@example.com"})
+    token = reg.json()["token"]
+
+    logout = client.post("/account/logout", headers={"Authorization": f"Bearer {token}"})
+    assert logout.status_code == 200
+    assert logout.json()["ok"] is True
+
+    me = client.get("/account/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 401
+
+
+def test_account_logout_without_a_token_is_rejected():
+    resp = client.post("/account/logout")
+    assert resp.status_code == 401
+
+
+def test_account_logout_unknown_token_is_rejected():
+    resp = client.post("/account/logout", headers={"Authorization": "Bearer nope"})
+    assert resp.status_code == 401

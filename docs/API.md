@@ -12,6 +12,8 @@ http://localhost:7677
 
 Off by default. A normal local/self-hosted backend needs no authentication (and no database) at all — skip this section. A centrally-hosted deployment that sets `MT_REQUIRE_AUTH=true` requires an `Authorization: Bearer <token>` header (a token from [`POST /account/register`](#post-accountregister)) on `/translate`, `/translate/batch`, `/suggest-instructions`, and `/test-key`. Missing/invalid token → `401`; quota exceeded for the account's plan → `429`. `/health` and `/providers` are never gated. Accounts are stored in a real Postgres database (`MT_DATABASE_URL`, e.g. `postgresql+psycopg2://user:pass@host:5432/dbname`) — see `backend/docker-compose.yml` for a local one to develop against.
 
+Tokens are stored server-side only as a SHA-256 hash, never in the clear, and expire 180 days after issuance. [`POST /account/google-login`](#post-accountgoogle-login) always issues a fresh token (invalidating any previous one for that email); [`POST /account/logout`](#post-accountlogout) revokes the current token on demand. An email-only account (`/account/register`, no Google identity) has no way to obtain a new token once its one token expires or is revoked.
+
 ## Endpoints
 
 ### `GET /health`
@@ -344,6 +346,19 @@ Sets an account's plan directly — a stand-in for what a real payment webhook (
 
 ---
 
+### `POST /account/logout`
+
+Revokes the caller's current token immediately — an actual server-side "sign out this device", not just clearing it from local extension storage. Requires `Authorization: Bearer <token>`. The account (email/plan/usage) is untouched; only a fresh [`POST /account/google-login`](#post-accountgoogle-login) can issue that email a new token afterward.
+
+**Response `200 OK`:**
+```json
+{ "ok": true }
+```
+
+`401` if the token is missing or already invalid.
+
+---
+
 ### `POST /account/google-login`
 
 "Sign in with Google" for the extension's Account tab. `access_token` is an OAuth access token from the extension's `chrome.identity.getAuthToken()` — **not** an ID token/JWT. Verified server-side against Google's own `tokeninfo` endpoint; finds the account for the verified email, or creates one (unlike `/account/register`, a returning user gets `200` with their existing account, not `409`).
@@ -368,7 +383,7 @@ Admin-only (see [Authentication](#authentication-hosted-deployments-only) — th
 { "provider": "Google", "model_name": "gemini-3.1-flash-lite-preview", "api_key_set": true, "base_url": null }
 ```
 
-The real key is never returned — only whether one is currently set (`api_key_set`). `503` if `MT_ADMIN_EMAIL` isn't configured on the server; `401`/`403` if the token is missing/invalid or isn't the admin account.
+The real key is never returned — only whether one is currently set (`api_key_set`). `503` if `MT_ADMIN_EMAIL` isn't configured on the server; `401`/`403` if the token is missing/invalid or isn't the admin account; `500` if the stored key can't be decrypted with the server's current `MT_SECRET_KEY` (almost always means that env var changed after the key was saved — re-save it via `POST /admin/llm-config`).
 
 ---
 
@@ -381,7 +396,7 @@ Admin-only, same auth as above. Sets the shared LLM config.
 { "provider": "Google", "model_name": "gemini-3.1-flash-lite-preview", "api_key": "<your key>", "base_url": null }
 ```
 
-An empty/omitted `api_key` means "don't change the currently-stored key" (since `GET` never echoes it back for the caller to resend) — not "clear it". To actually change the key, send a new one.
+An empty/omitted `api_key` means "don't change the currently-stored key" (since `GET` never echoes it back for the caller to resend) — not "clear it". To actually change the key, send a new one. The key is encrypted at rest with `MT_SECRET_KEY`; saving a non-empty `api_key` without that env var set fails with `503`.
 
 **Response `200 OK`:** same shape as `GET /admin/llm-config`.
 

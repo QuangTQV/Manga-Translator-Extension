@@ -100,8 +100,15 @@ def _apply_shared_llm_config(req, account: "Account | None") -> None:
     not a real Account. Only a genuine Account should ever trigger this."""
     if not isinstance(account, Account) or req.api_key:
         return
-    from core.server_config import get_shared_llm_config
-    shared = get_shared_llm_config()
+    from core.server_config import SecretKeyMismatchError, get_shared_llm_config
+    try:
+        shared = get_shared_llm_config()
+    except SecretKeyMismatchError:
+        # MT_SECRET_KEY no longer matches what the stored key was
+        # encrypted with — fall through with no shared config rather than
+        # 500ing every gated request; the admin sees the real error via
+        # GET /admin/llm-config and can re-save it.
+        return
     if shared is None:
         return
     req.provider = shared.provider

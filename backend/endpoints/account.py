@@ -16,6 +16,7 @@ from core.accounts import (
     find_or_create_account,
     get_account,
     register_account,
+    revoke_token,
     set_plan,
 )
 from schemas import AccountResponse, GoogleLoginRequest, RegisterAccountRequest, SetPlanRequest
@@ -81,6 +82,21 @@ async def change_plan(req: SetPlanRequest, authorization: str = Header(None)) ->
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _to_response(account)
+
+
+@router.post("/logout")
+async def logout(authorization: str = Header(None)) -> dict:
+    """Revokes the caller's current token server-side (see
+    core/accounts.py:revoke_token) — a self-serve "sign out this device"
+    that actually invalidates the credential, not just a local
+    chrome.storage clear. The account (email/plan/usage) is untouched;
+    only Google Sign-In can issue that email a new token afterward."""
+    token = _token_from_header(authorization)
+    try:
+        revoke_token(token)
+    except AccountNotFoundError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return {"ok": True}
 
 
 @router.post("/google-login", response_model=AccountResponse)

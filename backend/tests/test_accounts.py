@@ -21,15 +21,19 @@ import sqlalchemy as sa  # noqa: E402
 
 from core.accounts import (  # noqa: E402
     PERIOD_SECONDS,
+    TOKEN_TTL_SECONDS,
     AccountExistsError,
     AccountNotFoundError,
     QuotaExceededError,
     SchemaMismatchError,
     _accounts_table,
+    _hash_token,
     check_and_increment_usage,
     ensure_schema,
+    find_or_create_account,
     get_account,
     register_account,
+    revoke_token,
     set_plan,
 )
 from core.db import get_engine  # noqa: E402
@@ -55,6 +59,17 @@ def test_register_account_returns_a_free_plan_token():
     assert account.email == "alice@example.com"
 
 
+def test_register_account_stores_only_the_token_hash_not_the_raw_token():
+    account = register_account("hash-check@example.com")
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.select(_accounts_table).where(_accounts_table.c.email == "hash-check@example.com")
+        ).first()
+    assert row.token_hash == _hash_token(account.token)
+    assert row.token_hash != account.token
+
+
 def test_register_duplicate_email_raises():
     register_account("alice@example.com")
     with pytest.raises(AccountExistsError):
@@ -71,6 +86,10 @@ def test_get_account_by_token_round_trips():
     fetched = get_account(registered.token)
     assert fetched is not None
     assert fetched.email == "bob@example.com"
+    # Only the raw token returned at issuance carries the value — a row
+    # fetched back from storage never reconstructs it (only the hash is
+    # ever stored).
+    assert fetched.token is None
 
 
 def test_get_account_unknown_token_returns_none():
@@ -110,7 +129,7 @@ def test_usage_window_resets_after_the_period_elapses():
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
-            _accounts_table.update().where(_accounts_table.c.token == account.token)
+            _accounts_table.update().where(_accounts_table.c.email == account.email)
             .values(period_start=_accounts_table.c.period_start - (PERIOD_SECONDS + 1))
         )
 
@@ -181,3 +200,58 @@ def test_ensure_schema_rejects_a_pre_existing_incompatible_accounts_table():
         with engine.begin() as conn:
             conn.execute(sa.text("DROP TABLE accounts"))
         _accounts_table.metadata.create_all(engine)
+
+
+def test_expired_token_is_treated_as_invalid():
+    account = register_account("expired@example.com")
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            _accounts_table.update().where(_accounts_table.c.email == account.email)
+            .values(token_expires_at=1.0)  # far in the past
+        )
+    assert get_account(account.token) is None
+    with pytest.raises(AccountNotFoundError):
+        check_and_increment_usage(account.token)
+
+
+def test_a_freshly_issued_token_expires_roughly_ttl_seconds_from_now():
+    import time
+
+    account = register_account("ttl-check@example.com")
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.select(_accounts_table).where(_accounts_table.c.email == account.email)
+        ).first()
+    assert abs(row.token_expires_at - (time.time() + TOKEN_TTL_SECONDS)) < 5
+
+
+def test_revoke_token_invalidates_it_but_keeps_the_account():
+    account = register_account("revoke-me@example.com")
+    check_and_increment_usage(account.token)  # usage_count -> 1
+    revoke_token(account.token)
+
+    assert get_account(account.token) is None
+    with pytest.raises(AccountNotFoundError):
+        check_and_increment_usage(account.token)
+
+    # The account itself (plan/usage/email) survives — only the token died.
+    relogged_in = find_or_create_account(account.email)
+    assert relogged_in.usage_count == 1
+    assert relogged_in.token != account.token
+    assert get_account(relogged_in.token) is not None
+
+
+def test_revoke_unknown_token_raises():
+    with pytest.raises(AccountNotFoundError):
+        revoke_token("not-a-real-token")
+
+
+def test_find_or_create_account_rotates_the_token_on_every_call():
+    first = find_or_create_account("rotate@example.com")
+    second = find_or_create_account("rotate@example.com")
+    assert first.token != second.token
+    # The old token no longer authenticates once a new one has been issued.
+    assert get_account(first.token) is None
+    assert get_account(second.token) is not None
