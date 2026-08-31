@@ -160,3 +160,54 @@ class TestApiKeyResponse(BaseModel):
     ok: bool
     error: Optional[str] = None
     latency_ms: Optional[float] = None
+
+
+class RegisterAccountRequest(BaseModel):
+    email: str
+
+
+class AccountResponse(BaseModel):
+    email: str
+    token: Optional[str] = None  # only present on /account/register — never returned by /account/me
+    plan: str
+    usage_count: int
+    quota: int
+    period_start: float
+    is_admin: bool = False  # true iff this account's email matches the server's MT_ADMIN_EMAIL
+
+
+class SetPlanRequest(BaseModel):
+    """Stand-in for what a real payment webhook (Stripe checkout completed
+    / subscription cancelled) would call — no payment is verified here."""
+
+    plan: str
+
+
+class GoogleLoginRequest(BaseModel):
+    """access_token from the extension's chrome.identity.getAuthToken() —
+    NOT an ID token/JWT. Verified server-side against Google's tokeninfo
+    endpoint (see endpoints/account.py:google_login)."""
+
+    access_token: str
+
+
+class SharedLlmConfigRequest(BaseModel):
+    """Admin-only (see auth.py:require_admin) — the LLM provider/model/key
+    every hosted user's request falls back to when they haven't supplied
+    their own. Set via the extension popup's Owner section instead of
+    editing GOOGLE_API_KEY/etc. env vars by hand."""
+
+    provider: str
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
+
+
+class SharedLlmConfigResponse(BaseModel):
+    provider: str
+    model_name: Optional[str] = None
+    # Never echoes the real key back — only whether one is currently set,
+    # so the popup can show "configured" without re-displaying the secret
+    # every time an admin opens the tab.
+    api_key_set: bool = False
+    base_url: Optional[str] = None

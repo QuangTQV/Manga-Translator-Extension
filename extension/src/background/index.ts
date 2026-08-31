@@ -182,6 +182,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(await fetchTestApiKey(body));
       return;
     }
+
+    if (message.type === 'ACCOUNT_REGISTER') {
+      const { email } = message as { type: string; email: string };
+      sendResponse(await accountRegister(email));
+      return;
+    }
+
+    if (message.type === 'ACCOUNT_ME') {
+      const { token } = message as { type: string; token?: string };
+      sendResponse(await accountMe(token));
+      return;
+    }
+
+    if (message.type === 'ACCOUNT_SET_PLAN') {
+      const { token, plan } = message as { type: string; token: string; plan: string };
+      sendResponse(await accountSetPlan(token, plan));
+      return;
+    }
+
+    if (message.type === 'ACCOUNT_GOOGLE_LOGIN') {
+      sendResponse(await accountGoogleLogin());
+      return;
+    }
+
+    if (message.type === 'ADMIN_GET_LLM_CONFIG') {
+      sendResponse(await adminGetLlmConfig());
+      return;
+    }
+
+    if (message.type === 'ADMIN_SET_LLM_CONFIG') {
+      const { body } = message as { type: string; body: { provider: string; model_name?: string; api_key?: string; base_url?: string } };
+      sendResponse(await adminSetLlmConfig(body));
+      return;
+    }
   })();
 
   return true;
@@ -248,6 +282,14 @@ async function fetchModelList(baseUrl: string, apiKey: string, provider?: string
   return [];
 }
 
+// Only meaningful against a centrally-hosted backend (MT_REQUIRE_AUTH=true
+// server-side) — the normal local/self-hosted backend ignores this header
+// entirely, and accountToken is unset for anyone who hasn't used the
+// popup's Account tab, so this is a no-op for the default setup.
+function authHeaders(settings: AppSettings): Record<string, string> {
+  return settings.accountToken ? { Authorization: `Bearer ${settings.accountToken}` } : {};
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fetch image + translate via backend (runs in background — no CORS)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +314,7 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
     console.log('[BG] fetchAndTranslateWithBody calling backend:', endpoint);
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
       body: JSON.stringify(body),
     });
     console.log('[BG] fetchAndTranslateWithBody backend status:', res.status, res.statusText);
@@ -331,7 +373,7 @@ async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -373,7 +415,7 @@ async function fetchTestApiKey(body: TestApiKeyBody): Promise<TestApiKeyResult> 
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -390,6 +432,170 @@ async function fetchTestApiKey(body: TestApiKeyBody): Promise<TestApiKeyResult> 
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: `Could not reach backend: ${msg}` };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Account (only relevant against a centrally-hosted backend — see
+// backend/auth.py and the popup's Account tab)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface AccountInfo {
+  email: string;
+  token?: string;
+  plan: string;
+  usage_count: number;
+  quota: number;
+  period_start: number;
+  is_admin: boolean;
+}
+
+interface AccountResult {
+  ok: boolean;
+  account?: AccountInfo;
+  error?: string;
+}
+
+async function accountApiCall(path: string, init: RequestInit): Promise<AccountResult> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const endpoint = `${backendUrl.replace(/\/$/, '')}${path}`;
+  try {
+    const res = await fetch(endpoint, init);
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+        else detail = JSON.stringify(errBody).slice(0, 200);
+      } catch { /* ignore */ }
+      return { ok: false, error: detail };
+    }
+    return { ok: true, account: (await res.json()) as AccountInfo };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Could not reach backend: ${msg}` };
+  }
+}
+
+async function accountRegister(email: string): Promise<AccountResult> {
+  return accountApiCall('/account/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+// token is explicit here (not read from settings) because this doubles as
+// the "log in with an existing token" verification step, run BEFORE that
+// token is saved to settings — the popup only persists it once this
+// confirms it's actually valid.
+async function accountMe(token?: string): Promise<AccountResult> {
+  const settings = await getSettings();
+  const effectiveToken = token ?? settings.accountToken;
+  if (!effectiveToken) return { ok: false, error: 'No account token' };
+  return accountApiCall('/account/me', {
+    headers: { Authorization: `Bearer ${effectiveToken}` },
+  });
+}
+
+async function accountSetPlan(token: string, plan: string): Promise<AccountResult> {
+  return accountApiCall('/account/plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ plan }),
+  });
+}
+
+// "Owner" section (Account tab, only shown when is_admin) — lets the
+// deployment operator configure the LLM provider/model/key every hosted
+// user's request falls back to, from the popup instead of setting
+// GOOGLE_API_KEY/etc. env vars on the server by hand. See
+// backend/auth.py:require_admin and core/server_config.py.
+interface SharedLlmConfigInfo {
+  provider: string;
+  model_name?: string | null;
+  api_key_set: boolean;
+  base_url?: string | null;
+}
+
+interface AdminLlmConfigResult {
+  ok: boolean;
+  config?: SharedLlmConfigInfo;
+  error?: string;
+}
+
+async function adminApiCall(init: RequestInit): Promise<AdminLlmConfigResult> {
+  const settings = await getSettings();
+  if (!settings.accountToken) return { ok: false, error: 'No account token' };
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const endpoint = `${backendUrl.replace(/\/$/, '')}/admin/llm-config`;
+  try {
+    const res = await fetch(endpoint, {
+      ...init,
+      headers: { ...(init.headers ?? {}), Authorization: `Bearer ${settings.accountToken}` },
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+        else detail = JSON.stringify(errBody).slice(0, 200);
+      } catch { /* ignore */ }
+      return { ok: false, error: detail };
+    }
+    return { ok: true, config: (await res.json()) as SharedLlmConfigInfo };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Could not reach backend: ${msg}` };
+  }
+}
+
+async function adminGetLlmConfig(): Promise<AdminLlmConfigResult> {
+  return adminApiCall({});
+}
+
+async function adminSetLlmConfig(body: { provider: string; model_name?: string; api_key?: string; base_url?: string }): Promise<AdminLlmConfigResult> {
+  return adminApiCall({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+// "Sign in with Google" — chrome.identity.getAuthToken() needs manifest.json's
+// oauth2.client_id to be a real Google Cloud OAuth client registered for
+// this extension's (published) ID; with the placeholder client_id this
+// ships with, Chrome will reject the request, which surfaces here as a
+// rejected promise, not a hang.
+// With a misconfigured/placeholder oauth2.client_id, getAuthToken({interactive:
+// true}) has been observed to neither resolve nor reject — it just hangs,
+// presumably stuck trying to open a consent flow Google's servers never
+// actually complete for an invalid client — leaving the popup spinning on
+// "Signing in..." forever with no feedback. Race it against a timeout so a
+// bad client_id always surfaces as a clear error instead.
+const GOOGLE_SIGN_IN_TIMEOUT_MS = 30_000;
+
+async function accountGoogleLogin(): Promise<AccountResult> {
+  let token: string | undefined;
+  try {
+    const result = await Promise.race([
+      chrome.identity.getAuthToken({ interactive: true }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timed out waiting for Google — check that manifest.json\'s oauth2.client_id is a real, valid Google OAuth client for this extension.')), GOOGLE_SIGN_IN_TIMEOUT_MS);
+      }),
+    ]);
+    token = result.token;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Google sign-in failed: ${msg}` };
+  }
+  if (!token) return { ok: false, error: 'Google sign-in did not return a token' };
+
+  return accountApiCall('/account/google-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ access_token: token }),
+  });
 }
 
 interface TranslateResult {
@@ -464,7 +670,7 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
     console.log('[BG] fetchAndTranslate calling backend:', endpoint);
     const res = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
       body: JSON.stringify(body),
     });
 

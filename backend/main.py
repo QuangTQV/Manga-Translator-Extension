@@ -1,5 +1,6 @@
 """FastAPI entry point for MangaTranslator backend."""
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 _backend_dir = Path(__file__).resolve().parent
@@ -11,7 +12,29 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from endpoints.account import router as account_router
+from endpoints.admin import router as admin_router
 from endpoints.translate import router as translate_router
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Only relevant when MT_REQUIRE_AUTH=true. Creates the accounts and
+    # server_llm_config tables up front so a misconfigured/unreachable
+    # MT_DATABASE_URL — or a pre-existing, incompatibly-shaped table with
+    # either name — fails loudly at boot instead of surprising the first
+    # real user to hit /account/register (or the operator's first save in
+    # the popup's Owner section). Runs regardless of how the app is
+    # launched (`python main.py` or a production host's `uvicorn
+    # main:app`), unlike the `if __name__ == "__main__"` block below,
+    # which only the former hits.
+    if settings.require_auth:
+        from core.accounts import ensure_schema as ensure_accounts_schema
+        from core.server_config import ensure_schema as ensure_server_config_schema
+        ensure_accounts_schema()
+        ensure_server_config_schema()
+    yield
+
 
 app = FastAPI(
     title="MangaTranslator Backend API",
@@ -19,6 +42,7 @@ app = FastAPI(
     "Wraps the MangaTranslator ML pipeline to accept base64 images and return "
     "translated images with bubble metadata.",
     version="1.0.0",
+    lifespan=_lifespan,
 )
 
 # CORS — allow browser extensions and localhost
@@ -32,6 +56,8 @@ app.add_middleware(
 
 # Mount routes
 app.include_router(translate_router)
+app.include_router(account_router)
+app.include_router(admin_router)
 
 
 @app.get("/")

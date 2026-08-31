@@ -1,0 +1,29 @@
+# Local Postgres for the hosted-mode account system (core/accounts.py) —
+# only needed if you're running MT_REQUIRE_AUTH=true. Not required for the
+# normal local/self-hosted backend.
+#
+# Usage:
+#   docker compose up -d
+#   export MT_DATABASE_URL=postgresql+psycopg2://manga_translator:manga_translator@localhost:5432/manga_translator
+#   export MT_REQUIRE_AUTH=true
+#   ./.venv/bin/python main.py
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: manga_translator
+      POSTGRES_PASSWORD: manga_translator
+      POSTGRES_DB: manga_translator
+    ports:
+      - "5432:5432"
+    volumes:
+      - manga_translator_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U manga_translator"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  manga_translator_pgdata:

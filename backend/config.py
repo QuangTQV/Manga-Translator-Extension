@@ -24,6 +24,35 @@ class Settings(BaseSettings):
     # requests can OOM the process.
     max_concurrent_translations: int = 8
 
+    # Off by default — a self-hosted/local backend (the normal `main.py`
+    # setup) needs no account/token at all, exactly as before. Set
+    # MT_REQUIRE_AUTH=true only for a centrally-hosted deployment that
+    # gates /translate, /translate/batch, /suggest-instructions, and
+    # /test-key behind a registered account (see backend/auth.py).
+    require_auth: bool = False
+    # Real Postgres, not a local file — a hosted deployment can run more
+    # than one backend process/instance, which a single sqlite file can't
+    # safely support. e.g. postgresql+psycopg2://user:pass@host:5432/dbname
+    # — see backend/docker-compose.yml for a local Postgres to develop
+    # against. Empty until set; core/accounts.py raises a clear error if
+    # something calls into it before this is configured, but a normal
+    # local/self-hosted backend that never touches /account/* never does.
+    database_url: str = ""
+    # OAuth client ID from Google Cloud Console, matched against the `aud`
+    # claim Google's tokeninfo endpoint returns for a "Sign in with Google"
+    # access token (endpoints/account.py:google_login). Left empty, the
+    # audience check is skipped — fine for local testing, but a real hosted
+    # deployment should set this so a token minted for a different app
+    # can't be replayed against this backend.
+    google_oauth_client_id: str = ""
+    # The one account (by email, case-insensitive) allowed to manage the
+    # server-wide shared LLM config (core/server_config.py) via the
+    # extension's popup Owner section — see auth.py:require_admin. Empty by
+    # default: /admin/* refuses everyone until the deployment operator sets
+    # this. Deliberately an env var, not "whoever signs up first" (which
+    # would let anyone on a public signup race to grab admin).
+    admin_email: str = ""
+
     # CORS
     cors_origins: list[str] = [
         "chrome-extension://*",
@@ -39,6 +68,13 @@ class Settings(BaseSettings):
     class Config:
         env_prefix = "MT_"
         extra = "ignore"
+        # Optional convenience: a backend/.env file (gitignored, see
+        # .env.example for the hosted-mode variables) is read the same as
+        # real shell-exported env vars. Real env vars still win if both are
+        # set — Settings reads process env first, only falling back to the
+        # file for anything unset there.
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()

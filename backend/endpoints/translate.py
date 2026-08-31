@@ -6,9 +6,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from PIL import Image
 
+from auth import verify_token
+from core.accounts import Account
 from schemas import (
     SuggestInstructionsRequest,
     SuggestInstructionsResponse,
@@ -81,6 +83,33 @@ async def _pipeline_slot(is_priority: bool):
                 yield
 
 
+def _apply_shared_llm_config(req, account: "Account | None") -> None:
+    """When authenticated (hosted mode) and the request didn't supply its
+    own api_key, overrides provider/model_name/api_key/base_url in place
+    from the operator's shared LLM config (core/server_config.py) if one
+    is set — so a hosted deployment's users never have to configure an LLM
+    provider themselves. A request that DID bring its own key (BYOK, even
+    against a hosted deployment) is left untouched. A no-op for the normal
+    local/self-hosted setup, where account is always None.
+
+    isinstance-checks rather than just `account is None`: some existing
+    tests (test_fix_hint_priority.py, test_translate_batch_concurrency.py)
+    call the route function directly instead of through a real request,
+    which skips FastAPI's dependency resolution entirely — `account` then
+    holds the raw `Depends(verify_token)` sentinel object, not None and
+    not a real Account. Only a genuine Account should ever trigger this."""
+    if not isinstance(account, Account) or req.api_key:
+        return
+    from core.server_config import get_shared_llm_config
+    shared = get_shared_llm_config()
+    if shared is None:
+        return
+    req.provider = shared.provider
+    req.model_name = shared.model_name
+    req.api_key = shared.api_key
+    req.base_url = shared.base_url
+
+
 def _build_bubble_info(bubbles: list[dict]) -> list:
     """Convert bubble dicts to BubbleInfo schema items."""
     from schemas import BubbleInfo
@@ -105,12 +134,13 @@ def _build_bubble_info(bubbles: list[dict]) -> list:
 
 
 @router.post("/translate", response_model=TranslateResponse)
-async def translate_single(req: TranslateRequest) -> TranslateResponse:
+async def translate_single(req: TranslateRequest, account=Depends(verify_token)) -> TranslateResponse:
     """Translate a single image.
 
     Accepts a base64-encoded image and returns the translated image
     plus bubble metadata.
     """
+    _apply_shared_llm_config(req, account)
     models_dir = settings.models_dir
     fonts_dir = settings.fonts_base_dir
 
@@ -267,12 +297,18 @@ async def _run_batch_item(
 
 
 @router.post("/translate/batch", response_model=TranslateBatchResponse)
-async def translate_batch(req: TranslateBatchRequest) -> TranslateBatchResponse:
+async def translate_batch(req: TranslateBatchRequest, account=Depends(verify_token)) -> TranslateBatchResponse:
     """Translate multiple images concurrently.
 
     Processes up to 20 images in parallel using a thread pool.
     Returns results in the same order as the input.
+
+    Usage accounting note: verify_token() counts this whole call as 1
+    request against the account's quota, same as a single-image /translate
+    call, even though it can process up to 20 images — a real billing
+    model would likely want to count per-image here instead.
     """
+    _apply_shared_llm_config(req, account)
     if len(req.images) > 20:
         raise HTTPException(
             status_code=400, detail="Maximum 20 images per batch"
@@ -310,7 +346,7 @@ def _downscale_and_reencode_jpeg(raw_b64: str, max_dimension: int) -> str:
 
 
 @router.post("/suggest-instructions", response_model=SuggestInstructionsResponse)
-async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstructionsResponse:
+async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(verify_token)) -> SuggestInstructionsResponse:
     """Draft Special Instructions text from a handful of sample pages.
 
     A single explicit, user-triggered LLM call — not part of the
@@ -322,6 +358,7 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
     at visually yet, and the notes can be drafted purely from search
     results.
     """
+    _apply_shared_llm_config(req, account)
     can_search_without_images = req.enable_web_search and bool((req.story_title or "").strip())
     if not req.images and not can_search_without_images:
         raise HTTPException(status_code=400, detail="No sample images provided.")
@@ -388,11 +425,12 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
 
 
 @router.post("/test-key", response_model=TestApiKeyResponse)
-async def test_key(req: TestApiKeyRequest) -> TestApiKeyResponse:
+async def test_key(req: TestApiKeyRequest, account=Depends(verify_token)) -> TestApiKeyResponse:
     """Ping one (provider, model, key) combo with a minimal text-only
     request — the popup's "Test API Key" button. Bypasses the pipeline
     concurrency slot entirely (no GPU/detection/rendering involved), so
     testing several keys at once never queues behind real translate work."""
+    _apply_shared_llm_config(req, account)
     try:
         config = build_test_key_config(req.provider, req.model_name, req.api_key, req.base_url, req.reasoning_effort)
     except ValueError as e:

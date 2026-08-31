@@ -287,6 +287,13 @@ export interface AppSettings {
   extensionEnabled: boolean;
   uiLanguage: UiLanguage;
   config: TranslateConfig;
+  // Only relevant against a centrally-hosted backend (MT_REQUIRE_AUTH=true
+  // on the server) — unset for the normal local/self-hosted setup, which
+  // ignores both fields entirely. When set, accountToken is sent as
+  // `Authorization: Bearer <token>` on every translate/suggest/test-key
+  // request (see background/index.ts's authHeaders()).
+  accountToken?: string;
+  accountEmail?: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {

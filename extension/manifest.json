@@ -14,11 +14,16 @@
     "activeTab",
     "storage",
     "scripting",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "identity"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
+  "oauth2": {
+    "client_id": "REPLACE_WITH_YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["openid", "email"]
+  },
   "background": {
     "service_worker": "background/index.js",
     "type": "module"

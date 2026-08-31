@@ -8,6 +8,10 @@ FastAPI backend with a vendored MangaTranslator-derived pipeline for use by the 
 http://localhost:7677
 ```
 
+## Authentication (hosted deployments only)
+
+Off by default. A normal local/self-hosted backend needs no authentication (and no database) at all — skip this section. A centrally-hosted deployment that sets `MT_REQUIRE_AUTH=true` requires an `Authorization: Bearer <token>` header (a token from [`POST /account/register`](#post-accountregister)) on `/translate`, `/translate/batch`, `/suggest-instructions`, and `/test-key`. Missing/invalid token → `401`; quota exceeded for the account's plan → `429`. `/health` and `/providers` are never gated. Accounts are stored in a real Postgres database (`MT_DATABASE_URL`, e.g. `postgresql+psycopg2://user:pass@host:5432/dbname`) — see `backend/docker-compose.yml` for a local one to develop against.
+
 ## Endpoints
 
 ### `GET /health`
@@ -293,6 +297,93 @@ Pings one `(provider, model, key)` combo with a minimal text-only request — th
 ```
 
 `latency_ms` is only set when `ok` is `true`.
+
+---
+
+### `POST /account/register`
+
+Hosted deployments only — registers a new account and returns its token. No email verification or payment collection; this is scaffolding for a hosted deployment's real signup flow, not one itself.
+
+**Request body:**
+```json
+{ "email": "you@example.com" }
+```
+
+**Response `200 OK`:**
+```json
+{ "email": "you@example.com", "token": "<opaque token — shown only here>", "plan": "free", "usage_count": 0, "quota": 50, "period_start": 1735689600.0, "is_admin": false }
+```
+
+`400` if the email looks invalid, `409` if already registered.
+
+---
+
+### `GET /account/me`
+
+Returns the authenticated account's current plan/usage. Requires `Authorization: Bearer <token>`. Never echoes the token back.
+
+**Response `200 OK`:**
+```json
+{ "email": "you@example.com", "token": null, "plan": "free", "usage_count": 3, "quota": 50, "period_start": 1735689600.0, "is_admin": false }
+```
+
+`is_admin` is `true` only when this account's email matches the server's `MT_ADMIN_EMAIL` — see [`/admin/llm-config`](#get-adminllm-config) below.
+
+---
+
+### `POST /account/plan`
+
+Sets an account's plan directly — a stand-in for what a real payment webhook (Stripe checkout completed / subscription cancelled) would call. No payment is verified here; a real hosted deployment should call `core.accounts.set_plan` from its own webhook handler instead of exposing this as-is. Requires `Authorization: Bearer <token>`.
+
+**Request body:**
+```json
+{ "plan": "paid" }
+```
+
+**Response `200 OK`:** same shape as `/account/me`, reflecting the new plan/quota.
+
+---
+
+### `POST /account/google-login`
+
+"Sign in with Google" for the extension's Account tab. `access_token` is an OAuth access token from the extension's `chrome.identity.getAuthToken()` — **not** an ID token/JWT. Verified server-side against Google's own `tokeninfo` endpoint; finds the account for the verified email, or creates one (unlike `/account/register`, a returning user gets `200` with their existing account, not `409`).
+
+**Request body:**
+```json
+{ "access_token": "<token from chrome.identity.getAuthToken()>" }
+```
+
+**Response `200 OK`:** same shape as `/account/register` (includes `token`).
+
+`401` if the token is invalid/expired, its email isn't verified, or (when `MT_GOOGLE_OAUTH_CLIENT_ID` is set) its audience doesn't match. `502` if Google's tokeninfo endpoint can't be reached.
+
+---
+
+### `GET /admin/llm-config`
+
+Admin-only (see [Authentication](#authentication-hosted-deployments-only) — this requires `Authorization: Bearer <token>` for the account whose email matches `MT_ADMIN_EMAIL`, independent of whether `MT_REQUIRE_AUTH` is on). Returns the shared LLM provider/model/key every hosted user's request falls back to when it doesn't carry its own `api_key`.
+
+**Response `200 OK`:**
+```json
+{ "provider": "Google", "model_name": "gemini-3.1-flash-lite-preview", "api_key_set": true, "base_url": null }
+```
+
+The real key is never returned — only whether one is currently set (`api_key_set`). `503` if `MT_ADMIN_EMAIL` isn't configured on the server; `401`/`403` if the token is missing/invalid or isn't the admin account.
+
+---
+
+### `POST /admin/llm-config`
+
+Admin-only, same auth as above. Sets the shared LLM config.
+
+**Request body:**
+```json
+{ "provider": "Google", "model_name": "gemini-3.1-flash-lite-preview", "api_key": "<your key>", "base_url": null }
+```
+
+An empty/omitted `api_key` means "don't change the currently-stored key" (since `GET` never echoes it back for the caller to resend) — not "clear it". To actually change the key, send a new one.
+
+**Response `200 OK`:** same shape as `GET /admin/llm-config`.
 
 ---
 

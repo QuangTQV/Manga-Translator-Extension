@@ -57,6 +57,27 @@ const llmInstructionsInput = qs<HTMLTextAreaElement>('f-llm-instructions');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
 const uiLanguageSelect = qs<HTMLSelectElement>('f-ui-language');
 
+const accountLoggedOutView = qs<HTMLDivElement>('account-logged-out');
+const accountLoggedInView = qs<HTMLDivElement>('account-logged-in');
+const accountEmailInput = qs<HTMLInputElement>('f-account-email');
+const accountRegisterBtn = qs<HTMLButtonElement>('btn-account-register');
+const accountGoogleBtn = qs<HTMLButtonElement>('btn-account-google');
+const accountTokenImportInput = qs<HTMLInputElement>('f-account-token-import');
+const accountTokenImportBtn = qs<HTMLButtonElement>('btn-account-token-import');
+const accountEmailDisplay = qs<HTMLDivElement>('account-email-display');
+const accountPlanDisplay = qs<HTMLDivElement>('account-plan-display');
+const accountUsageDisplay = qs<HTMLDivElement>('account-usage-display');
+const accountRefreshBtn = qs<HTMLButtonElement>('btn-account-refresh');
+const accountUpgradeBtn = qs<HTMLButtonElement>('btn-account-upgrade');
+const accountLogoutBtn = qs<HTMLButtonElement>('btn-account-logout');
+const accountOwnerSection = qs<HTMLDivElement>('account-owner-section');
+const ownerProviderSelect = qs<HTMLSelectElement>('f-owner-provider');
+const ownerModelInput = qs<HTMLInputElement>('f-owner-model');
+const ownerBaseUrlInput = qs<HTMLInputElement>('f-owner-base-url');
+const ownerApiKeyInput = qs<HTMLInputElement>('f-owner-api-key');
+const ownerKeyStatus = qs<HTMLDivElement>('owner-key-status');
+const ownerSaveBtn = qs<HTMLButtonElement>('btn-owner-save');
+
 const healthBadge = qs<HTMLSpanElement>('health-badge');
 const statusEl = qs<HTMLDivElement>('popup-status');
 const urlDisplay = qs<HTMLDivElement>('backend-url-display');
@@ -232,6 +253,9 @@ async function loadAndBind(): Promise<void> {
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
   contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? false;
 
+  renderAccountView();
+  if (settings.accountToken) void refreshAccountStatus();
+
   renderProviderGroups(settings.config.providerGroups ?? []);
   updateDuplicateKeyWarning();
   tempSlider.value = String(settings.config.temperature);
@@ -403,6 +427,14 @@ function bind(): void {
   });
 
   void refreshAutoTranslateStatus();
+
+  accountRegisterBtn.addEventListener('click', () => { void handleAccountRegister(); });
+  accountGoogleBtn.addEventListener('click', () => { void handleAccountGoogleLogin(); });
+  accountTokenImportBtn.addEventListener('click', () => { void handleAccountTokenImport(); });
+  accountRefreshBtn.addEventListener('click', () => { void refreshAccountStatus(); });
+  accountUpgradeBtn.addEventListener('click', () => { void handleAccountUpgradeDemo(); });
+  accountLogoutBtn.addEventListener('click', () => { void handleAccountLogout(); });
+  ownerSaveBtn.addEventListener('click', () => { void handleOwnerSave(); });
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -944,6 +976,246 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
 function setStatus(message: string, type: '' | 'ok' | 'err'): void {
   statusEl.textContent = message;
   statusEl.className = type;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Account (only relevant against a centrally-hosted backend — see
+// backend/auth.py; the normal local backend ignores accountToken entirely)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface AccountInfo {
+  email: string;
+  token?: string;
+  plan: string;
+  usage_count: number;
+  quota: number;
+  period_start: number;
+  is_admin: boolean;
+}
+
+interface AccountMessageResult {
+  ok: boolean;
+  account?: AccountInfo;
+  error?: string;
+}
+
+function accountMessage(type: string, extra: Record<string, unknown> = {}): Promise<AccountMessageResult> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type, ...extra }, (resp: unknown) => {
+      const lastError = chrome.runtime.lastError;
+      if (lastError) { resolve({ ok: false, error: lastError.message }); return; }
+      resolve((resp as AccountMessageResult) ?? { ok: false, error: 'no response' });
+    });
+  });
+}
+
+function planLabel(plan: string): string {
+  return plan === 'paid' ? t(uiLanguage, 'planPaid') : t(uiLanguage, 'planFree');
+}
+
+function renderAccountView(): void {
+  const loggedIn = Boolean(settings.accountToken);
+  accountLoggedOutView.style.display = loggedIn ? 'none' : '';
+  accountLoggedInView.style.display = loggedIn ? '' : 'none';
+  if (loggedIn) accountEmailDisplay.textContent = settings.accountEmail ?? '';
+}
+
+function renderAccountInfo(info: AccountInfo): void {
+  accountEmailDisplay.textContent = info.email;
+  accountPlanDisplay.textContent = planLabel(info.plan);
+  accountUsageDisplay.textContent = t(uiLanguage, 'accountUsageFormat', { used: info.usage_count, quota: info.quota });
+  accountOwnerSection.style.display = info.is_admin ? '' : 'none';
+  if (info.is_admin) void loadOwnerConfig();
+}
+
+async function handleAccountRegister(): Promise<void> {
+  const email = accountEmailInput.value.trim();
+  if (!email) return;
+  accountRegisterBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusAccountRegistering'), '');
+  try {
+    const result = await accountMessage('ACCOUNT_REGISTER', { email });
+    if (!result.ok || !result.account?.token) {
+      setStatus(`${t(uiLanguage, 'errorAccountRegisterFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    settings.accountToken = result.account.token;
+    settings.accountEmail = result.account.email;
+    await autoSave();
+    renderAccountInfo(result.account);
+    renderAccountView();
+    accountEmailInput.value = '';
+    setStatus(t(uiLanguage, 'statusAccountRegistered'), 'ok');
+  } finally {
+    accountRegisterBtn.disabled = false;
+  }
+}
+
+async function handleAccountGoogleLogin(): Promise<void> {
+  accountGoogleBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusAccountGoogleSigningIn'), '');
+  try {
+    const result = await accountMessage('ACCOUNT_GOOGLE_LOGIN');
+    if (!result.ok || !result.account?.token) {
+      setStatus(`${t(uiLanguage, 'errorAccountGoogleFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    settings.accountToken = result.account.token;
+    settings.accountEmail = result.account.email;
+    await autoSave();
+    renderAccountInfo(result.account);
+    renderAccountView();
+    setStatus(t(uiLanguage, 'statusAccountLoggedIn'), 'ok');
+  } finally {
+    accountGoogleBtn.disabled = false;
+  }
+}
+
+async function handleAccountTokenImport(): Promise<void> {
+  const token = accountTokenImportInput.value.trim();
+  if (!token) return;
+  accountTokenImportBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusAccountLoggingIn'), '');
+  try {
+    const result = await accountMessage('ACCOUNT_ME', { token });
+    if (!result.ok || !result.account) {
+      setStatus(`${t(uiLanguage, 'errorAccountLoginFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    settings.accountToken = token;
+    settings.accountEmail = result.account.email;
+    await autoSave();
+    renderAccountInfo(result.account);
+    renderAccountView();
+    accountTokenImportInput.value = '';
+    setStatus(t(uiLanguage, 'statusAccountLoggedIn'), 'ok');
+  } finally {
+    accountTokenImportBtn.disabled = false;
+  }
+}
+
+async function refreshAccountStatus(): Promise<void> {
+  if (!settings.accountToken) return;
+  accountRefreshBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusAccountRefreshing'), '');
+  try {
+    const result = await accountMessage('ACCOUNT_ME');
+    if (!result.ok || !result.account) {
+      setStatus(`${t(uiLanguage, 'errorAccountRefreshFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    renderAccountInfo(result.account);
+    setStatus(t(uiLanguage, 'statusAccountRefreshed'), 'ok');
+  } finally {
+    accountRefreshBtn.disabled = false;
+  }
+}
+
+async function handleAccountUpgradeDemo(): Promise<void> {
+  if (!settings.accountToken) return;
+  accountUpgradeBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusAccountUpgrading'), '');
+  try {
+    const result = await accountMessage('ACCOUNT_SET_PLAN', { token: settings.accountToken, plan: 'paid' });
+    if (!result.ok || !result.account) {
+      setStatus(result.error ?? t(uiLanguage, 'errorAccountRefreshFailed'), 'err');
+      return;
+    }
+    renderAccountInfo(result.account);
+    setStatus(t(uiLanguage, 'statusAccountUpgraded'), 'ok');
+  } finally {
+    accountUpgradeBtn.disabled = false;
+  }
+}
+
+async function handleAccountLogout(): Promise<void> {
+  settings.accountToken = undefined;
+  settings.accountEmail = undefined;
+  await autoSave();
+  renderAccountView();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Owner section (Account tab, only shown when the logged-in account's
+// is_admin is true) — configures the shared LLM provider/model/key for
+// every user of this hosted deployment. See backend/auth.py:require_admin,
+// core/server_config.py.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SharedLlmConfigInfo {
+  provider: string;
+  model_name?: string | null;
+  api_key_set: boolean;
+  base_url?: string | null;
+}
+
+interface AdminMessageResult {
+  ok: boolean;
+  config?: SharedLlmConfigInfo;
+  error?: string;
+}
+
+function adminMessage(type: string, extra: Record<string, unknown> = {}): Promise<AdminMessageResult> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type, ...extra }, (resp: unknown) => {
+      const lastError = chrome.runtime.lastError;
+      if (lastError) { resolve({ ok: false, error: lastError.message }); return; }
+      resolve((resp as AdminMessageResult) ?? { ok: false, error: 'no response' });
+    });
+  });
+}
+
+function populateOwnerProviderSelect(): void {
+  if (ownerProviderSelect.options.length > 0) return;
+  for (const p of PROVIDERS) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    ownerProviderSelect.appendChild(opt);
+  }
+}
+
+function renderOwnerConfig(config: SharedLlmConfigInfo): void {
+  ownerProviderSelect.value = config.provider || PROVIDERS[0];
+  ownerModelInput.value = config.model_name ?? '';
+  ownerBaseUrlInput.value = config.base_url ?? '';
+  // The real key is never sent back by the server — leave the field blank
+  // either way, and let the hint below explain what blank means right now.
+  ownerApiKeyInput.value = '';
+  ownerKeyStatus.textContent = t(uiLanguage, config.api_key_set ? 'hintOwnerKeySet' : 'hintOwnerKeyEmpty');
+}
+
+async function loadOwnerConfig(): Promise<void> {
+  populateOwnerProviderSelect();
+  const result = await adminMessage('ADMIN_GET_LLM_CONFIG');
+  if (!result.ok || !result.config) {
+    setStatus(`${t(uiLanguage, 'errorOwnerConfigLoadFailed')}: ${result.error ?? ''}`, 'err');
+    return;
+  }
+  renderOwnerConfig(result.config);
+}
+
+async function handleOwnerSave(): Promise<void> {
+  ownerSaveBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusOwnerConfigSaving'), '');
+  try {
+    const result = await adminMessage('ADMIN_SET_LLM_CONFIG', {
+      body: {
+        provider: ownerProviderSelect.value,
+        model_name: ownerModelInput.value.trim() || undefined,
+        api_key: ownerApiKeyInput.value.trim() || undefined,
+        base_url: ownerBaseUrlInput.value.trim() || undefined,
+      },
+    });
+    if (!result.ok || !result.config) {
+      setStatus(`${t(uiLanguage, 'errorOwnerConfigSaveFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    renderOwnerConfig(result.config);
+    setStatus(t(uiLanguage, 'statusOwnerConfigSaved'), 'ok');
+  } finally {
+    ownerSaveBtn.disabled = false;
+  }
 }
 
 void init();
