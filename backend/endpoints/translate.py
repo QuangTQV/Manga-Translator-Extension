@@ -110,6 +110,28 @@ def _apply_shared_llm_config(req, account: "Account | None") -> None:
     req.base_url = shared.base_url
 
 
+def _is_oversized_image(raw_b64: str) -> bool:
+    """Checked against the base64 string length (~4/3 the decoded byte
+    count) rather than decoding first, so an oversized/malicious payload
+    doesn't get a full base64-decode + PIL load done on it just to find
+    out it should've been rejected."""
+    max_bytes = settings.max_image_size_mb * 1024 * 1024
+    approx_bytes = (len(raw_b64) * 3) // 4
+    return approx_bytes > max_bytes
+
+
+def _reject_oversized_image(raw_b64: str) -> None:
+    """Raises for a request handled directly on the event loop (single
+    /translate, /suggest-instructions) — see _is_oversized_image for a
+    batch item, which runs in a worker thread and can't turn an
+    HTTPException into an HTTP response."""
+    if _is_oversized_image(raw_b64):
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {settings.max_image_size_mb}MB limit",
+        )
+
+
 def _build_bubble_info(bubbles: list[dict]) -> list:
     """Convert bubble dicts to BubbleInfo schema items."""
     from schemas import BubbleInfo
@@ -141,6 +163,7 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
     plus bubble metadata.
     """
     _apply_shared_llm_config(req, account)
+    _reject_oversized_image(req.image)
     models_dir = settings.models_dir
     fonts_dir = settings.fonts_base_dir
 
@@ -189,9 +212,17 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
     start = time.time()
     try:
         async with _pipeline_slot(req.fix_hint is not None):
-            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
-                translate_image_base64, req.image, config, req.previous_context_texts
+            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.wait_for(
+                asyncio.to_thread(
+                    translate_image_base64, req.image, config, req.previous_context_texts
+                ),
+                timeout=settings.request_timeout_seconds,
             )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Translation timed out after {settings.request_timeout_seconds}s",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
@@ -220,6 +251,8 @@ def _translate_single_item(
 
     item_start = t.time()
     try:
+        if _is_oversized_image(item.image):
+            raise ValueError(f"Image exceeds the {settings.max_image_size_mb}MB limit")
         config = _build_config(
             input_language=req.input_language,
             output_language=req.output_language,
@@ -293,7 +326,19 @@ async def _run_batch_item(
     the same priority reservation as a single-page fix)."""
     loop = asyncio.get_running_loop()
     async with _pipeline_slot(req.fix_hint is not None):
-        return await loop.run_in_executor(_executor, _translate_single_item, item, req)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(_executor, _translate_single_item, item, req),
+                timeout=settings.request_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return TranslateBatchItemResponse(
+                id=item.id,
+                translated_image=None,
+                bubbles=[],
+                error=f"Translation timed out after {settings.request_timeout_seconds}s",
+                processing_time_seconds=settings.request_timeout_seconds,
+            )
 
 
 @router.post("/translate/batch", response_model=TranslateBatchResponse)
@@ -364,6 +409,8 @@ async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(
         raise HTTPException(status_code=400, detail="No sample images provided.")
 
     sample_images = req.images[:SUGGEST_INSTRUCTIONS_MAX_IMAGES]
+    for img in sample_images:
+        _reject_oversized_image(img)
 
     try:
         prepared_images = [

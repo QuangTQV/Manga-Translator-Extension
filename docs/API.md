@@ -408,8 +408,10 @@ All error responses return `JSON` with a `detail` field:
 | Status | Meaning |
 |---|---|
 | `400 Bad Request` | Invalid request body |
+| `413 Payload Too Large` | Image exceeds `MT_MAX_IMAGE_SIZE_MB` |
 | `422 Unprocessable Entity` | Validation error (Pydantic) |
 | `500 Internal Server Error` | Translation pipeline failed |
+| `504 Gateway Timeout` | Translation exceeded `MT_REQUEST_TIMEOUT_SECONDS` |
 
 ## Image Format
 
