@@ -1,4 +1,6 @@
 import base64
+import contextlib
+import contextvars
 import json
 import random
 import re
@@ -67,6 +69,40 @@ TRANSLATION_PATTERN = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS = 10
+
+
+# Every LLM call (OCR + translation, including failed attempts that then
+# rotate to a backup key/provider) goes through _call_llm_endpoint, which
+# already times each attempt. When a request wants to know how much of its
+# total wall time was spent inside the LLM — separately from the whole
+# pipeline's detection/cleaning/upscaling/rendering — it opens
+# collect_llm_seconds() around the pipeline call; _call_llm_endpoint then
+# appends every attempt's elapsed seconds into that sink. The ContextVar is
+# copied (shallowly — the same list object) into the worker thread by
+# asyncio.to_thread, so in-place .append() from the thread is visible to
+# the caller after it returns. Default None = nobody is collecting, no-op.
+_llm_seconds_sink: "contextvars.ContextVar[Optional[List[float]]]" = contextvars.ContextVar(
+    "_llm_seconds_sink", default=None
+)
+
+
+@contextlib.contextmanager
+def collect_llm_seconds():
+    """Collect the wall time of every LLM call made while this context is
+    open. Yields the list the times are appended to; sum it after the
+    pipeline call returns."""
+    sink: List[float] = []
+    token = _llm_seconds_sink.set(sink)
+    try:
+        yield sink
+    finally:
+        _llm_seconds_sink.reset(token)
+
+
+def _record_llm_seconds(elapsed: float) -> None:
+    sink = _llm_seconds_sink.get()
+    if sink is not None:
+        sink.append(elapsed)
 
 
 def _is_vietnamese_output(output_language: Optional[str]) -> bool:
@@ -1345,6 +1381,11 @@ def _call_llm_endpoint(
                     f"rate-limited or out of credit. Last error: {e}"
                 ) from e
             raise
+        finally:
+            # One record per attempt regardless of how it ended (success,
+            # refusal, or exception/rotation) — the caller sums these to
+            # learn how much of its wall time was LLM, not pipeline.
+            _record_llm_seconds(time.time() - start)
     # Unreachable: candidates is non-empty at this point (checked above),
     # and every branch in the loop returns or raises.
     raise TranslationError("LLM call failed: no candidates were configured.")

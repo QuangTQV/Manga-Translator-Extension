@@ -384,6 +384,21 @@
         </div>
         <div class="toggle-hint" data-i18n="hintRotationStrategy">Which key/provider a request tries first: Round-robin spreads load evenly across all of them (default), Random picks any ready one, Sequential always starts at the first key in your list. Cooldown is how long a rate-limited key/provider is skipped before being retried.</div>
 
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelSlowLlmWarning">Slow-LLM warning</div>
+            <div class="toggle-hint" data-i18n="hintSlowLlmWarning">Show an in-page notice when one provider is slower than the threshold below on most of your recent pages, so you can switch provider/model.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-slow-llm-warning" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="field">
+          <label class="label" data-i18n="labelSlowLlmThreshold">Slow threshold (seconds)</label>
+          <input id="f-slow-llm-threshold" class="input" type="number" min="5" step="5" value="40" />
+        </div>
+
         <div class="llm-fields-row">
           <div class="field slider-row">
             <div class="slider-label-row">

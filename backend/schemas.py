@@ -83,6 +83,7 @@ class TranslateResponse(BaseModel):
     translated_image: str  # raw base64
     bubbles: List[BubbleInfo]
     processing_time_seconds: float
+    llm_time_seconds: Optional[float] = None  # summed wall time of all LLM calls (OCR + translation), separate from the whole-pipeline processing_time_seconds
     source_language: str
     target_language: str
     provider: str

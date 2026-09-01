@@ -21,7 +21,11 @@ from schemas import (
     TranslateRequest,
     TranslateResponse,
 )
-from core.services.translation import generate_character_notes, test_api_key
+from core.services.translation import (
+    collect_llm_seconds,
+    generate_character_notes,
+    test_api_key,
+)
 from pipeline.wrapper import (
     _build_config,
     build_test_key_config,
@@ -158,19 +162,26 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
 
     start = time.time()
     try:
-        async with _pipeline_slot(req.fix_hint is not None):
-            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
-                translate_image_base64, req.image, config, req.previous_context_texts
-            )
+        # collect_llm_seconds() sums the wall time of every LLM call (OCR +
+        # translation, failed rotation attempts included) the pipeline
+        # makes — asyncio.to_thread copies this ContextVar into the worker
+        # thread, so appends from there land in llm_secs here.
+        with collect_llm_seconds() as llm_secs:
+            async with _pipeline_slot(req.fix_hint is not None):
+                result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
+                    translate_image_base64, req.image, config, req.previous_context_texts
+                )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
     translated_b64 = image_to_base64_raw(result_image)
+    llm_time = round(sum(llm_secs), 3) if llm_secs else None
 
     return TranslateResponse(
         translated_image=translated_b64,
         bubbles=_build_bubble_info(bubbles),
         processing_time_seconds=elapsed,
+        llm_time_seconds=llm_time,
         source_language=req.input_language,
         target_language=req.output_language,
         provider=req.provider,

@@ -268,6 +268,7 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
   const endpoint = `${backendUrl.replace(/\/$/, '')}/translate`;
 
+  const t0 = Date.now();
   try {
     console.log('[BG] fetchAndTranslateWithBody calling backend:', endpoint);
     const res = await fetch(endpoint, {
@@ -291,6 +292,9 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
       translated_image: data.translated_image,
       bubbles: data.bubbles,
       processing_time_seconds: data.processing_time_seconds,
+      llm_time_seconds: data.llm_time_seconds,
+      provider: data.provider,
+      wall_ms: Date.now() - t0,
       ocr_texts: data.ocr_texts,
       memory_note: data.memory_note,
     };
@@ -396,6 +400,9 @@ interface TranslateResult {
   translated_image?: string;
   bubbles?: unknown[];
   processing_time_seconds?: number;
+  llm_time_seconds?: number; // backend's measured LLM wall time, if available
+  provider?: string; // provider that actually produced this translation (may differ from primary after rotation)
+  wall_ms?: number; // background-measured round-trip time of the /translate call
   ocr_texts?: string[];
   memory_note?: string;
   error?: string;
@@ -460,6 +467,7 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
     outside_text_enabled: settings.config.outsideTextEnabled ?? false,
   };
 
+  const t0 = Date.now();
   try {
     console.log('[BG] fetchAndTranslate calling backend:', endpoint);
     const res = await fetch(endpoint, {
@@ -485,6 +493,9 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
       translated_image: data.translated_image,
       bubbles: data.bubbles,
       processing_time_seconds: data.processing_time_seconds,
+      llm_time_seconds: data.llm_time_seconds,
+      provider: data.provider,
+      wall_ms: Date.now() - t0,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
