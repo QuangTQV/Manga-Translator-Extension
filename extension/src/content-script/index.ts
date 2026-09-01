@@ -881,10 +881,17 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
     // resolves to *right now* against what was translated. Deliberately
     // NOT using img.currentSrc here — that can legitimately shift on its
     // own for a responsive srcset/DPR change with no recycling involved,
-    // which would misfire this check.
+    // which would misfire this check. Also deliberately path-only
+    // (sameImagePath, not the exact-match urlsMatch) — some lazy-load
+    // libraries append a fresh cache-busting query param to the same
+    // attribute on every re-render with no real content change; an exact
+    // match there would treat every one of those as a recycle and
+    // tear down/recreate this element's overlay+badges on every such
+    // re-render, which looks exactly like the in-progress badge
+    // flickering on and off repeatedly.
     const storedRaw = img.getAttribute('data-mt-raw');
     const liveSrc = resolveLazyAttributeSrc(img) ?? img.src;
-    if (storedRaw && isUsableImageUrl(liveSrc) && !urlsMatch(storedRaw, liveSrc)) {
+    if (storedRaw && isUsableImageUrl(liveSrc) && !sameImagePath(storedRaw, liveSrc)) {
       resetRecycledTranslatedImage(img);
     } else {
       syncTranslatedDecorations(img);
@@ -1686,6 +1693,28 @@ function urlsMatch(a: string | null | undefined, b: string): boolean {
   if (!a) return false;
   try {
     return new URL(a, window.location.href).href === new URL(b, window.location.href).href;
+  } catch {
+    return a === b;
+  }
+}
+
+// Deliberately looser than urlsMatch: ignores query string/hash, comparing
+// only origin+pathname. Used only for the "was this <img> recycled for a
+// different page" check (see handleAutoTranslateImage) — some lazy-load
+// libraries append a fresh cache-busting query param (?t=<timestamp>) to
+// the same lazy attribute on every re-render/observer callback with no
+// actual content change. An exact urlsMatch there would treat every one of
+// those re-renders as "a different image", tearing down and recreating the
+// overlay/badges over and over — visible as the in-progress badge
+// flickering on/off repeatedly. A genuine recycle (a virtualized reader
+// pointing the element at an actually different page) changes the path,
+// not just a query param, so this still catches the real case.
+function sameImagePath(a: string | null | undefined, b: string): boolean {
+  if (!a) return false;
+  try {
+    const ua = new URL(a, window.location.href);
+    const ub = new URL(b, window.location.href);
+    return ua.origin === ub.origin && ua.pathname === ub.pathname;
   } catch {
     return a === b;
   }

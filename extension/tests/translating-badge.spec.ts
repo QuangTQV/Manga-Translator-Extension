@@ -185,3 +185,72 @@ test('an <img> recycled for a different page (src changed in place, same element
   await expect.poll(() => translateCount, { timeout: 15_000 }).toBe(2);
   await expect(mangaPage.locator('.mt-badge')).toHaveCount(1); // the stale one was cleaned up, not duplicated
 });
+
+// A production report: the in-progress badge appeared to "flicker" — the
+// MT badge repeatedly turning back into the in-progress dots and back
+// again with no user action. Root cause: the recycled-image check above
+// (comparing the element's live src against what was translated) used an
+// exact URL match, so a lazy-load library appending a fresh cache-busting
+// query param (?t=<timestamp>) to the same attribute on every re-render —
+// no actual content change — was misread as a recycle every single time,
+// tearing the overlay/badges down and rebuilding them from scratch. It
+// must compare path only, ignoring the query string, so this keeps
+// reading as "same image, just resync position" instead.
+//
+// Asserting on the overlay ELEMENT's identity (not translateCount): a
+// separate, unrelated cache (the content-hash cache — see
+// translateAndApply's contentCacheKey) happens to hide the wasted-request
+// side effect here anyway, since re-querying byte-identical image data
+// hits that cache regardless of whether this bug is present. What the bug
+// actually causes — visible on screen regardless of that cache — is the
+// overlay/badge DOM elements themselves being torn down and recreated on
+// every false-positive "recycle".
+test('an <img> whose lazy-load attribute gets a fresh cache-busting query param on every re-render is NOT treated as recycled', async ({ context, extensionId }) => {
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+  await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+  await context.route('**/translate', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        translated_image: FAKE_TRANSLATED_PNG_B64,
+        bubbles: [],
+        processing_time_seconds: 0.1,
+        source_language: 'Japanese',
+        target_language: 'English',
+        provider: 'Google',
+        ocr_texts: [],
+      }),
+    });
+  });
+
+  const singleSiteUrl = `file://${path.resolve(__dirname, 'fixtures/test-site-single/index.html')}`;
+  const mangaPage = await context.newPage();
+  await mangaPage.goto(singleSiteUrl);
+
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+  await mangaPage.bringToFront();
+  await popup.locator('#btn-auto').click();
+
+  await expect(mangaPage.locator('.mt-badge').first()).toBeVisible({ timeout: 15_000 });
+  await mangaPage.locator('.mt-page-overlay').first().evaluate((el) => el.setAttribute('data-test-mark', 'original'));
+
+  // Same file, cache-busting query param only — same element, no recycle.
+  for (let i = 0; i < 3; i++) {
+    await mangaPage.locator('img:not(.mt-page-overlay)').first().evaluate((img, n) => {
+      (img as HTMLImageElement).src = `../test-site/page1.jpg?t=${n}`;
+    }, Date.now() + i);
+    await mangaPage.evaluate(() => window.dispatchEvent(new Event('resize')));
+    await mangaPage.waitForTimeout(500);
+  }
+
+  // If the overlay were ever torn down and recreated, the mark would be
+  // gone (a fresh element never carries it) — this fails immediately
+  // instead of waiting out a timeout if the bug is present.
+  await expect(mangaPage.locator('.mt-page-overlay[data-test-mark="original"]')).toHaveCount(1);
+  await expect(mangaPage.locator('.mt-progress-badge')).toHaveCount(0); // never flashed into "translating"
+});
