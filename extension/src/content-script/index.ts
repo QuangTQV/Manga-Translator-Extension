@@ -658,6 +658,22 @@ async function startAutoTranslate(): Promise<void> {
   autoTranslateObserver = new MutationObserver((mutations) => {
     if (!autoTranslateActive) return;
     for (const mut of mutations) {
+      if (mut.type === 'attributes') {
+        // A reader repointing an existing <img>'s src/lazy-src in place
+        // (e.g. MangaDex mints a fresh blob: URL for the same element on
+        // every page turn) — without watching attributes this was only
+        // ever noticed by the ~4s periodic rescan or the next
+        // scroll/resize + 350ms debounce. handleAutoTranslateImage
+        // already handles the "src no longer matches what was translated"
+        // recycle case; just feed the element into the same rAF-coalesced
+        // flush the added-node path uses. Skip our own overlay <img>
+        // (applyTranslatedOverlay sets its src to a data: URL).
+        const target = mut.target;
+        if (target instanceof HTMLImageElement && !target.classList.contains('mt-page-overlay')) {
+          autoTranslatePendingMutationNodes.add(target);
+        }
+        continue;
+      }
       for (const node of mut.addedNodes) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
         autoTranslatePendingMutationNodes.add(node as Element);
@@ -669,6 +685,8 @@ async function startAutoTranslate(): Promise<void> {
   autoTranslateObserver.observe(document.body, {
     childList: true,
     subtree: true,
+    attributes: true,
+    attributeFilter: ['src', 'srcset', ...LAZY_IMAGE_ATTRS],
   });
 
   window.addEventListener('scroll', scheduleAutoTranslateScan, { passive: true });
@@ -4018,6 +4036,32 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
     return false;
   }
 
+  // Content-hash cache: the URL check above is only good within this page
+  // session (readers like MangaDex mint a fresh blob: URL per load), so a
+  // page translated in an earlier session — or by auto-translate — is only
+  // recognized here by hashing the actual captured bytes. Same check the
+  // auto-translate path does; without it Scanner re-hits the backend for
+  // every page whose blob: URL changed since it was last translated.
+  const contentKey = await contentCacheKey(imgData, settings.config.outputLanguage);
+  const contentCached = translatedContentCache.get(contentKey);
+  if (contentCached) {
+    touchTranslatedCache(translatedContentCache, contentKey);
+    rememberTranslated(page.rawUrl, contentCached);
+    const dataUrl = `data:image/png;base64,${contentCached}`;
+    applyTranslatedImageToPage(page.rawUrl, dataUrl);
+    if (currentShadow) {
+      const card = currentShadow.querySelector<HTMLElement>(`.mts-card[data-index="${page.index}"]`);
+      const img = card?.querySelector<HTMLImageElement>('.mts-thumb');
+      if (img) {
+        const thumb = await makeThumbnailDataUrl(dataUrl);
+        thumbnailCache.set(page.rawUrl, thumb);
+        img.src = thumb;
+      }
+    }
+    if (statusEl) { statusEl.textContent = tr('cached'); statusEl.className = 'mts-card-status done'; }
+    return true;
+  }
+
   const backendUrl = settings.backendUrl || DEFAULT_BACKEND_URL;
   // endpoint kept for reference; translation now routes through background
   void backendUrl;
@@ -4050,8 +4094,14 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
     const translatedB64 = result.translated_image;
     const translatedDataUrl = `data:image/png;base64,${translatedB64}`;
 
+    // Mirror the auto-translate path's dual write: URL key for this session,
+    // content-hash key (contentKey, computed above) so the result survives
+    // reloads/blob-URL changes and is picked up by both Scanner and
+    // auto-translate without a re-translate.
     rememberTranslated(page.rawUrl, translatedB64);
+    rememberTranslatedContent(contentKey, translatedB64);
     await saveTranslatedCacheEntry(page.rawUrl, translatedB64);
+    await saveTranslatedContentCacheEntry(contentKey, translatedB64);
     applyTranslatedImageToPage(page.rawUrl, translatedDataUrl, result.bubbles ? normalizeBubbles(result.bubbles) : undefined, body);
 
     if (currentShadow) {
