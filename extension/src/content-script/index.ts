@@ -729,16 +729,21 @@ function scheduleAutoTranslateScan(): void {
   if (autoTranslateScanTimer !== undefined) return;
   autoTranslateScanTimer = window.setTimeout(() => {
     autoTranslateScanTimer = undefined;
-    scanAutoTranslateImages(document);
-    promoteCurrentPageToFront();
+    // Both of these used to independently run their own document-wide
+    // querySelectorAll('img') — one right after the other, on every
+    // scroll-settle and every periodic tick. Collecting the list once and
+    // sharing it halves that cost.
+    const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('img'));
+    scanAutoTranslateImages(document, imgs);
+    promoteCurrentPageToFront(imgs);
     void processAutoTranslateQueue();
   }, 350);
 }
 
-function scanAutoTranslateImages(root: ParentNode): void {
-  const imgs = root instanceof HTMLImageElement
+function scanAutoTranslateImages(root: ParentNode, precomputedImgs?: HTMLImageElement[]): void {
+  const imgs = precomputedImgs ?? (root instanceof HTMLImageElement
     ? [root]
-    : Array.from(root.querySelectorAll<HTMLImageElement>('img'));
+    : Array.from(root.querySelectorAll<HTMLImageElement>('img')));
   let handled = 0;
   for (const img of imgs) {
     handleAutoTranslateImage(img);
@@ -761,11 +766,12 @@ function isNearViewport(el: Element): boolean {
 // center — a proxy for "the page the reader is actually looking at right
 // now", as distinct from "somewhere in the near-viewport margin" (which
 // isNearViewport uses and can include the page just above/below it too).
-function getCurrentCenterImg(): HTMLImageElement | null {
+function getCurrentCenterImg(precomputedImgs?: HTMLImageElement[]): HTMLImageElement | null {
   const viewportCenter = (window.innerHeight || document.documentElement.clientHeight) / 2;
   let best: HTMLImageElement | null = null;
   let bestDist = Infinity;
-  for (const img of document.querySelectorAll<HTMLImageElement>('img')) {
+  const imgs = precomputedImgs ?? Array.from(document.querySelectorAll<HTMLImageElement>('img'));
+  for (const img of imgs) {
     if (img.classList.contains('mt-page-overlay')) continue;
     const rect = img.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) continue;
@@ -784,8 +790,8 @@ function getCurrentCenterImg(): HTMLImageElement | null {
 // queue — plain unshift-on-discovery order can put a page that just barely
 // entered the margin ahead of the one actually centered on screen (whichever
 // gets scanned last wins), so this re-asserts the invariant every tick.
-function promoteCurrentPageToFront(): void {
-  const current = getCurrentCenterImg();
+function promoteCurrentPageToFront(precomputedImgs?: HTMLImageElement[]): void {
+  const current = getCurrentCenterImg(precomputedImgs);
   if (!current) return;
   const url = current.getAttribute('data-mt-raw') ?? resolveMangaUrl(current);
   if (!url) return;
@@ -826,6 +832,27 @@ function resolveLazyAttributeSrc(img: HTMLImageElement): string | null {
   return null;
 }
 
+// Tears down this element's own translated decorations and clears its
+// markers so handleAutoTranslateImage() re-evaluates it as a fresh,
+// untranslated image on this same pass — used when the element's live src
+// no longer matches what it was translated from (see the call site).
+function resetRecycledTranslatedImage(img: HTMLImageElement): void {
+  const overlayId = getTranslatedOverlayId(img);
+  const parent = img.parentElement;
+  if (parent) {
+    findTranslatedOverlay(parent, overlayId)?.remove();
+    findTranslatedBadge(parent, overlayId)?.remove();
+    findInProgressBadge(parent, overlayId)?.remove();
+    findRetryBadge(parent, overlayId)?.remove();
+    findFixHitLayer(parent, overlayId)?.remove();
+    findExportButton(parent, overlayId)?.remove();
+    findOriginalToggleButton(parent, overlayId)?.remove();
+  }
+  img.removeAttribute('data-mt-translated');
+  img.removeAttribute('data-mt-raw');
+  lastTranslateInfo.delete(img);
+}
+
 function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
   // The translated overlay is a separate <img> stacked on top (see
   // applyTranslatedOverlay) — the original element's own src/currentSrc is
@@ -841,8 +868,28 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
   // readers shift layout as more images load below), so keep that part —
   // just skip the src/badge recreation.
   if (img.getAttribute('data-mt-translated') === 'true') {
-    syncTranslatedDecorations(img);
-    return;
+    // Some readers (virtualized/long-strip layouts especially) recycle an
+    // existing <img> element for a different page instead of creating a
+    // new one — repointing its src/lazy-load attribute in place as the
+    // user scrolls. Our data-mt-translated/data-mt-raw markers would
+    // otherwise stick to that element forever, so this element keeps
+    // being treated as "already translated" while its translated overlay
+    // now sits over a completely different page's pixels, and the actual
+    // new page never gets queued. Cheap to check on every scan (no
+    // forced layout — just attribute/property reads, unlike the position
+    // resync below): compare what the element's lazy/src attribute
+    // resolves to *right now* against what was translated. Deliberately
+    // NOT using img.currentSrc here — that can legitimately shift on its
+    // own for a responsive srcset/DPR change with no recycling involved,
+    // which would misfire this check.
+    const storedRaw = img.getAttribute('data-mt-raw');
+    const liveSrc = resolveLazyAttributeSrc(img) ?? img.src;
+    if (storedRaw && isUsableImageUrl(liveSrc) && !urlsMatch(storedRaw, liveSrc)) {
+      resetRecycledTranslatedImage(img);
+    } else {
+      syncTranslatedDecorations(img);
+      return;
+    }
   }
 
   const url = resolveMangaUrl(img);
@@ -900,7 +947,7 @@ function queueAutoTranslateLookahead(anchorImg: HTMLImageElement): number {
   const anchorUrl = anchorImg.getAttribute('data-mt-raw') ?? resolveMangaUrl(anchorImg);
   if (!anchorUrl) return 0;
 
-  const entries = collectAutoTranslateImageEntries(document);
+  const entries = collectAutoTranslateImageEntriesCached();
   const anchorIndex = entries.findIndex((entry) => entry.img === anchorImg || entry.url === anchorUrl);
   if (anchorIndex < 0) return 0;
 
@@ -932,6 +979,27 @@ function collectAutoTranslateImageEntries(root: ParentNode): Array<{ img: HTMLIm
     if (entries.length >= AUTO_SCAN_LIMIT) break;
   }
 
+  return entries;
+}
+
+// queueAutoTranslateLookahead() calls collectAutoTranslateImageEntries(document)
+// — a full querySelectorAll('img') plus a resolveMangaUrl() (which itself
+// forces a layout read for any not-yet-loaded image) per element — once for
+// EVERY near-viewport image it's asked about. A single scan pass
+// (scanAutoTranslateImages) can call it for dozens of images in one go, each
+// re-walking the whole page's <img> list: O(near-viewport images × total
+// images) instead of O(total images). All of those calls happen
+// synchronously within the same scan pass, so caching the result for the
+// duration of one microtask burst (auto-cleared via queueMicrotask, which
+// runs after the synchronous scan loop finishes but before any later,
+// separately-scheduled scan) is safe — a later pass always recomputes fresh.
+let cachedAutoTranslateEntries: Array<{ img: HTMLImageElement; url: string }> | null = null;
+
+function collectAutoTranslateImageEntriesCached(): Array<{ img: HTMLImageElement; url: string }> {
+  if (cachedAutoTranslateEntries) return cachedAutoTranslateEntries;
+  const entries = collectAutoTranslateImageEntries(document);
+  cachedAutoTranslateEntries = entries;
+  queueMicrotask(() => { cachedAutoTranslateEntries = null; });
   return entries;
 }
 
@@ -1081,6 +1149,17 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   if (retries >= AUTO_RETRY_MAX) { console.log('[MT] max retries reached:', url); return; }
 
   updateAutoTranslateCounter();
+  // If a previous <img> element for this same URL is still lingering (a
+  // reader library replaced/detached it while its own translate call was
+  // in flight — see removeOrphanedOverlayFor's comment), its decorations
+  // are now meaningless regardless of whether THIS attempt succeeds or
+  // fails. Sweep them proactively here rather than only on success
+  // (applyTranslatedImage already does this too, redundantly-safely) —
+  // otherwise a stale in-progress badge from that old element is only
+  // ever cleaned up when a new translate for the same URL happens to
+  // succeed, leaving it stuck on screen indefinitely if this attempt
+  // fails out to the retry badge instead.
+  removeOrphanedOverlayFor(url, getTranslatedOverlayId(img));
   addInProgressBadge(img);
 
   // A failed attempt that's about to be silently retried on the next scan
@@ -1145,7 +1224,17 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     }
 
     if (!result.translated_image) {
+      // Same shape as the result.error branch above (200 OK, but nothing
+      // usable came back) — must be treated as a failure too, or this
+      // silently skips markAutoTranslateFailure/AUTO_RETRY_MAP entirely:
+      // the in-progress badge gets torn down every time (willRetrySoon
+      // stays false) and immediately recreated on the next scan (~4s),
+      // reading as the badge endlessly flickering on/off, while
+      // AUTO_RETRY_MAX is never reached so the retry badge never appears
+      // to tell the reader anything is actually wrong.
       console.log('[MT] no translated_image in result');
+      willRetrySoon = retries + 1 < AUTO_RETRY_MAX;
+      markAutoTranslateFailure(img, url, retries);
       return;
     }
 
@@ -1322,7 +1411,7 @@ function getImagePositionWithinParent(img: HTMLImageElement, parent: HTMLElement
   );
 }
 
-function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageElement | null): void {
+function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1330,7 +1419,7 @@ function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageE
   const targetOverlay = overlay ?? findTranslatedOverlay(parent, overlayId);
   if (!targetOverlay) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   const imgStyle = window.getComputedStyle(img);
   targetOverlay.style.inset = 'auto';
   targetOverlay.style.left = `${pos.x}px`;
@@ -1341,7 +1430,7 @@ function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageE
   targetOverlay.style.objectPosition = imgStyle.objectPosition || '50% 50%';
 }
 
-function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | null): void {
+function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1349,7 +1438,7 @@ function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | 
   const targetBadge = badge ?? findTranslatedBadge(parent, overlayId);
   if (!targetBadge) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   targetBadge.style.left = `${pos.x + pos.width - 4}px`;
   targetBadge.style.top = `${pos.y + 4}px`;
   targetBadge.style.right = 'auto';
@@ -1369,7 +1458,7 @@ function findExportButton(parent: HTMLElement, overlayId: string): HTMLElement |
   return null;
 }
 
-function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null): void {
+function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1377,7 +1466,7 @@ function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null)
   const targetBtn = btn ?? findExportButton(parent, overlayId);
   if (!targetBtn) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   // Stacked directly below the "MT" badge — avoids needing to know the
   // badge's rendered width to sit beside it horizontally.
   targetBtn.style.left = `${pos.x + pos.width - 4}px`;
@@ -1449,7 +1538,7 @@ function findOriginalToggleButton(parent: HTMLElement, overlayId: string): HTMLE
   return null;
 }
 
-function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null): void {
+function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1457,7 +1546,7 @@ function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement
   const targetBtn = btn ?? findOriginalToggleButton(parent, overlayId);
   if (!targetBtn) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   // Stacked below the export button, same right-aligned column as the
   // "MT" badge.
   targetBtn.style.left = `${pos.x + pos.width - 4}px`;
@@ -1539,13 +1628,23 @@ function setOriginalViewActive(img: HTMLImageElement, showOriginal: boolean): vo
   }
 }
 
+// Each of these six sync*Layout calls used to independently re-derive the
+// image's position via getImagePositionWithinParent() — two
+// getBoundingClientRect() calls (image + parent) apiece, so a single
+// already-translated image cost 12 forced-layout reads every time this ran
+// (every scroll-settle/periodic scan touches every already-translated
+// image on the page). Computing it once here and passing it down cuts that
+// to 2 reads per image.
 function syncTranslatedDecorations(img: HTMLImageElement): void {
-  syncTranslatedOverlayLayout(img);
-  syncTranslatedBadgeLayout(img);
-  syncInProgressBadgeLayout(img);
-  syncFixHitLayerLayout(img);
-  syncExportButtonLayout(img);
-  syncOriginalToggleButtonLayout(img);
+  const parent = img.parentElement;
+  if (!parent) return;
+  const pos = getImagePositionWithinParent(img, parent);
+  syncTranslatedOverlayLayout(img, undefined, pos);
+  syncTranslatedBadgeLayout(img, undefined, pos);
+  syncInProgressBadgeLayout(img, pos);
+  syncFixHitLayerLayout(img, undefined, pos);
+  syncExportButtonLayout(img, undefined, pos);
+  syncOriginalToggleButtonLayout(img, undefined, pos);
 }
 
 // Several decorations (overlay, badge, export button, toggle button, ...)
@@ -1739,12 +1838,12 @@ function removeInProgressBadge(img: HTMLImageElement): void {
   findInProgressBadge(parent, overlayId)?.remove();
 }
 
-function syncInProgressBadgeLayout(img: HTMLImageElement): void {
+function syncInProgressBadgeLayout(img: HTMLImageElement, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
   const overlayId = getTranslatedOverlayId(img);
   const badge = findInProgressBadge(parent, overlayId);
-  if (badge) syncTranslatedBadgeLayout(img, badge);
+  if (badge) syncTranslatedBadgeLayout(img, badge, precomputedPos);
 }
 
 function findRetryBadge(parent: HTMLElement, overlayId: string): HTMLElement | null {
@@ -1849,13 +1948,13 @@ function findFixHitLayer(parent: HTMLElement, overlayId: string): HTMLElement | 
   return null;
 }
 
-function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null): void {
+function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
   const overlayId = getTranslatedOverlayId(img);
   const targetLayer = layer ?? findFixHitLayer(parent, overlayId);
   if (!targetLayer) return;
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   targetLayer.style.left = `${pos.x}px`;
   targetLayer.style.top = `${pos.y}px`;
   targetLayer.style.width = `${pos.width}px`;

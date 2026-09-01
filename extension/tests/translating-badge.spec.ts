@@ -127,3 +127,61 @@ test('the in-progress badge is not torn down and recreated between automatic ret
   await expect(mangaPage.locator('.mt-retry-badge').first()).toBeVisible({ timeout: 10_000 });
   await expect(mangaPage.locator('.mt-progress-badge')).toHaveCount(0);
 });
+
+// A production report: on some readers (virtualized/long-strip layouts
+// especially), the same <img> DOM node gets reused for a different page as
+// the reader scrolls — the site repoints its src in place instead of
+// creating a new element (the MutationObserver only watches for
+// added/removed nodes, not attribute changes, so this needed the periodic
+// rescan to notice at all). Without detecting the src no longer matches
+// what was translated, the old page's translated overlay/"MT" badge kept
+// sitting on top of the new page's pixels indefinitely, and the new page
+// was never actually queued for translation.
+test('an <img> recycled for a different page (src changed in place, same element) gets re-translated instead of keeping the stale overlay', async ({ context, extensionId }) => {
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+  await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+  let translateCount = 0;
+  await context.route('**/translate', async (route) => {
+    translateCount++;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        translated_image: FAKE_TRANSLATED_PNG_B64,
+        bubbles: [],
+        processing_time_seconds: 0.1,
+        source_language: 'Japanese',
+        target_language: 'English',
+        provider: 'Google',
+        ocr_texts: [],
+      }),
+    });
+  });
+
+  const singleSiteUrl = `file://${path.resolve(__dirname, 'fixtures/test-site-single/index.html')}`;
+  const mangaPage = await context.newPage();
+  await mangaPage.goto(singleSiteUrl);
+
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+  await mangaPage.bringToFront();
+  await popup.locator('#btn-auto').click();
+
+  await expect(mangaPage.locator('.mt-badge').first()).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => translateCount).toBe(1);
+
+  // Simulate the recycle: same element, new src, no DOM replacement.
+  await mangaPage.locator('img:not(.mt-page-overlay)').first().evaluate((img) => {
+    (img as HTMLImageElement).src = '../test-site/page2.jpg';
+  });
+
+  // Nudge the scroll/resize-driven rescan rather than waiting out the full
+  // periodic timer.
+  await mangaPage.evaluate(() => window.dispatchEvent(new Event('resize')));
+
+  await expect.poll(() => translateCount, { timeout: 15_000 }).toBe(2);
+  await expect(mangaPage.locator('.mt-badge')).toHaveCount(1); // the stale one was cleaned up, not duplicated
+});
