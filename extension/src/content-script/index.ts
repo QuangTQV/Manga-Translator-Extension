@@ -840,7 +840,21 @@ function resetRecycledTranslatedImage(img: HTMLImageElement): void {
   const overlayId = getTranslatedOverlayId(img);
   const parent = img.parentElement;
   if (parent) {
-    findTranslatedOverlay(parent, overlayId)?.remove();
+    // Hidden, not removed — the overlay carries a full decoded translated
+    // bitmap, so tearing it down here just to let applyTranslatedOverlay()
+    // create a brand new <img> (and force a fresh decode) moments later is
+    // pure waste, especially for sites like MangaDex that reuse a single
+    // <img> element across every page turn with a fresh blob: URL each
+    // time — every single page turn hits this reset path there, not just
+    // an occasional virtualized-list recycle. Same overlayId, so
+    // applyTranslatedOverlay()'s findTranslatedOverlay() reuses this exact
+    // element (updates .src in place) once the new page's translation is
+    // ready, instead of a remove+recreate cycle on every page turn.
+    // !important is required to actually hide it — the .mt-page-overlay
+    // CSS class forces `display: block !important`, so a plain (non-
+    // important) inline override would lose to it (see
+    // setOriginalViewActive for the same pattern).
+    findTranslatedOverlay(parent, overlayId)?.style.setProperty('display', 'none', 'important');
     findTranslatedBadge(parent, overlayId)?.remove();
     findInProgressBadge(parent, overlayId)?.remove();
     findRetryBadge(parent, overlayId)?.remove();

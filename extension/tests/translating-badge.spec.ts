@@ -172,6 +172,7 @@ test('an <img> recycled for a different page (src changed in place, same element
 
   await expect(mangaPage.locator('.mt-badge').first()).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => translateCount).toBe(1);
+  await mangaPage.locator('.mt-page-overlay').first().evaluate((el) => el.setAttribute('data-test-mark', 'original'));
 
   // Simulate the recycle: same element, new src, no DOM replacement.
   await mangaPage.locator('img:not(.mt-page-overlay)').first().evaluate((img) => {
@@ -184,6 +185,11 @@ test('an <img> recycled for a different page (src changed in place, same element
 
   await expect.poll(() => translateCount, { timeout: 15_000 }).toBe(2);
   await expect(mangaPage.locator('.mt-badge')).toHaveCount(1); // the stale one was cleaned up, not duplicated
+  // The overlay element itself is hidden-then-reused, not torn down and
+  // recreated — matters most for sites that recycle the <img> on every
+  // single page turn (e.g. MangaDex's blob: URLs), where remove+recreate
+  // would mean a fresh full-image decode on every page turn.
+  await expect(mangaPage.locator('.mt-page-overlay[data-test-mark="original"]')).toHaveCount(1);
 });
 
 // A production report: the in-progress badge appeared to "flicker" — the
