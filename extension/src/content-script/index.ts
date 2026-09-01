@@ -867,7 +867,18 @@ function resetRecycledTranslatedImage(img: HTMLImageElement): void {
   lastTranslateInfo.delete(img);
 }
 
+// An async fast-path check (see tryThumbnailFastPath) is in flight for
+// these — handleAutoTranslateImage must not start a second, redundant
+// full-pipeline pass for the same element while its result is pending
+// (data-mt-translated/data-mt-raw are already cleared at that point, so
+// without this a concurrent scan would just look like a fresh untranslated
+// image and re-queue it for the very capture the fast path exists to
+// avoid).
+const pendingThumbnailFastPathChecks = new WeakSet<HTMLImageElement>();
+
 function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
+  if (pendingThumbnailFastPathChecks.has(img)) return;
+
   // The translated overlay is a separate <img> stacked on top (see
   // applyTranslatedOverlay) — the original element's own src/currentSrc is
   // never rewritten to a data: URL, so a check requiring that was dead code
@@ -907,12 +918,27 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
     const liveSrc = resolveLazyAttributeSrc(img) ?? img.src;
     if (storedRaw && isUsableImageUrl(liveSrc) && !sameImagePath(storedRaw, liveSrc)) {
       resetRecycledTranslatedImage(img);
+      // Sites that reuse one <img> across every page turn with a fresh URL
+      // each time (MangaDex's blob: URLs) hit this branch on every single
+      // turn, not just an occasional recycle — check a cheap thumbnail
+      // first so flipping back to a page just left doesn't have to pay
+      // for a full-resolution capture to find out it's already known.
+      void tryThumbnailFastPath(img, force);
+      return;
     } else {
       syncTranslatedDecorations(img);
       return;
     }
   }
 
+  continueHandlingUntranslatedImage(img, force);
+}
+
+// The "this element isn't currently showing a translation" continuation of
+// handleAutoTranslateImage — split out so tryThumbnailFastPath's miss path
+// can fall into the exact same logic a normal (non-recycled) untranslated
+// image goes through, rather than duplicating it.
+function continueHandlingUntranslatedImage(img: HTMLImageElement, force: boolean): void {
   const url = resolveMangaUrl(img);
   if (!url) return;
   img.setAttribute('data-mt-raw', url);
@@ -941,6 +967,46 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
   // pre-translate work queued for pages further ahead never delays them.
   queueAutoTranslateImage(img, url, force || isNearViewport(img));
   queueAutoTranslateLookahead(img);
+}
+
+// Checks translatedThumbnailCache (a cheap downscaled-content-hash cache —
+// see captureImgThumbnail) before falling into the normal, expensive path.
+// On a hit, applies immediately without ever calling addInProgressBadge or
+// touching the translate queue — the whole point is skipping that. On a
+// miss (including capture failure — e.g. the image hasn't fully decoded
+// yet), falls through to continueHandlingUntranslatedImage() exactly as if
+// this optimization didn't exist.
+async function tryThumbnailFastPath(img: HTMLImageElement, force: boolean): Promise<void> {
+  pendingThumbnailFastPathChecks.add(img);
+  let appliedFromFastPath = false;
+  try {
+    const settings = await loadSettings();
+    const thumb = await captureImgThumbnail(img);
+    if (thumb) {
+      const thumbKey = await contentCacheKey(thumb, settings.config.outputLanguage);
+      const cachedB64 = translatedThumbnailCache.get(thumbKey);
+      if (cachedB64) {
+        const url = resolveMangaUrl(img);
+        if (url) {
+          applyTranslatedImage(img, `data:image/png;base64,${cachedB64}`, url);
+          appliedFromFastPath = true;
+        }
+      }
+    }
+  } catch (e) {
+    console.log('[MT] tryThumbnailFastPath error:', e);
+  } finally {
+    pendingThumbnailFastPathChecks.delete(img);
+  }
+  if (!appliedFromFastPath) {
+    // continueHandlingUntranslatedImage() only enqueues — draining the
+    // queue is normally the scan tick's own job (scheduleAutoTranslateScan
+    // etc. call processAutoTranslateQueue() right after scanning), but
+    // that already ran and returned before this async miss resolved, so
+    // nothing else is going to pick this item up otherwise.
+    continueHandlingUntranslatedImage(img, force);
+    void processAutoTranslateQueue();
+  }
 }
 
 function queueAutoTranslateImage(img: HTMLImageElement, url: string, priority = false): boolean {
@@ -1216,6 +1282,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
       console.log('[MT] content-cache hit:', url);
       touchTranslatedCache(translatedContentCache, contentKey);
       rememberTranslated(url, contentCached);
+      rememberTranslatedThumbnail(img, contentCached, settings.config.outputLanguage);
       applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
       if (isNearViewport(img)) queueAutoTranslateLookahead(img);
       updateAutoTranslateCounter();
@@ -1268,6 +1335,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     // content-addressed lookup that survives reloads/URL changes)
     rememberTranslated(url, translatedB64);
     rememberTranslatedContent(contentKey, translatedB64);
+    rememberTranslatedThumbnail(img, translatedB64, settings.config.outputLanguage);
     await saveTranslatedCacheEntry(url, translatedB64);
     await saveTranslatedContentCacheEntry(contentKey, translatedB64);
 
@@ -2606,6 +2674,19 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
 
 let translatedCache = new Map<string, string>(); // rawUrl -> base64 (no prefix), fast within-session lookup
 let translatedContentCache = new Map<string, string>(); // contentKey -> base64, persisted, survives URL changes/reloads
+
+// In-memory only (not persisted — this is purely an in-session shortcut,
+// unlike translatedContentCache above). Keyed the same way as that cache
+// (contentCacheKey) but over a cheap downscaled thumbnail instead of the
+// full-resolution capture — see captureImgThumbnail/tryThumbnailFastPath.
+// Exists specifically for sites that reuse one <img> element across every
+// page turn with a freshly-minted URL each time (MangaDex's blob: URLs are
+// the documented case): resetRecycledTranslatedImage() fires on every such
+// turn, and without this, re-verifying a page the reader just came from
+// (a guaranteed content-cache hit) still pays for a full-resolution
+// capture+PNG-encode first, which is real, perceptible latency on every
+// back-and-forth page flip.
+const translatedThumbnailCache = new Map<string, string>();
 
 // Each entry is a full translated page image (often several MB of base64),
 // so both the in-memory maps and their chrome.storage.local backing must
@@ -4000,6 +4081,63 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 // ─────────────────────────────────────────────────────────────────────────────
 // Image capture / fetch
 // ─────────────────────────────────────────────────────────────────────────────
+
+const THUMBNAIL_MAX_DIMENSION = 128;
+
+// A much cheaper stand-in for captureImgElement, used only to answer "have
+// we already translated this exact page's content before" (see
+// tryThumbnailFastPath) without paying for a full-resolution capture +
+// lossless PNG encode first just to find out. SHA-256 of even a small
+// downscaled bitmap is still a proper cryptographic hash of that specific
+// pixel data — two genuinely different manga pages producing
+// byte-identical downscaled output is astronomically unlikely, so this is
+// trusted directly rather than treated as a hint requiring full
+// verification, while drawing/encoding maybe 1-2% of the pixel count of a
+// full-resolution capture.
+function captureImgThumbnail(img: HTMLImageElement): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      if (!img.complete) { resolve(null); return; }
+      const naturalW = img.naturalWidth || img.width;
+      const naturalH = img.naturalHeight || img.height;
+      if (naturalW === 0 || naturalH === 0) { resolve(null); return; }
+      const scale = Math.min(1, THUMBNAIL_MAX_DIMENSION / Math.max(naturalW, naturalH));
+      const w = Math.max(1, Math.round(naturalW * scale));
+      const h = Math.max(1, Math.round(naturalH * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(null); return; }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(null); return; }
+        const fr = new FileReader();
+        fr.onloadend = () => resolve((fr.result as string).replace(/^data:image\/\w+;base64,/, ''));
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(blob);
+      }, 'image/png');
+    } catch { resolve(null); }
+  });
+}
+
+// Fire-and-forget: records this content's thumbnail hash -> translated
+// result, so a later tryThumbnailFastPath() call for the same content
+// (typically the reader flipping back to a page they just left) can skip
+// straight to applying it. Called from both places translateAndApply()
+// learns a (source image, translated result) pair — a fresh translate and
+// a content-cache hit alike — so the thumbnail cache warms up regardless
+// of which path first learns about a given page.
+function rememberTranslatedThumbnail(img: HTMLImageElement, translatedB64: string, outputLanguage: string): void {
+  void (async () => {
+    const thumb = await captureImgThumbnail(img);
+    if (!thumb) return;
+    const thumbKey = await contentCacheKey(thumb, outputLanguage);
+    translatedThumbnailCache.set(thumbKey, translatedB64);
+    evictToByteBudget(translatedThumbnailCache, MAX_CACHE_BYTES_PER_MAP);
+  })();
+}
 
 function captureImgElement(img: HTMLImageElement): Promise<string | null> {
   return new Promise((resolve) => {
