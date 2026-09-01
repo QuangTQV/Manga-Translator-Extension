@@ -147,4 +147,35 @@ test.describe('popup — LLM Config tab', () => {
     await expect(warning).toBeVisible();
     await expect(warning).toContainText('gemini-3.1-flash');
   });
+
+  test('slow-LLM warning toggle and threshold persist across a popup reload', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'LLM Config' }).click();
+
+    // Default: on, threshold 40.
+    await expect(popup.locator('#f-slow-llm-warning')).toBeChecked();
+    await expect(popup.locator('#f-slow-llm-threshold')).toHaveValue('40');
+
+    // The visible control is a CSS toggle-switch on a zero-size <input> —
+    // set DOM state directly and fire the 'change' the app listens for.
+    await popup.locator('#f-slow-llm-warning').evaluate((el: HTMLInputElement) => {
+      el.checked = false;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await popup.locator('#f-slow-llm-threshold').fill('25');
+    await popup.locator('#f-slow-llm-threshold').dispatchEvent('change');
+    await popup.waitForTimeout(300);
+
+    const reloaded = await context.newPage();
+    await reloaded.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await reloaded.getByRole('button', { name: 'LLM Config' }).click();
+    await expect(reloaded.locator('#f-slow-llm-warning')).not.toBeChecked();
+    await expect(reloaded.locator('#f-slow-llm-threshold')).toHaveValue('25');
+  });
 });

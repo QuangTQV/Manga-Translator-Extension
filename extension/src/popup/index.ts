@@ -47,6 +47,8 @@ const maxTokensInput = qs<HTMLInputElement>('f-max-tokens');
 const imageDetailSelect = qs<HTMLSelectElement>('f-image-detail');
 const rotationStrategySelect = qs<HTMLSelectElement>('f-rotation-strategy');
 const cooldownSecondsInput = qs<HTMLInputElement>('f-cooldown-seconds');
+const slowLlmWarningToggle = qs<HTMLInputElement>('f-slow-llm-warning');
+const slowLlmThresholdInput = qs<HTMLInputElement>('f-slow-llm-threshold');
 const contextToggle = qs<HTMLInputElement>('f-context');
 const instructionsInput = qs<HTMLTextAreaElement>('f-instructions');
 const expandInstructionsBtn = qs<HTMLButtonElement>('btn-expand-instructions');
@@ -267,6 +269,8 @@ async function loadAndBind(): Promise<void> {
   rotationStrategySelect.value = settings.config.rotationStrategy || 'round_robin';
   updateRotationWeightVisibility();
   cooldownSecondsInput.value = String(settings.config.cooldownSeconds ?? 15);
+  slowLlmWarningToggle.checked = settings.config.slowLlmWarningEnabled ?? true;
+  slowLlmThresholdInput.value = String(settings.config.slowLlmThresholdSeconds ?? 40);
   tempVal.textContent = Number(settings.config.temperature).toFixed(2);
   topPVal.textContent = Number(settings.config.topP).toFixed(2);
   topKVal.textContent = String(settings.config.topK);
@@ -321,6 +325,8 @@ function bind(): void {
   imageDetailSelect.addEventListener('change', () => { void autoSave(); });
   rotationStrategySelect.addEventListener('change', () => { updateRotationWeightVisibility(); void autoSave(); });
   cooldownSecondsInput.addEventListener('change', () => { void autoSave(); });
+  slowLlmThresholdInput.addEventListener('change', () => { void autoSave(); });
+  slowLlmWarningToggle.addEventListener('change', () => { void autoSave(); });
   for (const el of [tempSlider, topPSlider, topKSlider, contextToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
@@ -907,6 +913,8 @@ function collectAllSettings(): AppSettings {
       imageDetail: imageDetailSelect.value || 'auto',
       rotationStrategy: (rotationStrategySelect.value || 'round_robin') as TranslateConfig['rotationStrategy'],
       cooldownSeconds: Math.max(0, parseFloat(cooldownSecondsInput.value)) || 15,
+      slowLlmWarningEnabled: slowLlmWarningToggle.checked,
+      slowLlmThresholdSeconds: Math.max(5, parseInt(slowLlmThresholdInput.value, 10)) || 40,
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       preTranslate: preTranslateToggle.checked,

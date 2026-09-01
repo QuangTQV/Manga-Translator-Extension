@@ -72,6 +72,10 @@ const EN_MESSAGES = {
   fixSelectedDone: 'Fixed {success}/{total} page(s)',
   cacheTooLargeToLoad: 'Translated page cache is {mb}MB — too large to load, so previously translated pages won\'t show as translated this session. Use "Clear translated cache" in Config to reset it.',
   btnBackToTranslate: 'Translate',
+  slowLlmTitle: 'This provider has been slow',
+  slowLlmBody: '{provider} is averaging {seconds}s per page over your last few translations. Consider switching provider or model.',
+  slowLlmOpenConfig: 'Open LLM Config',
+  slowLlmDismiss: 'Dismiss',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -139,6 +143,10 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: 'Da sua {success}/{total} trang',
     cacheTooLargeToLoad: 'Cache trang da dich dang {mb}MB - qua lon de tai, nen cac trang da dich truoc do se khong hien la da dich trong phien nay. Dung "Clear translated cache" trong Config de reset.',
     btnBackToTranslate: 'Dich',
+    slowLlmTitle: 'Provider nay dang cham',
+    slowLlmBody: '{provider} dang mat trung binh {seconds}s moi trang trong vai lan dich gan day. Can nhac doi provider hoac model.',
+    slowLlmOpenConfig: 'Mo LLM Config',
+    slowLlmDismiss: 'Bo qua',
   },
   zh: {
     autoMt: '自动 MT',
@@ -201,6 +209,10 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: '已修正 {success}/{total} 页',
     cacheTooLargeToLoad: '已翻译页面缓存为 {mb}MB，太大无法加载，因此本次会话中之前翻译过的页面不会显示为已翻译。请在设置的 Config 中使用"Clear translated cache"重置。',
     btnBackToTranslate: '翻译',
+    slowLlmTitle: '该服务商响应较慢',
+    slowLlmBody: '最近几页翻译中，{provider} 平均每页耗时 {seconds}s。可考虑更换服务商或模型。',
+    slowLlmOpenConfig: '打开 LLM 配置',
+    slowLlmDismiss: '忽略',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -263,6 +275,10 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: '{success}/{total} ページを修正しました',
     cacheTooLargeToLoad: '翻訳済みページのキャッシュが {mb}MB あり、大きすぎて読み込めません。そのため今回のセッションでは以前翻訳したページが「翻訳済み」と表示されません。Config の「Clear translated cache」でリセットしてください。',
     btnBackToTranslate: '翻訳',
+    slowLlmTitle: 'このプロバイダーは遅くなっています',
+    slowLlmBody: '直近の翻訳で {provider} は1ページあたり平均 {seconds}s かかっています。プロバイダーかモデルの変更を検討してください。',
+    slowLlmOpenConfig: 'LLM 設定を開く',
+    slowLlmDismiss: '閉じる',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -325,6 +341,10 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: '{success}/{total}개 페이지를 수정했습니다',
     cacheTooLargeToLoad: '번역된 페이지 캐시가 {mb}MB로 너무 커서 불러올 수 없습니다. 이번 세션에서는 이전에 번역한 페이지가 번역됨으로 표시되지 않습니다. Config의 "Clear translated cache"로 초기화하세요.',
     btnBackToTranslate: '번역',
+    slowLlmTitle: '이 제공업체가 느립니다',
+    slowLlmBody: '최근 몇 페이지 번역에서 {provider}가 페이지당 평균 {seconds}s 걸리고 있습니다. 제공업체나 모델 변경을 고려하세요.',
+    slowLlmOpenConfig: 'LLM 설정 열기',
+    slowLlmDismiss: '닫기',
   },
 };
 
@@ -3165,10 +3185,133 @@ function updateAutoTranslateCounter(): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Slow-LLM warning: keep a small rolling history of per-provider translation
+// latency and pop an in-page warning when one provider is persistently slow.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LLM_PERF_STORAGE_KEY = 'mt_llm_perf';
+const LLM_PERF_MAX_SAMPLES = 100;      // hard cap on stored history
+const LLM_PERF_WINDOW = 8;             // how many recent samples of a provider we judge
+const LLM_PERF_SLOW_COUNT = 5;         // ...how many of those must be "slow" to warn
+const LLM_PERF_WARN_SNOOZE_MS = 6 * 60 * 60 * 1000; // don't re-warn about the same provider within this
+
+interface LlmPerfSample { provider: string; sec: number; slow: boolean; ts: number; }
+interface LlmPerfStore { samples: LlmPerfSample[]; warnedAt: Record<string, number>; }
+
+async function readLlmPerfStore(): Promise<LlmPerfStore> {
+  try {
+    const raw = (await chrome.storage.local.get(LLM_PERF_STORAGE_KEY))[LLM_PERF_STORAGE_KEY] as LlmPerfStore | undefined;
+    if (raw && Array.isArray(raw.samples)) {
+      return { samples: raw.samples, warnedAt: raw.warnedAt ?? {} };
+    }
+  } catch { /* ignore */ }
+  return { samples: [], warnedAt: {} };
+}
+
+// Called (fire-and-forget) for every successful translation, from the single
+// choke point in bgTranslateImageWithBody. Records how long the LLM part took
+// (backend-reported llm_time_seconds when available, else the background's
+// round-trip wall time) keyed by the provider that actually produced it, then
+// warns if that provider has been slow LLM_PERF_SLOW_COUNT of its last
+// LLM_PERF_WINDOW pages.
+async function recordLlmPerfSample(resp: BgTranslateResult): Promise<void> {
+  try {
+    const settings = await loadSettings();
+    if (settings.config.slowLlmWarningEnabled === false) return;
+
+    const metricMs = resp.llm_time_seconds != null ? resp.llm_time_seconds * 1000 : resp.wall_ms;
+    if (metricMs == null || !Number.isFinite(metricMs)) return;
+
+    const provider = resp.provider || settings.config.providerGroups[0]?.provider || 'unknown';
+    const thresholdSec = Math.max(5, settings.config.slowLlmThresholdSeconds ?? 40);
+    const sec = metricMs / 1000;
+
+    const store = await readLlmPerfStore();
+    store.samples.push({ provider, sec, slow: sec > thresholdSec, ts: Date.now() });
+    if (store.samples.length > LLM_PERF_MAX_SAMPLES) {
+      store.samples = store.samples.slice(-LLM_PERF_MAX_SAMPLES);
+    }
+
+    const recent = store.samples.filter((s) => s.provider === provider).slice(-LLM_PERF_WINDOW);
+    const slowCount = recent.filter((s) => s.slow).length;
+    const lastWarned = store.warnedAt[provider] ?? 0;
+    const shouldWarn = recent.length >= LLM_PERF_WINDOW
+      && slowCount >= LLM_PERF_SLOW_COUNT
+      && Date.now() - lastWarned > LLM_PERF_WARN_SNOOZE_MS;
+
+    if (shouldWarn) {
+      store.warnedAt[provider] = Date.now();
+      const slowSecs = recent.filter((s) => s.slow).map((s) => s.sec).sort((a, b) => a - b);
+      const median = slowSecs[Math.floor(slowSecs.length / 2)] ?? recent[recent.length - 1].sec;
+      showSlowLlmWarning(provider, Math.round(median));
+    }
+
+    await chrome.storage.local.set({ [LLM_PERF_STORAGE_KEY]: store });
+  } catch { /* a heuristic warning is never worth throwing over */ }
+}
+
+function showSlowLlmWarning(provider: string, seconds: number): void {
+  const existingId = 'mt-slow-llm-warning';
+  document.getElementById(existingId)?.remove();
+
+  const box = document.createElement('div');
+  box.id = existingId;
+  box.style.cssText = [
+    'position:fixed', 'right:16px', 'bottom:16px', 'z-index:2147483000',
+    'width:300px', 'background:#1f2937', 'color:#f9fafb',
+    'border:1px solid rgba(255,255,255,0.15)', 'border-radius:10px',
+    'padding:12px 14px', 'box-shadow:0 10px 30px rgba(0,0,0,0.4)',
+    'font-family:Inter, system-ui, sans-serif', 'font-size:12px', 'line-height:1.45',
+  ].join(';');
+
+  const title = document.createElement('div');
+  title.textContent = tr('slowLlmTitle');
+  title.style.cssText = 'font-weight:600;margin-bottom:5px;color:#fbbf24;';
+  box.appendChild(title);
+
+  const body = document.createElement('div');
+  body.textContent = tr('slowLlmBody', { provider, seconds });
+  body.style.marginBottom = '10px';
+  box.appendChild(body);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+
+  const dismiss = document.createElement('button');
+  dismiss.textContent = tr('slowLlmDismiss');
+  dismiss.style.cssText = 'all:unset;cursor:pointer;padding:5px 10px;border-radius:6px;background:#374151;color:#f9fafb;font-size:12px;';
+  dismiss.onclick = () => box.remove();
+
+  const open = document.createElement('button');
+  open.textContent = tr('slowLlmOpenConfig');
+  open.style.cssText = 'all:unset;cursor:pointer;padding:5px 10px;border-radius:6px;background:#2563eb;color:#fff;font-size:12px;';
+  open.onclick = () => { chrome.runtime.sendMessage({ type: 'OPEN_POPUP' }).catch(() => {}); box.remove(); };
+
+  row.appendChild(dismiss);
+  row.appendChild(open);
+  box.appendChild(row);
+  document.body.appendChild(box);
+
+  window.setTimeout(() => box.remove(), 20_000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Background helpers (bypass CORS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; error?: string }> {
+interface BgTranslateResult {
+  translated_image?: string;
+  bubbles?: unknown[];
+  processing_time_seconds?: number;
+  llm_time_seconds?: number;
+  provider?: string;
+  wall_ms?: number;
+  ocr_texts?: string[];
+  memory_note?: string;
+  error?: string;
+}
+
+function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<BgTranslateResult> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 5 minutes' }), 300_000);
     chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE_WITH_BODY', imageUrl, pageUrl, body }, (resp: unknown) => {
@@ -3178,7 +3321,9 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
         resolve({ error: `extension error: ${lastError.message}` });
         return;
       }
-      resolve((resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; error?: string }) ?? { error: 'no response' });
+      const result = (resp as BgTranslateResult) ?? { error: 'no response' };
+      if (result.translated_image) void recordLlmPerfSample(result);
+      resolve(result);
     });
   });
 }

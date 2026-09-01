@@ -165,6 +165,8 @@ export interface TranslateConfig {
   outsideTextEnabled: boolean;
   preTranslate: boolean; // eagerly translate pages as they load, not just near viewport (Auto-translate only)
   previousContextEnabled: boolean; // send prior pages' OCR text for pronoun/name consistency (costs latency)
+  slowLlmWarningEnabled?: boolean; // watch per-provider LLM latency and pop an in-page warning when one is persistently slow (default true)
+  slowLlmThresholdSeconds?: number; // a single translation slower than this counts as "slow" for the warning heuristic (default 40)
 }
 
 export interface BubbleInfo {
@@ -193,6 +195,7 @@ export interface TranslateResponse {
   translated_image: string; // raw base64
   bubbles: BubbleInfo[];
   processing_time_seconds: number;
+  llm_time_seconds?: number; // summed wall time of all LLM calls (OCR + translation); absent if the backend couldn't measure it
   source_language: string;
   target_language: string;
   provider: string;
@@ -323,6 +326,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     contextMemorySequential: false,
     rotationStrategy: 'round_robin',
     cooldownSeconds: 15,
+    slowLlmWarningEnabled: true,
+    slowLlmThresholdSeconds: 40,
   },
 };
 
