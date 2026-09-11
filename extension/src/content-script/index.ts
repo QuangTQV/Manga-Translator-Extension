@@ -729,16 +729,21 @@ function scheduleAutoTranslateScan(): void {
   if (autoTranslateScanTimer !== undefined) return;
   autoTranslateScanTimer = window.setTimeout(() => {
     autoTranslateScanTimer = undefined;
-    scanAutoTranslateImages(document);
-    promoteCurrentPageToFront();
+    // Both of these used to independently run their own document-wide
+    // querySelectorAll('img') — one right after the other, on every
+    // scroll-settle and every periodic tick. Collecting the list once and
+    // sharing it halves that cost.
+    const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('img'));
+    scanAutoTranslateImages(document, imgs);
+    promoteCurrentPageToFront(imgs);
     void processAutoTranslateQueue();
   }, 350);
 }
 
-function scanAutoTranslateImages(root: ParentNode): void {
-  const imgs = root instanceof HTMLImageElement
+function scanAutoTranslateImages(root: ParentNode, precomputedImgs?: HTMLImageElement[]): void {
+  const imgs = precomputedImgs ?? (root instanceof HTMLImageElement
     ? [root]
-    : Array.from(root.querySelectorAll<HTMLImageElement>('img'));
+    : Array.from(root.querySelectorAll<HTMLImageElement>('img')));
   let handled = 0;
   for (const img of imgs) {
     handleAutoTranslateImage(img);
@@ -761,11 +766,12 @@ function isNearViewport(el: Element): boolean {
 // center — a proxy for "the page the reader is actually looking at right
 // now", as distinct from "somewhere in the near-viewport margin" (which
 // isNearViewport uses and can include the page just above/below it too).
-function getCurrentCenterImg(): HTMLImageElement | null {
+function getCurrentCenterImg(precomputedImgs?: HTMLImageElement[]): HTMLImageElement | null {
   const viewportCenter = (window.innerHeight || document.documentElement.clientHeight) / 2;
   let best: HTMLImageElement | null = null;
   let bestDist = Infinity;
-  for (const img of document.querySelectorAll<HTMLImageElement>('img')) {
+  const imgs = precomputedImgs ?? Array.from(document.querySelectorAll<HTMLImageElement>('img'));
+  for (const img of imgs) {
     if (img.classList.contains('mt-page-overlay')) continue;
     const rect = img.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) continue;
@@ -784,8 +790,8 @@ function getCurrentCenterImg(): HTMLImageElement | null {
 // queue — plain unshift-on-discovery order can put a page that just barely
 // entered the margin ahead of the one actually centered on screen (whichever
 // gets scanned last wins), so this re-asserts the invariant every tick.
-function promoteCurrentPageToFront(): void {
-  const current = getCurrentCenterImg();
+function promoteCurrentPageToFront(precomputedImgs?: HTMLImageElement[]): void {
+  const current = getCurrentCenterImg(precomputedImgs);
   if (!current) return;
   const url = current.getAttribute('data-mt-raw') ?? resolveMangaUrl(current);
   if (!url) return;
@@ -826,7 +832,53 @@ function resolveLazyAttributeSrc(img: HTMLImageElement): string | null {
   return null;
 }
 
+// Tears down this element's own translated decorations and clears its
+// markers so handleAutoTranslateImage() re-evaluates it as a fresh,
+// untranslated image on this same pass — used when the element's live src
+// no longer matches what it was translated from (see the call site).
+function resetRecycledTranslatedImage(img: HTMLImageElement): void {
+  const overlayId = getTranslatedOverlayId(img);
+  const parent = img.parentElement;
+  if (parent) {
+    // Hidden, not removed — the overlay carries a full decoded translated
+    // bitmap, so tearing it down here just to let applyTranslatedOverlay()
+    // create a brand new <img> (and force a fresh decode) moments later is
+    // pure waste, especially for sites like MangaDex that reuse a single
+    // <img> element across every page turn with a fresh blob: URL each
+    // time — every single page turn hits this reset path there, not just
+    // an occasional virtualized-list recycle. Same overlayId, so
+    // applyTranslatedOverlay()'s findTranslatedOverlay() reuses this exact
+    // element (updates .src in place) once the new page's translation is
+    // ready, instead of a remove+recreate cycle on every page turn.
+    // !important is required to actually hide it — the .mt-page-overlay
+    // CSS class forces `display: block !important`, so a plain (non-
+    // important) inline override would lose to it (see
+    // setOriginalViewActive for the same pattern).
+    findTranslatedOverlay(parent, overlayId)?.style.setProperty('display', 'none', 'important');
+    findTranslatedBadge(parent, overlayId)?.remove();
+    findInProgressBadge(parent, overlayId)?.remove();
+    findRetryBadge(parent, overlayId)?.remove();
+    findFixHitLayer(parent, overlayId)?.remove();
+    findExportButton(parent, overlayId)?.remove();
+    findOriginalToggleButton(parent, overlayId)?.remove();
+  }
+  img.removeAttribute('data-mt-translated');
+  img.removeAttribute('data-mt-raw');
+  lastTranslateInfo.delete(img);
+}
+
+// An async fast-path check (see tryThumbnailFastPath) is in flight for
+// these — handleAutoTranslateImage must not start a second, redundant
+// full-pipeline pass for the same element while its result is pending
+// (data-mt-translated/data-mt-raw are already cleared at that point, so
+// without this a concurrent scan would just look like a fresh untranslated
+// image and re-queue it for the very capture the fast path exists to
+// avoid).
+const pendingThumbnailFastPathChecks = new WeakSet<HTMLImageElement>();
+
 function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
+  if (pendingThumbnailFastPathChecks.has(img)) return;
+
   // The translated overlay is a separate <img> stacked on top (see
   // applyTranslatedOverlay) — the original element's own src/currentSrc is
   // never rewritten to a data: URL, so a check requiring that was dead code
@@ -841,10 +893,52 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
   // readers shift layout as more images load below), so keep that part —
   // just skip the src/badge recreation.
   if (img.getAttribute('data-mt-translated') === 'true') {
-    syncTranslatedDecorations(img);
-    return;
+    // Some readers (virtualized/long-strip layouts especially) recycle an
+    // existing <img> element for a different page instead of creating a
+    // new one — repointing its src/lazy-load attribute in place as the
+    // user scrolls. Our data-mt-translated/data-mt-raw markers would
+    // otherwise stick to that element forever, so this element keeps
+    // being treated as "already translated" while its translated overlay
+    // now sits over a completely different page's pixels, and the actual
+    // new page never gets queued. Cheap to check on every scan (no
+    // forced layout — just attribute/property reads, unlike the position
+    // resync below): compare what the element's lazy/src attribute
+    // resolves to *right now* against what was translated. Deliberately
+    // NOT using img.currentSrc here — that can legitimately shift on its
+    // own for a responsive srcset/DPR change with no recycling involved,
+    // which would misfire this check. Also deliberately path-only
+    // (sameImagePath, not the exact-match urlsMatch) — some lazy-load
+    // libraries append a fresh cache-busting query param to the same
+    // attribute on every re-render with no real content change; an exact
+    // match there would treat every one of those as a recycle and
+    // tear down/recreate this element's overlay+badges on every such
+    // re-render, which looks exactly like the in-progress badge
+    // flickering on and off repeatedly.
+    const storedRaw = img.getAttribute('data-mt-raw');
+    const liveSrc = resolveLazyAttributeSrc(img) ?? img.src;
+    if (storedRaw && isUsableImageUrl(liveSrc) && !sameImagePath(storedRaw, liveSrc)) {
+      resetRecycledTranslatedImage(img);
+      // Sites that reuse one <img> across every page turn with a fresh URL
+      // each time (MangaDex's blob: URLs) hit this branch on every single
+      // turn, not just an occasional recycle — check a cheap thumbnail
+      // first so flipping back to a page just left doesn't have to pay
+      // for a full-resolution capture to find out it's already known.
+      void tryThumbnailFastPath(img, force);
+      return;
+    } else {
+      syncTranslatedDecorations(img);
+      return;
+    }
   }
 
+  continueHandlingUntranslatedImage(img, force);
+}
+
+// The "this element isn't currently showing a translation" continuation of
+// handleAutoTranslateImage — split out so tryThumbnailFastPath's miss path
+// can fall into the exact same logic a normal (non-recycled) untranslated
+// image goes through, rather than duplicating it.
+function continueHandlingUntranslatedImage(img: HTMLImageElement, force: boolean): void {
   const url = resolveMangaUrl(img);
   if (!url) return;
   img.setAttribute('data-mt-raw', url);
@@ -875,6 +969,46 @@ function handleAutoTranslateImage(img: HTMLImageElement, force = false): void {
   queueAutoTranslateLookahead(img);
 }
 
+// Checks translatedThumbnailCache (a cheap downscaled-content-hash cache —
+// see captureImgThumbnail) before falling into the normal, expensive path.
+// On a hit, applies immediately without ever calling addInProgressBadge or
+// touching the translate queue — the whole point is skipping that. On a
+// miss (including capture failure — e.g. the image hasn't fully decoded
+// yet), falls through to continueHandlingUntranslatedImage() exactly as if
+// this optimization didn't exist.
+async function tryThumbnailFastPath(img: HTMLImageElement, force: boolean): Promise<void> {
+  pendingThumbnailFastPathChecks.add(img);
+  let appliedFromFastPath = false;
+  try {
+    const settings = await loadSettings();
+    const thumb = await captureImgThumbnail(img);
+    if (thumb) {
+      const thumbKey = await contentCacheKey(thumb, settings.config.outputLanguage);
+      const cachedB64 = translatedThumbnailCache.get(thumbKey);
+      if (cachedB64) {
+        const url = resolveMangaUrl(img);
+        if (url) {
+          applyTranslatedImage(img, `data:image/png;base64,${cachedB64}`, url);
+          appliedFromFastPath = true;
+        }
+      }
+    }
+  } catch (e) {
+    console.log('[MT] tryThumbnailFastPath error:', e);
+  } finally {
+    pendingThumbnailFastPathChecks.delete(img);
+  }
+  if (!appliedFromFastPath) {
+    // continueHandlingUntranslatedImage() only enqueues — draining the
+    // queue is normally the scan tick's own job (scheduleAutoTranslateScan
+    // etc. call processAutoTranslateQueue() right after scanning), but
+    // that already ran and returned before this async miss resolved, so
+    // nothing else is going to pick this item up otherwise.
+    continueHandlingUntranslatedImage(img, force);
+    void processAutoTranslateQueue();
+  }
+}
+
 function queueAutoTranslateImage(img: HTMLImageElement, url: string, priority = false): boolean {
   const cached = translatedCache.get(url);
   if (cached) {
@@ -900,7 +1034,7 @@ function queueAutoTranslateLookahead(anchorImg: HTMLImageElement): number {
   const anchorUrl = anchorImg.getAttribute('data-mt-raw') ?? resolveMangaUrl(anchorImg);
   if (!anchorUrl) return 0;
 
-  const entries = collectAutoTranslateImageEntries(document);
+  const entries = collectAutoTranslateImageEntriesCached();
   const anchorIndex = entries.findIndex((entry) => entry.img === anchorImg || entry.url === anchorUrl);
   if (anchorIndex < 0) return 0;
 
@@ -932,6 +1066,27 @@ function collectAutoTranslateImageEntries(root: ParentNode): Array<{ img: HTMLIm
     if (entries.length >= AUTO_SCAN_LIMIT) break;
   }
 
+  return entries;
+}
+
+// queueAutoTranslateLookahead() calls collectAutoTranslateImageEntries(document)
+// — a full querySelectorAll('img') plus a resolveMangaUrl() (which itself
+// forces a layout read for any not-yet-loaded image) per element — once for
+// EVERY near-viewport image it's asked about. A single scan pass
+// (scanAutoTranslateImages) can call it for dozens of images in one go, each
+// re-walking the whole page's <img> list: O(near-viewport images × total
+// images) instead of O(total images). All of those calls happen
+// synchronously within the same scan pass, so caching the result for the
+// duration of one microtask burst (auto-cleared via queueMicrotask, which
+// runs after the synchronous scan loop finishes but before any later,
+// separately-scheduled scan) is safe — a later pass always recomputes fresh.
+let cachedAutoTranslateEntries: Array<{ img: HTMLImageElement; url: string }> | null = null;
+
+function collectAutoTranslateImageEntriesCached(): Array<{ img: HTMLImageElement; url: string }> {
+  if (cachedAutoTranslateEntries) return cachedAutoTranslateEntries;
+  const entries = collectAutoTranslateImageEntries(document);
+  cachedAutoTranslateEntries = entries;
+  queueMicrotask(() => { cachedAutoTranslateEntries = null; });
   return entries;
 }
 
@@ -1081,6 +1236,17 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
   if (retries >= AUTO_RETRY_MAX) { console.log('[MT] max retries reached:', url); return; }
 
   updateAutoTranslateCounter();
+  // If a previous <img> element for this same URL is still lingering (a
+  // reader library replaced/detached it while its own translate call was
+  // in flight — see removeOrphanedOverlayFor's comment), its decorations
+  // are now meaningless regardless of whether THIS attempt succeeds or
+  // fails. Sweep them proactively here rather than only on success
+  // (applyTranslatedImage already does this too, redundantly-safely) —
+  // otherwise a stale in-progress badge from that old element is only
+  // ever cleaned up when a new translate for the same URL happens to
+  // succeed, leaving it stuck on screen indefinitely if this attempt
+  // fails out to the retry badge instead.
+  removeOrphanedOverlayFor(url, getTranslatedOverlayId(img));
   addInProgressBadge(img);
 
   // A failed attempt that's about to be silently retried on the next scan
@@ -1116,6 +1282,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
       console.log('[MT] content-cache hit:', url);
       touchTranslatedCache(translatedContentCache, contentKey);
       rememberTranslated(url, contentCached);
+      rememberTranslatedThumbnail(img, contentCached, settings.config.outputLanguage);
       applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
       if (isNearViewport(img)) queueAutoTranslateLookahead(img);
       updateAutoTranslateCounter();
@@ -1145,7 +1312,17 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     }
 
     if (!result.translated_image) {
+      // Same shape as the result.error branch above (200 OK, but nothing
+      // usable came back) — must be treated as a failure too, or this
+      // silently skips markAutoTranslateFailure/AUTO_RETRY_MAP entirely:
+      // the in-progress badge gets torn down every time (willRetrySoon
+      // stays false) and immediately recreated on the next scan (~4s),
+      // reading as the badge endlessly flickering on/off, while
+      // AUTO_RETRY_MAX is never reached so the retry badge never appears
+      // to tell the reader anything is actually wrong.
       console.log('[MT] no translated_image in result');
+      willRetrySoon = retries + 1 < AUTO_RETRY_MAX;
+      markAutoTranslateFailure(img, url, retries);
       return;
     }
 
@@ -1158,6 +1335,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     // content-addressed lookup that survives reloads/URL changes)
     rememberTranslated(url, translatedB64);
     rememberTranslatedContent(contentKey, translatedB64);
+    rememberTranslatedThumbnail(img, translatedB64, settings.config.outputLanguage);
     await saveTranslatedCacheEntry(url, translatedB64);
     await saveTranslatedContentCacheEntry(contentKey, translatedB64);
 
@@ -1322,7 +1500,7 @@ function getImagePositionWithinParent(img: HTMLImageElement, parent: HTMLElement
   );
 }
 
-function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageElement | null): void {
+function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1330,7 +1508,7 @@ function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageE
   const targetOverlay = overlay ?? findTranslatedOverlay(parent, overlayId);
   if (!targetOverlay) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   const imgStyle = window.getComputedStyle(img);
   targetOverlay.style.inset = 'auto';
   targetOverlay.style.left = `${pos.x}px`;
@@ -1341,7 +1519,7 @@ function syncTranslatedOverlayLayout(img: HTMLImageElement, overlay?: HTMLImageE
   targetOverlay.style.objectPosition = imgStyle.objectPosition || '50% 50%';
 }
 
-function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | null): void {
+function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1349,7 +1527,7 @@ function syncTranslatedBadgeLayout(img: HTMLImageElement, badge?: HTMLElement | 
   const targetBadge = badge ?? findTranslatedBadge(parent, overlayId);
   if (!targetBadge) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   targetBadge.style.left = `${pos.x + pos.width - 4}px`;
   targetBadge.style.top = `${pos.y + 4}px`;
   targetBadge.style.right = 'auto';
@@ -1369,7 +1547,7 @@ function findExportButton(parent: HTMLElement, overlayId: string): HTMLElement |
   return null;
 }
 
-function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null): void {
+function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1377,7 +1555,7 @@ function syncExportButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null)
   const targetBtn = btn ?? findExportButton(parent, overlayId);
   if (!targetBtn) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   // Stacked directly below the "MT" badge — avoids needing to know the
   // badge's rendered width to sit beside it horizontally.
   targetBtn.style.left = `${pos.x + pos.width - 4}px`;
@@ -1449,7 +1627,7 @@ function findOriginalToggleButton(parent: HTMLElement, overlayId: string): HTMLE
   return null;
 }
 
-function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null): void {
+function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
 
@@ -1457,7 +1635,7 @@ function syncOriginalToggleButtonLayout(img: HTMLImageElement, btn?: HTMLElement
   const targetBtn = btn ?? findOriginalToggleButton(parent, overlayId);
   if (!targetBtn) return;
 
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   // Stacked below the export button, same right-aligned column as the
   // "MT" badge.
   targetBtn.style.left = `${pos.x + pos.width - 4}px`;
@@ -1539,13 +1717,23 @@ function setOriginalViewActive(img: HTMLImageElement, showOriginal: boolean): vo
   }
 }
 
+// Each of these six sync*Layout calls used to independently re-derive the
+// image's position via getImagePositionWithinParent() — two
+// getBoundingClientRect() calls (image + parent) apiece, so a single
+// already-translated image cost 12 forced-layout reads every time this ran
+// (every scroll-settle/periodic scan touches every already-translated
+// image on the page). Computing it once here and passing it down cuts that
+// to 2 reads per image.
 function syncTranslatedDecorations(img: HTMLImageElement): void {
-  syncTranslatedOverlayLayout(img);
-  syncTranslatedBadgeLayout(img);
-  syncInProgressBadgeLayout(img);
-  syncFixHitLayerLayout(img);
-  syncExportButtonLayout(img);
-  syncOriginalToggleButtonLayout(img);
+  const parent = img.parentElement;
+  if (!parent) return;
+  const pos = getImagePositionWithinParent(img, parent);
+  syncTranslatedOverlayLayout(img, undefined, pos);
+  syncTranslatedBadgeLayout(img, undefined, pos);
+  syncInProgressBadgeLayout(img, pos);
+  syncFixHitLayerLayout(img, undefined, pos);
+  syncExportButtonLayout(img, undefined, pos);
+  syncOriginalToggleButtonLayout(img, undefined, pos);
 }
 
 // Several decorations (overlay, badge, export button, toggle button, ...)
@@ -1587,6 +1775,28 @@ function urlsMatch(a: string | null | undefined, b: string): boolean {
   if (!a) return false;
   try {
     return new URL(a, window.location.href).href === new URL(b, window.location.href).href;
+  } catch {
+    return a === b;
+  }
+}
+
+// Deliberately looser than urlsMatch: ignores query string/hash, comparing
+// only origin+pathname. Used only for the "was this <img> recycled for a
+// different page" check (see handleAutoTranslateImage) — some lazy-load
+// libraries append a fresh cache-busting query param (?t=<timestamp>) to
+// the same lazy attribute on every re-render/observer callback with no
+// actual content change. An exact urlsMatch there would treat every one of
+// those re-renders as "a different image", tearing down and recreating the
+// overlay/badges over and over — visible as the in-progress badge
+// flickering on/off repeatedly. A genuine recycle (a virtualized reader
+// pointing the element at an actually different page) changes the path,
+// not just a query param, so this still catches the real case.
+function sameImagePath(a: string | null | undefined, b: string): boolean {
+  if (!a) return false;
+  try {
+    const ua = new URL(a, window.location.href);
+    const ub = new URL(b, window.location.href);
+    return ua.origin === ub.origin && ua.pathname === ub.pathname;
   } catch {
     return a === b;
   }
@@ -1739,12 +1949,12 @@ function removeInProgressBadge(img: HTMLImageElement): void {
   findInProgressBadge(parent, overlayId)?.remove();
 }
 
-function syncInProgressBadgeLayout(img: HTMLImageElement): void {
+function syncInProgressBadgeLayout(img: HTMLImageElement, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
   const overlayId = getTranslatedOverlayId(img);
   const badge = findInProgressBadge(parent, overlayId);
-  if (badge) syncTranslatedBadgeLayout(img, badge);
+  if (badge) syncTranslatedBadgeLayout(img, badge, precomputedPos);
 }
 
 function findRetryBadge(parent: HTMLElement, overlayId: string): HTMLElement | null {
@@ -1849,13 +2059,13 @@ function findFixHitLayer(parent: HTMLElement, overlayId: string): HTMLElement | 
   return null;
 }
 
-function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null): void {
+function syncFixHitLayerLayout(img: HTMLImageElement, layer?: HTMLElement | null, precomputedPos?: DOMRect): void {
   const parent = img.parentElement;
   if (!parent) return;
   const overlayId = getTranslatedOverlayId(img);
   const targetLayer = layer ?? findFixHitLayer(parent, overlayId);
   if (!targetLayer) return;
-  const pos = getImagePositionWithinParent(img, parent);
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
   targetLayer.style.left = `${pos.x}px`;
   targetLayer.style.top = `${pos.y}px`;
   targetLayer.style.width = `${pos.width}px`;
@@ -2464,6 +2674,19 @@ function openFixSelectedPopover(pages: PageEntry[]): void {
 
 let translatedCache = new Map<string, string>(); // rawUrl -> base64 (no prefix), fast within-session lookup
 let translatedContentCache = new Map<string, string>(); // contentKey -> base64, persisted, survives URL changes/reloads
+
+// In-memory only (not persisted — this is purely an in-session shortcut,
+// unlike translatedContentCache above). Keyed the same way as that cache
+// (contentCacheKey) but over a cheap downscaled thumbnail instead of the
+// full-resolution capture — see captureImgThumbnail/tryThumbnailFastPath.
+// Exists specifically for sites that reuse one <img> element across every
+// page turn with a freshly-minted URL each time (MangaDex's blob: URLs are
+// the documented case): resetRecycledTranslatedImage() fires on every such
+// turn, and without this, re-verifying a page the reader just came from
+// (a guaranteed content-cache hit) still pays for a full-resolution
+// capture+PNG-encode first, which is real, perceptible latency on every
+// back-and-forth page flip.
+const translatedThumbnailCache = new Map<string, string>();
 
 // Each entry is a full translated page image (often several MB of base64),
 // so both the in-memory maps and their chrome.storage.local backing must
@@ -3858,6 +4081,63 @@ async function translateOne(page: PageEntry, statusEl: HTMLElement | null): Prom
 // ─────────────────────────────────────────────────────────────────────────────
 // Image capture / fetch
 // ─────────────────────────────────────────────────────────────────────────────
+
+const THUMBNAIL_MAX_DIMENSION = 128;
+
+// A much cheaper stand-in for captureImgElement, used only to answer "have
+// we already translated this exact page's content before" (see
+// tryThumbnailFastPath) without paying for a full-resolution capture +
+// lossless PNG encode first just to find out. SHA-256 of even a small
+// downscaled bitmap is still a proper cryptographic hash of that specific
+// pixel data — two genuinely different manga pages producing
+// byte-identical downscaled output is astronomically unlikely, so this is
+// trusted directly rather than treated as a hint requiring full
+// verification, while drawing/encoding maybe 1-2% of the pixel count of a
+// full-resolution capture.
+function captureImgThumbnail(img: HTMLImageElement): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      if (!img.complete) { resolve(null); return; }
+      const naturalW = img.naturalWidth || img.width;
+      const naturalH = img.naturalHeight || img.height;
+      if (naturalW === 0 || naturalH === 0) { resolve(null); return; }
+      const scale = Math.min(1, THUMBNAIL_MAX_DIMENSION / Math.max(naturalW, naturalH));
+      const w = Math.max(1, Math.round(naturalW * scale));
+      const h = Math.max(1, Math.round(naturalH * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(null); return; }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(null); return; }
+        const fr = new FileReader();
+        fr.onloadend = () => resolve((fr.result as string).replace(/^data:image\/\w+;base64,/, ''));
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(blob);
+      }, 'image/png');
+    } catch { resolve(null); }
+  });
+}
+
+// Fire-and-forget: records this content's thumbnail hash -> translated
+// result, so a later tryThumbnailFastPath() call for the same content
+// (typically the reader flipping back to a page they just left) can skip
+// straight to applying it. Called from both places translateAndApply()
+// learns a (source image, translated result) pair — a fresh translate and
+// a content-cache hit alike — so the thumbnail cache warms up regardless
+// of which path first learns about a given page.
+function rememberTranslatedThumbnail(img: HTMLImageElement, translatedB64: string, outputLanguage: string): void {
+  void (async () => {
+    const thumb = await captureImgThumbnail(img);
+    if (!thumb) return;
+    const thumbKey = await contentCacheKey(thumb, outputLanguage);
+    translatedThumbnailCache.set(thumbKey, translatedB64);
+    evictToByteBudget(translatedThumbnailCache, MAX_CACHE_BYTES_PER_MAP);
+  })();
+}
 
 function captureImgElement(img: HTMLImageElement): Promise<string | null> {
   return new Promise((resolve) => {

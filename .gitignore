@@ -27,9 +27,16 @@ backend/core/__pycache__/
 backend/pipeline/__pycache__/
 runtime/
 
+# Hosted-mode account store (MT_REQUIRE_AUTH=true only, see core/accounts.py)
+# — real user emails + secret bearer tokens live in here, must never be
+# committed, even accidentally via a broad `git add`.
+backend/accounts.db
+backend/*.db
+
 # Secrets and local machine settings
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 

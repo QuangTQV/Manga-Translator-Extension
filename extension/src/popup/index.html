@@ -29,7 +29,7 @@
     .health-badge.ok { background: #0d3320; color: #4ade80; }
     .health-badge.err { background: #2d0d0d; color: #f87171; }
     .tabs {
-      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px;
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px;
       background: rgba(8,14,28,0.9);
       border: 1px solid rgba(59,130,246,0.1);
       border-radius: 10px; padding: 3px;
@@ -262,6 +262,7 @@
       <button class="tab-btn active" data-tab="translate" data-i18n="tabTranslate">Translate</button>
       <button class="tab-btn" data-tab="llm" data-i18n="tabLlm">LLM Config</button>
       <button class="tab-btn" data-tab="config" data-i18n="tabConfig">Config</button>
+      <button class="tab-btn" data-tab="account" data-i18n="tabAccount">Account</button>
     </div>
 
     <div id="tab-translate" class="tab-pane active">
@@ -476,6 +477,62 @@
       </div>
       <div class="actions">
         <button id="btn-save-config" class="btn btn-primary" data-i18n="btnSave">Save</button>
+      </div>
+    </div>
+
+    <div id="tab-account" class="tab-pane">
+      <div class="config-section">
+        <div class="toggle-hint" data-i18n="hintAccountTab">Only needed for a centrally-hosted deployment (a server run by someone else, gated by account). The default local backend needs none of this — leave it empty and everything works exactly as before.</div>
+
+        <div id="account-logged-out">
+          <button id="btn-account-google" class="btn btn-primary" type="button" data-i18n="btnAccountGoogle">Sign in with Google</button>
+          <div class="toggle-hint" data-i18n="hintAccountGoogle">Requires the deployment operator to have registered a Google OAuth client for this extension — see manifest.json.</div>
+
+          <div class="field" style="margin-top:10px">
+            <label class="label" data-i18n="labelAccountEmail">Email</label>
+            <input id="f-account-email" class="input" type="email" placeholder="you@example.com" autocomplete="off" />
+          </div>
+          <button id="btn-account-register" class="btn btn-secondary" type="button" data-i18n="btnAccountRegister">Register</button>
+
+          <div class="field" style="margin-top:10px">
+            <label class="label" data-i18n="labelAccountTokenImport">Already have an account token?</label>
+            <input id="f-account-token-import" class="input" type="text" placeholder="token" autocomplete="off" />
+            <button id="btn-account-token-import" class="btn-add-fallback" type="button" data-i18n="btnAccountLogin">Log in with token</button>
+          </div>
+        </div>
+
+        <div id="account-logged-in" style="display:none">
+          <div class="field"><span class="label" data-i18n="labelAccountEmail">Email</span><div id="account-email-display"></div></div>
+          <div class="field"><span class="label" data-i18n="labelAccountPlan">Plan</span><div id="account-plan-display"></div></div>
+          <div class="field"><span class="label" data-i18n="labelAccountUsage">Usage this period</span><div id="account-usage-display"></div></div>
+          <div class="toggle-hint" data-i18n="hintAccountToken">This token grants full access to your account — keep it as private as a password.</div>
+          <div class="actions-row" style="margin-top:8px">
+            <button id="btn-account-refresh" class="btn-add-fallback" type="button" data-i18n="btnAccountRefresh">Refresh status</button>
+            <button id="btn-account-upgrade" class="btn-add-fallback" type="button" data-i18n="btnAccountUpgradeDemo">Upgrade to Paid (demo)</button>
+          </div>
+          <button id="btn-account-logout" class="btn btn-clear-cache" type="button" data-i18n="btnAccountLogout">Log out</button>
+
+          <div id="account-owner-section" class="config-section" style="display:none;margin-top:14px">
+            <label class="label" data-i18n="labelOwnerSection">Owner — Shared LLM Config</label>
+            <div class="toggle-hint" data-i18n="hintOwnerSection">Configures the provider/model/key every user of this hosted deployment falls back to when they haven't entered their own key in LLM Config. Only you (the configured admin account) can see or change this.</div>
+
+            <div class="field">
+              <label class="label" data-i18n="labelProviders">Provider</label>
+              <select id="f-owner-provider" class="select"></select>
+            </div>
+            <div class="field">
+              <input id="f-owner-model" class="input" type="text" data-i18n-placeholder="placeholderModel" placeholder="model id, e.g. gpt-4o-mini" />
+            </div>
+            <div class="field">
+              <input id="f-owner-base-url" class="input" type="url" data-i18n-placeholder="labelBaseUrl" placeholder="Base URL" />
+            </div>
+            <div class="field">
+              <input id="f-owner-api-key" class="input" type="password" data-i18n-placeholder="placeholderApiKey" placeholder="sk-..." autocomplete="off" />
+              <div class="toggle-hint" id="owner-key-status" data-i18n="hintOwnerKeyEmpty">No key configured yet.</div>
+            </div>
+            <button id="btn-owner-save" class="btn btn-primary" type="button" data-i18n="btnOwnerSave">Save shared config</button>
+          </div>
+        </div>
       </div>
     </div>
 

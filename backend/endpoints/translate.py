@@ -6,9 +6,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from PIL import Image
 
+from auth import verify_token
+from core.accounts import Account
 from schemas import (
     SuggestInstructionsRequest,
     SuggestInstructionsResponse,
@@ -81,6 +83,62 @@ async def _pipeline_slot(is_priority: bool):
                 yield
 
 
+def _apply_shared_llm_config(req, account: "Account | None") -> None:
+    """When authenticated (hosted mode) and the request didn't supply its
+    own api_key, overrides provider/model_name/api_key/base_url in place
+    from the operator's shared LLM config (core/server_config.py) if one
+    is set — so a hosted deployment's users never have to configure an LLM
+    provider themselves. A request that DID bring its own key (BYOK, even
+    against a hosted deployment) is left untouched. A no-op for the normal
+    local/self-hosted setup, where account is always None.
+
+    isinstance-checks rather than just `account is None`: some existing
+    tests (test_fix_hint_priority.py, test_translate_batch_concurrency.py)
+    call the route function directly instead of through a real request,
+    which skips FastAPI's dependency resolution entirely — `account` then
+    holds the raw `Depends(verify_token)` sentinel object, not None and
+    not a real Account. Only a genuine Account should ever trigger this."""
+    if not isinstance(account, Account) or req.api_key:
+        return
+    from core.server_config import SecretKeyMismatchError, get_shared_llm_config
+    try:
+        shared = get_shared_llm_config()
+    except SecretKeyMismatchError:
+        # MT_SECRET_KEY no longer matches what the stored key was
+        # encrypted with — fall through with no shared config rather than
+        # 500ing every gated request; the admin sees the real error via
+        # GET /admin/llm-config and can re-save it.
+        return
+    if shared is None:
+        return
+    req.provider = shared.provider
+    req.model_name = shared.model_name
+    req.api_key = shared.api_key
+    req.base_url = shared.base_url
+
+
+def _is_oversized_image(raw_b64: str) -> bool:
+    """Checked against the base64 string length (~4/3 the decoded byte
+    count) rather than decoding first, so an oversized/malicious payload
+    doesn't get a full base64-decode + PIL load done on it just to find
+    out it should've been rejected."""
+    max_bytes = settings.max_image_size_mb * 1024 * 1024
+    approx_bytes = (len(raw_b64) * 3) // 4
+    return approx_bytes > max_bytes
+
+
+def _reject_oversized_image(raw_b64: str) -> None:
+    """Raises for a request handled directly on the event loop (single
+    /translate, /suggest-instructions) — see _is_oversized_image for a
+    batch item, which runs in a worker thread and can't turn an
+    HTTPException into an HTTP response."""
+    if _is_oversized_image(raw_b64):
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image exceeds the {settings.max_image_size_mb}MB limit",
+        )
+
+
 def _build_bubble_info(bubbles: list[dict]) -> list:
     """Convert bubble dicts to BubbleInfo schema items."""
     from schemas import BubbleInfo
@@ -105,12 +163,14 @@ def _build_bubble_info(bubbles: list[dict]) -> list:
 
 
 @router.post("/translate", response_model=TranslateResponse)
-async def translate_single(req: TranslateRequest) -> TranslateResponse:
+async def translate_single(req: TranslateRequest, account=Depends(verify_token)) -> TranslateResponse:
     """Translate a single image.
 
     Accepts a base64-encoded image and returns the translated image
     plus bubble metadata.
     """
+    _apply_shared_llm_config(req, account)
+    _reject_oversized_image(req.image)
     models_dir = settings.models_dir
     fonts_dir = settings.fonts_base_dir
 
@@ -159,9 +219,17 @@ async def translate_single(req: TranslateRequest) -> TranslateResponse:
     start = time.time()
     try:
         async with _pipeline_slot(req.fix_hint is not None):
-            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.to_thread(
-                translate_image_base64, req.image, config, req.previous_context_texts
+            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.wait_for(
+                asyncio.to_thread(
+                    translate_image_base64, req.image, config, req.previous_context_texts
+                ),
+                timeout=settings.request_timeout_seconds,
             )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Translation timed out after {settings.request_timeout_seconds}s",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
 
@@ -190,6 +258,8 @@ def _translate_single_item(
 
     item_start = t.time()
     try:
+        if _is_oversized_image(item.image):
+            raise ValueError(f"Image exceeds the {settings.max_image_size_mb}MB limit")
         config = _build_config(
             input_language=req.input_language,
             output_language=req.output_language,
@@ -263,16 +333,34 @@ async def _run_batch_item(
     the same priority reservation as a single-page fix)."""
     loop = asyncio.get_running_loop()
     async with _pipeline_slot(req.fix_hint is not None):
-        return await loop.run_in_executor(_executor, _translate_single_item, item, req)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(_executor, _translate_single_item, item, req),
+                timeout=settings.request_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return TranslateBatchItemResponse(
+                id=item.id,
+                translated_image=None,
+                bubbles=[],
+                error=f"Translation timed out after {settings.request_timeout_seconds}s",
+                processing_time_seconds=settings.request_timeout_seconds,
+            )
 
 
 @router.post("/translate/batch", response_model=TranslateBatchResponse)
-async def translate_batch(req: TranslateBatchRequest) -> TranslateBatchResponse:
+async def translate_batch(req: TranslateBatchRequest, account=Depends(verify_token)) -> TranslateBatchResponse:
     """Translate multiple images concurrently.
 
     Processes up to 20 images in parallel using a thread pool.
     Returns results in the same order as the input.
+
+    Usage accounting note: verify_token() counts this whole call as 1
+    request against the account's quota, same as a single-image /translate
+    call, even though it can process up to 20 images — a real billing
+    model would likely want to count per-image here instead.
     """
+    _apply_shared_llm_config(req, account)
     if len(req.images) > 20:
         raise HTTPException(
             status_code=400, detail="Maximum 20 images per batch"
@@ -310,7 +398,7 @@ def _downscale_and_reencode_jpeg(raw_b64: str, max_dimension: int) -> str:
 
 
 @router.post("/suggest-instructions", response_model=SuggestInstructionsResponse)
-async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstructionsResponse:
+async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(verify_token)) -> SuggestInstructionsResponse:
     """Draft Special Instructions text from a handful of sample pages.
 
     A single explicit, user-triggered LLM call — not part of the
@@ -322,11 +410,14 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
     at visually yet, and the notes can be drafted purely from search
     results.
     """
+    _apply_shared_llm_config(req, account)
     can_search_without_images = req.enable_web_search and bool((req.story_title or "").strip())
     if not req.images and not can_search_without_images:
         raise HTTPException(status_code=400, detail="No sample images provided.")
 
     sample_images = req.images[:SUGGEST_INSTRUCTIONS_MAX_IMAGES]
+    for img in sample_images:
+        _reject_oversized_image(img)
 
     try:
         prepared_images = [
@@ -388,11 +479,12 @@ async def suggest_instructions(req: SuggestInstructionsRequest) -> SuggestInstru
 
 
 @router.post("/test-key", response_model=TestApiKeyResponse)
-async def test_key(req: TestApiKeyRequest) -> TestApiKeyResponse:
+async def test_key(req: TestApiKeyRequest, account=Depends(verify_token)) -> TestApiKeyResponse:
     """Ping one (provider, model, key) combo with a minimal text-only
     request — the popup's "Test API Key" button. Bypasses the pipeline
     concurrency slot entirely (no GPU/detection/rendering involved), so
     testing several keys at once never queues behind real translate work."""
+    _apply_shared_llm_config(req, account)
     try:
         config = build_test_key_config(req.provider, req.model_name, req.api_key, req.base_url, req.reasoning_effort)
     except ValueError as e:
