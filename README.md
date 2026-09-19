@@ -80,6 +80,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Bubble translation | Detects speech bubbles, removes original text, translates, and renders text back into the image. |
 | Hover-to-magnify | Hover a translated bubble for a sharp zoomed-in crop with the original text as a caption, so you can cross-check the translation at a glance. A per-page button toggles between the translated and original image. |
 | Story Notes | Per-story notes (glossary, character relationships, tone) the model always follows; a "Suggest" button drafts them from your already-scanned pages. Separate from General LLM Instructions, which apply to every story. |
+| Story DB (optional, requires login) | A persistent, per-story character database — characters (name/gender/role/voice), relationships, a glossary of fixed term translations, and continuity notes — synced to your account and applied automatically when translating that story. Manage it from the `Story DB` tab. |
 | Vietnamese pronoun accuracy | For Vietnamese output, automatically reasons about each speaker pair's relationship (age, gender, family ties, honorifics like "onii-chan") to pick the correct pronouns (anh/em, tao/mày, etc.) and keeps them consistent across a page — no configuration needed. |
 | Context Memory | Optional: the model writes a one-sentence summary each page and reuses it on later pages of the same story, keeping characters/events consistent for cheaper than sending prior pages' full text/images. |
 | Fix a translation | Click a translated bubble and describe what's wrong to re-translate just that page with the correction applied to that bubble. To fix the same mistake across several pages at once (e.g. a character name), select the already-translated pages in the scanner, describe it once, and apply it to all of them. |
@@ -165,13 +166,15 @@ Enable Developer mode, choose Load unpacked, and select `extension/dist/`.
 
 ## Configuration
 
-Open the extension popup and use the three tabs:
+Open the extension popup and use the tabs:
 
 | Tab | Options |
 | --- | --- |
 | `Translate` | Source language, target language, outside-bubble text toggle, Previous-page context, Context Memory, Story Notes (with "Suggest" to draft them). |
 | `LLM Config` | Provider, Base URL, model, API key (+ optional backup keys and fallback providers, tried in order on rate limit), temperature, Top P, Top K, full-page context, General LLM Instructions. |
 | `Config` | Extension UI language and backend URL. |
+| `Account` | Sign in with email or Google to use optional per-account features (Story DB); also where a centrally-hosted deployment's users see their plan/usage. |
+| `Story DB` | Optional, requires being logged in on `Account`. Per-story character database, relationships, a term glossary, and continuity notes, synced to your account. |
 
 Default backend URL:
 

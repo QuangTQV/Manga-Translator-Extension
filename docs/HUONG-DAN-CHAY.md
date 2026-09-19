@@ -103,6 +103,43 @@ Tab **LLM Config** còn có:
 - **Full Page Context** (mặc định bật): gửi kèm cả ảnh trang, không chỉ từng bong bóng cắt riêng — giúp model thấy được tranh vẽ/quan hệ nhân vật để dịch đúng ngữ cảnh hơn (vd chọn đúng xưng hô), đổi lại tốn thêm token mỗi lần dịch.
 - **General LLM Instructions** (tuỳ chọn): chỉ dẫn chung áp dụng cho *mọi* truyện, không riêng truyện đang dịch — vd quy tắc văn phong/hành vi cố định bạn luôn muốn. Khác với Story Notes (riêng theo từng truyện, ở tab Translate).
 
+## 8. (Tuỳ chọn) Đăng nhập & CSDL truyện (Story DB)
+
+Tính năng CSDL truyện — nhân vật (tên/giới tính/vai trò/giọng điệu), mối quan hệ, thuật ngữ dịch cố định, ghi chú diễn biến, giữ riêng theo từng truyện — là **tuỳ chọn và cần đăng nhập**. Khác với mọi thứ ở trên, phần này cần thêm một database Postgres chạy cùng backend.
+
+1. Chạy Postgres cục bộ bằng Docker (chỉ cần làm 1 lần, container giữ dữ liệu lâu dài):
+
+```bash
+cd backend
+docker compose up -d
+```
+
+2. Set biến môi trường trước khi chạy backend:
+
+```bash
+export MT_DATABASE_URL="postgresql+psycopg2://manga_translator:manga_translator@localhost:5432/manga_translator"
+```
+
+3. Chạy lại backend (`./.venv/bin/python main.py`) như bình thường. **Không cần bật `MT_REQUIRE_AUTH`** — đăng nhập ở đây chỉ để dùng CSDL truyện, không bắt buộc cả backend phải yêu cầu tài khoản cho mọi yêu cầu dịch.
+4. Mở popup → tab **Account** → đăng nhập bằng email (nút Register) hoặc Google.
+5. Sang tab **Story DB** → bấm **+ Create** để tạo 1 truyện → nhập nhân vật/mối quan hệ/thuật ngữ/ghi chú diễn biến → bấm **Save story**. Truyện đang chọn sẽ tự động được dùng khi bạn dịch trang.
+
+## 9. (Tuỳ chọn) Live AI — log input/output của mọi lệnh gọi AI
+
+Công cụ debug: ghi lại prompt gửi đi và response nhận về của mọi lệnh gọi tới LLM (mọi provider, mọi tính năng dịch/suggest/test key). Mặc định tắt, không ảnh hưởng gì nếu không bật.
+
+```bash
+export MT_LIVE_AI_LOG_ENABLED=true
+```
+
+Xem các lệnh gọi gần nhất qua API (không cần đăng nhập nếu chưa bật `MT_REQUIRE_AUTH`):
+
+```bash
+curl http://localhost:7677/admin/live-ai-log
+```
+
+Log cũng được ghi ra file `backend/logs/live_ai.jsonl` — không lưu ảnh (chỉ ghi số lượng ảnh + KB ước tính), chỉ lưu phần text.
+
 ## Xử lý sự cố thường gặp
 
 | Vấn đề | Cách xử lý |

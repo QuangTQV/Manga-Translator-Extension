@@ -80,6 +80,7 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Dịch bubble | Nhận diện bubble thoại, xóa chữ gốc, dịch và render chữ lại vào ảnh. |
 | Di chuột phóng to | Di chuột vào 1 bubble đã dịch để xem bản crop phóng to sắc nét kèm chú thích là chữ gốc, giúp đối chiếu bản dịch nhanh chóng. Có nút chuyển qua lại giữa ảnh đã dịch và ảnh gốc cho từng trang. |
 | Ghi chú truyện | Ghi chú riêng cho từng truyện (glossary, quan hệ nhân vật, văn phong) mà model luôn tuân theo; có nút "Suggest" để tự soạn nháp từ các trang đã quét. Khác với Chỉ dẫn chung cho LLM (áp dụng mọi truyện). |
+| CSDL truyện (tùy chọn, cần đăng nhập) | Cơ sở dữ liệu nhân vật riêng cho từng truyện — nhân vật (tên/giới tính/vai trò/giọng điệu), mối quan hệ, thuật ngữ dịch cố định, và ghi chú diễn biến — đồng bộ theo tài khoản, dùng tự động khi dịch đúng truyện đó. Quản lý ở tab `Story DB` mới. |
 | Xưng hô tiếng Việt chính xác | Khi dịch sang tiếng Việt, tự động suy luận quan hệ từng cặp nhân vật (tuổi, giới tính, quan hệ gia đình, honorific như "onii-chan") để chọn đúng xưng hô (anh/em, tao/mày...) và giữ nhất quán suốt trang — không cần cấu hình gì. |
 | Trí nhớ context | Tùy chọn: model tự viết 1 câu tóm tắt mỗi trang và dùng lại ở các trang sau trong cùng truyện, giữ nhân vật/sự kiện nhất quán mà rẻ hơn gửi kèm ảnh/chữ đầy đủ của trang trước. |
 | Sửa bản dịch | Bấm vào 1 bubble đã dịch, mô tả chỗ sai để dịch lại đúng trang đó với hướng dẫn sửa áp riêng cho bubble đó. Để sửa cùng 1 lỗi lặp lại trên nhiều trang (vd tên nhân vật sai), chọn các trang đã dịch trong trình quét, mô tả 1 lần rồi áp dụng cho tất cả. |
@@ -165,13 +166,15 @@ Bật Developer mode, chọn Load unpacked và chọn `extension/dist/`.
 
 ## Cấu Hình
 
-Mở popup extension và dùng ba tab:
+Mở popup extension và dùng các tab:
 
 | Tab | Tùy chọn |
 | --- | --- |
 | `Translate` | Ngôn ngữ nguồn, ngôn ngữ đích, bật/tắt chữ ngoài bubble, Previous-page context, Trí nhớ context, Ghi chú truyện (có nút "Suggest" để soạn nháp). |
 | `LLM Config` | Provider, Base URL, model, API key (+ key dự phòng và provider dự phòng tùy chọn, thử lần lượt khi bị rate limit), temperature, Top P, Top K, ngữ cảnh toàn trang, Chỉ dẫn chung cho LLM. |
 | `Config` | Ngôn ngữ giao diện extension và backend URL. |
+| `Account` | Đăng nhập bằng email hoặc Google để dùng các tính năng tùy chọn theo tài khoản (CSDL truyện); cũng là nơi người dùng backend hosted tập trung xem gói/mức dùng. |
+| `Story DB` | Tùy chọn, cần đăng nhập ở tab `Account`. CSDL nhân vật, mối quan hệ, thuật ngữ, và ghi chú diễn biến cho từng truyện, đồng bộ theo tài khoản. |
 
 Backend URL mặc định:
 
