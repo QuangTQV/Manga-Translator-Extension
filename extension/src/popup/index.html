@@ -263,6 +263,7 @@
       <button class="tab-btn" data-tab="llm" data-i18n="tabLlm">LLM Config</button>
       <button class="tab-btn" data-tab="config" data-i18n="tabConfig">Config</button>
       <button class="tab-btn" data-tab="account" data-i18n="tabAccount">Account</button>
+      <button class="tab-btn" data-tab="storydb" data-i18n="tabStoryDb">Story DB</button>
     </div>
 
     <div id="tab-translate" class="tab-pane active">
@@ -531,6 +532,67 @@
               <div class="toggle-hint" id="owner-key-status" data-i18n="hintOwnerKeyEmpty">No key configured yet.</div>
             </div>
             <button id="btn-owner-save" class="btn btn-primary" type="button" data-i18n="btnOwnerSave">Save shared config</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-storydb" class="tab-pane">
+      <div class="config-section">
+        <div class="toggle-hint" data-i18n="hintStoryDbTab">A persistent character database (names/genders/roles), relationships, and a glossary of fixed term translations — kept consistent across pages of the same story. Optional, and requires being logged in on the Account tab (server-side storage, so it survives across devices).</div>
+
+        <div id="storydb-locked">
+          <div class="toggle-hint" data-i18n="hintStoryDbLocked">Log in on the Account tab to use the Story DB.</div>
+        </div>
+
+        <div id="storydb-editor" style="display:none">
+          <div class="field">
+            <label class="label" data-i18n="labelStorySelect">Active story</label>
+            <select id="f-story-select" class="select"></select>
+          </div>
+          <div class="config-row">
+            <input id="f-story-new-name" class="input" type="text" data-i18n-placeholder="placeholderStoryName" placeholder="New story name" autocomplete="off" />
+            <button id="btn-story-new" class="btn-add-fallback" type="button" data-i18n="btnStoryNew">+ Create</button>
+          </div>
+
+          <div id="story-content-fields" style="display:none;margin-top:10px">
+            <div class="field">
+              <label class="label" data-i18n="labelStoryName">Story name</label>
+              <input id="f-story-name" class="input" type="text" autocomplete="off" />
+            </div>
+
+            <label class="label" data-i18n="labelStoryCharacters">Characters</label>
+            <div class="toggle-hint" data-i18n="hintStoryCharacters">Name, gender (for correct pronouns), role, and a short voice/tone note.</div>
+            <div id="story-characters-list"></div>
+            <button id="btn-add-story-character" class="btn-add-fallback" type="button" data-i18n="btnAddCharacter">+ Add character</button>
+
+            <label class="label" style="margin-top:14px" data-i18n="labelStoryRelationships">Relationships</label>
+            <div class="toggle-hint" data-i18n="hintStoryRelationships">How two characters relate/address each other (e.g. "boss and employee", "secretly in love") — helps get pronouns/honorifics/register right.</div>
+            <div id="story-relationships-list"></div>
+            <button id="btn-add-story-relationship" class="btn-add-fallback" type="button" data-i18n="btnAddRelationship">+ Add relationship</button>
+
+            <label class="label" style="margin-top:14px" data-i18n="labelStoryGlossary">Glossary</label>
+            <div class="toggle-hint" data-i18n="hintStoryGlossary">Fixed translations for skills/items/nicknames/place names, used exactly instead of left to the model each time.</div>
+            <div id="story-glossary-list"></div>
+            <button id="btn-add-story-glossary" class="btn-add-fallback" type="button" data-i18n="btnAddGlossaryTerm">+ Add term</button>
+
+            <div class="toggle-row" style="margin-top:14px">
+              <div class="toggle-copy">
+                <div class="toggle-title" data-i18n="labelStoryContinuityNotes">Continuity Notes</div>
+                <div class="toggle-hint" data-i18n="hintStoryContinuityNotes">Short notes on what's happened/been revealed so far (e.g. "Ch.5: Ren is revealed to be Aoi's half-brother"), sent to the model only when this is on. Off by default — can add up over a long-running series.</div>
+              </div>
+              <label class="toggle">
+                <input id="f-story-continuity-enabled" type="checkbox" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div id="story-continuity-notes-list"></div>
+            <button id="btn-add-story-continuity-note" class="btn-add-fallback" type="button" data-i18n="btnAddContinuityNote">+ Add note</button>
+
+            <div class="actions-row" style="margin-top:14px">
+              <button id="btn-story-save" class="btn btn-primary" type="button" data-i18n="btnStorySave">Save story</button>
+              <button id="btn-story-delete" class="btn btn-clear-cache" type="button" data-i18n="btnStoryDelete">Delete story</button>
+            </div>
           </div>
         </div>
       </div>

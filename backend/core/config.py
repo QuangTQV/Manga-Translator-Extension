@@ -29,6 +29,50 @@ class FallbackProviderConfig:
 
 
 @dataclass
+class StoryCharacterConfig:
+    """One character from a logged-in account's Story DB (see
+    core/story_context.py), resolved server-side and injected into the
+    translation prompt. `id` links to StoryRelationshipConfig entries."""
+
+    id: str
+    name: str
+    gender: str = "unknown"
+    role: Optional[str] = None
+    voice_notes: Optional[str] = None
+
+
+@dataclass
+class StoryRelationshipConfig:
+    """How two Story DB characters relate/address each other."""
+
+    character_a_id: str
+    character_b_id: str
+    surface_relation: str
+    address_notes: Optional[str] = None
+
+
+@dataclass
+class StoryGlossaryTermConfig:
+    """A fixed term translation from a Story DB, to keep consistent
+    across pages instead of leaving it to the model each time."""
+
+    term: str
+    translation: str
+    notes: Optional[str] = None
+
+
+@dataclass
+class StoryContinuityNoteConfig:
+    """A user-maintained note about something that's happened/been
+    revealed in the story so far — only present here when the Story DB's
+    own continuity_notes_enabled toggle is on (see
+    endpoints/translate.py:_resolve_story_context)."""
+
+    text: str
+    source_label: Optional[str] = None
+
+
+@dataclass
 class DetectionConfig:
     """Configuration for speech bubble detection."""
 
@@ -120,6 +164,10 @@ class TranslationConfig:
     osb_min_side_pixels: int = 128
     special_instructions: Optional[str] = None  # per-story notes (glossary, character relationships)
     llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
+    story_characters: List[StoryCharacterConfig] = field(default_factory=list)  # from a logged-in account's Story DB, resolved server-side (see endpoints/translate.py:_resolve_story_context)
+    story_relationships: List[StoryRelationshipConfig] = field(default_factory=list)
+    story_glossary: List[StoryGlossaryTermConfig] = field(default_factory=list)
+    story_continuity_notes: List[StoryContinuityNoteConfig] = field(default_factory=list)  # only populated when the story's continuity_notes_enabled toggle is on
     context_memory_enabled: bool = False  # require a MEMORY NOTE summary each page, for the caller to accumulate
     context_memory: Optional[str] = None  # caller-accumulated MEMORY NOTE summaries from earlier pages of this story
     fix_hint_bubble_index: Optional[int] = None  # 0-based index into the previous response's bubbles list

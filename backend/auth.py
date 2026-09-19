@@ -34,6 +34,23 @@ async def verify_token(authorization: Optional[str] = Header(None)) -> Optional[
         raise HTTPException(status_code=429, detail=str(e)) from e
 
 
+async def require_login(authorization: Optional[str] = Header(None)) -> Account:
+    """FastAPI dependency for the story-context (character DB) endpoints.
+    Unconditionally requires a valid account token, independent of
+    require_auth — same shape as require_admin below, minus the
+    admin-email check. The character-DB feature is opt-in per user (you
+    log in via the Account tab to get it), not tied to whether the
+    deployment happens to enforce translate quotas right now."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    account = get_account(token) if token else None
+    if not account:
+        raise HTTPException(status_code=401, detail="Invalid account token")
+    return account
+
+
 async def require_admin(authorization: Optional[str] = Header(None)) -> Account:
     """FastAPI dependency for GET/POST /admin/llm-config. Independent of
     require_auth — managing the shared LLM config is always a privileged,
@@ -56,3 +73,16 @@ async def require_admin(authorization: Optional[str] = Header(None)) -> Account:
     if account.email.lower() != settings.admin_email.lower():
         raise HTTPException(status_code=403, detail="This account is not the configured admin")
     return account
+
+
+async def require_live_ai_log_access(authorization: Optional[str] = Header(None)) -> Optional[Account]:
+    """FastAPI dependency for GET /admin/live-ai-log. A no-op (any request
+    allowed) for the normal self-hosted setup (require_auth off) — Live AI
+    logging is already opt-in via MT_LIVE_AI_LOG_ENABLED, and this is
+    meant as a local debugging tool for whoever already controls that env
+    var. On a hosted deployment (require_auth on), the log can contain
+    OTHER users' prompts/translations, so only the configured admin may
+    view it — reuses require_admin's check rather than duplicating it."""
+    if not settings.require_auth:
+        return None
+    return await require_admin(authorization)

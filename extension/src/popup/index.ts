@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig } from '../shared/types.js';
+import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig, type StoryCharacter, type StoryRelationship, type StoryGlossaryTerm, type StoryContinuityNote, type StoryDetail, type StorySummary } from '../shared/types.js';
 import { UI_LANGUAGES, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -77,6 +77,25 @@ const ownerBaseUrlInput = qs<HTMLInputElement>('f-owner-base-url');
 const ownerApiKeyInput = qs<HTMLInputElement>('f-owner-api-key');
 const ownerKeyStatus = qs<HTMLDivElement>('owner-key-status');
 const ownerSaveBtn = qs<HTMLButtonElement>('btn-owner-save');
+
+const storyDbLockedView = qs<HTMLDivElement>('storydb-locked');
+const storyDbEditorView = qs<HTMLDivElement>('storydb-editor');
+const storySelect = qs<HTMLSelectElement>('f-story-select');
+const storyNewNameInput = qs<HTMLInputElement>('f-story-new-name');
+const storyNewBtn = qs<HTMLButtonElement>('btn-story-new');
+const storyContentFields = qs<HTMLDivElement>('story-content-fields');
+const storyNameInput = qs<HTMLInputElement>('f-story-name');
+const storyCharactersList = qs<HTMLDivElement>('story-characters-list');
+const addStoryCharacterBtn = qs<HTMLButtonElement>('btn-add-story-character');
+const storyRelationshipsList = qs<HTMLDivElement>('story-relationships-list');
+const addStoryRelationshipBtn = qs<HTMLButtonElement>('btn-add-story-relationship');
+const storyGlossaryList = qs<HTMLDivElement>('story-glossary-list');
+const addStoryGlossaryBtn = qs<HTMLButtonElement>('btn-add-story-glossary');
+const storyContinuityEnabledToggle = qs<HTMLInputElement>('f-story-continuity-enabled');
+const storyContinuityNotesList = qs<HTMLDivElement>('story-continuity-notes-list');
+const addStoryContinuityNoteBtn = qs<HTMLButtonElement>('btn-add-story-continuity-note');
+const storySaveBtn = qs<HTMLButtonElement>('btn-story-save');
+const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
 
 const healthBadge = qs<HTMLSpanElement>('health-badge');
 const statusEl = qs<HTMLDivElement>('popup-status');
@@ -255,6 +274,9 @@ async function loadAndBind(): Promise<void> {
 
   renderAccountView();
   if (settings.accountToken) void refreshAccountStatus();
+
+  renderStoryDbView();
+  if (settings.accountToken) void loadStoryList();
 
   renderProviderGroups(settings.config.providerGroups ?? []);
   updateDuplicateKeyWarning();
@@ -435,6 +457,15 @@ function bind(): void {
   accountUpgradeBtn.addEventListener('click', () => { void handleAccountUpgradeDemo(); });
   accountLogoutBtn.addEventListener('click', () => { void handleAccountLogout(); });
   ownerSaveBtn.addEventListener('click', () => { void handleOwnerSave(); });
+
+  storySelect.addEventListener('change', () => { void handleStorySelectChange(); });
+  storyNewBtn.addEventListener('click', () => { void handleStoryNew(); });
+  addStoryCharacterBtn.addEventListener('click', () => { addStoryCharacterRow(); });
+  addStoryRelationshipBtn.addEventListener('click', () => { addStoryRelationshipRow(); });
+  addStoryGlossaryBtn.addEventListener('click', () => { addStoryGlossaryRow(); });
+  addStoryContinuityNoteBtn.addEventListener('click', () => { addStoryContinuityNoteRow(); });
+  storySaveBtn.addEventListener('click', () => { void handleStorySave(); });
+  storyDeleteBtn.addEventListener('click', () => { void handleStoryDelete(); });
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -1044,6 +1075,8 @@ async function handleAccountRegister(): Promise<void> {
     await autoSave();
     renderAccountInfo(result.account);
     renderAccountView();
+    renderStoryDbView();
+    void loadStoryList();
     accountEmailInput.value = '';
     setStatus(t(uiLanguage, 'statusAccountRegistered'), 'ok');
   } finally {
@@ -1065,6 +1098,8 @@ async function handleAccountGoogleLogin(): Promise<void> {
     await autoSave();
     renderAccountInfo(result.account);
     renderAccountView();
+    renderStoryDbView();
+    void loadStoryList();
     setStatus(t(uiLanguage, 'statusAccountLoggedIn'), 'ok');
   } finally {
     accountGoogleBtn.disabled = false;
@@ -1087,6 +1122,8 @@ async function handleAccountTokenImport(): Promise<void> {
     await autoSave();
     renderAccountInfo(result.account);
     renderAccountView();
+    renderStoryDbView();
+    void loadStoryList();
     accountTokenImportInput.value = '';
     setStatus(t(uiLanguage, 'statusAccountLoggedIn'), 'ok');
   } finally {
@@ -1144,8 +1181,10 @@ async function handleAccountLogout(): Promise<void> {
   }
   settings.accountToken = undefined;
   settings.accountEmail = undefined;
+  settings.activeStoryId = undefined;
   await autoSave();
   renderAccountView();
+  renderStoryDbView();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1229,6 +1268,453 @@ async function handleOwnerSave(): Promise<void> {
   } finally {
     ownerSaveBtn.disabled = false;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story DB (character database / relationships / glossary) — the "Story DB"
+// tab, only usable when logged in (see backend/auth.py:require_login,
+// core/story_context.py). Each story is edited as a whole document: picking
+// one loads its content into the form, Save PUTs the whole thing back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface StoryListMessageResult { ok: boolean; stories?: StorySummary[]; error?: string; }
+interface StoryDetailMessageResult { ok: boolean; story?: StoryDetail; error?: string; }
+interface StoryOkMessageResult { ok: boolean; error?: string; }
+
+const GENDER_OPTIONS: { value: string; key: I18nKey }[] = [
+  { value: 'unknown', key: 'genderOptionUnknown' },
+  { value: 'female', key: 'genderOptionFemale' },
+  { value: 'male', key: 'genderOptionMale' },
+  { value: 'other', key: 'genderOptionOther' },
+];
+
+function storyMessage<T>(type: string, extra: Record<string, unknown> = {}): Promise<T> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type, ...extra }, (resp: unknown) => {
+      const lastError = chrome.runtime.lastError;
+      if (lastError) { resolve({ ok: false, error: lastError.message } as T); return; }
+      resolve((resp as T) ?? ({ ok: false, error: 'no response' } as T));
+    });
+  });
+}
+
+function renderStoryDbView(): void {
+  const loggedIn = Boolean(settings.accountToken);
+  storyDbLockedView.style.display = loggedIn ? 'none' : '';
+  storyDbEditorView.style.display = loggedIn ? '' : 'none';
+  if (!loggedIn) storyContentFields.style.display = 'none';
+}
+
+function populateStorySelect(stories: StorySummary[], preferredId?: string): string {
+  storySelect.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = t(uiLanguage, 'placeholderStorySelect');
+  storySelect.appendChild(placeholder);
+  for (const s of stories) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    storySelect.appendChild(opt);
+  }
+  const resolvedId = preferredId && stories.some((s) => s.id === preferredId) ? preferredId : (stories[0]?.id ?? '');
+  storySelect.value = resolvedId;
+  return resolvedId;
+}
+
+async function refreshStoryOptions(preferredId?: string): Promise<string> {
+  const result = await storyMessage<StoryListMessageResult>('STORY_LIST');
+  if (!result.ok || !result.stories) {
+    setStatus(`${t(uiLanguage, 'errorStoryListFailed')}: ${result.error ?? ''}`, 'err');
+    return '';
+  }
+  return populateStorySelect(result.stories, preferredId);
+}
+
+async function loadStoryIntoForm(id: string): Promise<void> {
+  const result = await storyMessage<StoryDetailMessageResult>('STORY_GET', { id });
+  if (!result.ok || !result.story) {
+    setStatus(`${t(uiLanguage, 'errorStoryLoadFailed')}: ${result.error ?? ''}`, 'err');
+    return;
+  }
+  storySelect.value = id;
+  storyNameInput.value = result.story.name;
+  renderStoryCharacters(result.story.characters);
+  renderStoryRelationships(result.story.relationships);
+  renderStoryGlossary(result.story.glossary);
+  storyContinuityEnabledToggle.checked = result.story.continuity_notes_enabled;
+  renderStoryContinuityNotes(result.story.continuity_notes);
+  storyContentFields.style.display = '';
+  settings.activeStoryId = id;
+  await autoSave();
+}
+
+async function loadStoryList(): Promise<void> {
+  const id = await refreshStoryOptions(settings.activeStoryId);
+  if (id) {
+    await loadStoryIntoForm(id);
+  } else {
+    storyContentFields.style.display = 'none';
+  }
+}
+
+async function handleStorySelectChange(): Promise<void> {
+  const id = storySelect.value;
+  if (!id) {
+    storyContentFields.style.display = 'none';
+    settings.activeStoryId = undefined;
+    await autoSave();
+    return;
+  }
+  await loadStoryIntoForm(id);
+}
+
+async function handleStoryNew(): Promise<void> {
+  const name = storyNewNameInput.value.trim();
+  if (!name) return;
+  storyNewBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusStoryCreating'), '');
+  try {
+    const result = await storyMessage<StoryDetailMessageResult>('STORY_CREATE', { name });
+    if (!result.ok || !result.story) {
+      setStatus(`${t(uiLanguage, 'errorStoryCreateFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    storyNewNameInput.value = '';
+    await refreshStoryOptions(result.story.id);
+    await loadStoryIntoForm(result.story.id);
+    setStatus(t(uiLanguage, 'statusStoryCreated'), 'ok');
+  } finally {
+    storyNewBtn.disabled = false;
+  }
+}
+
+async function handleStorySave(): Promise<void> {
+  const id = storySelect.value;
+  if (!id) return;
+  const name = storyNameInput.value.trim();
+  if (!name) {
+    setStatus(t(uiLanguage, 'errorStoryNameRequired'), 'err');
+    return;
+  }
+  storySaveBtn.disabled = true;
+  setStatus(t(uiLanguage, 'statusStorySaving'), '');
+  try {
+    const payload = {
+      name,
+      characters: collectStoryCharacters(),
+      relationships: collectStoryRelationships(),
+      glossary: collectStoryGlossary(),
+      continuity_notes: collectStoryContinuityNotes(),
+      continuity_notes_enabled: storyContinuityEnabledToggle.checked,
+    };
+    const result = await storyMessage<StoryDetailMessageResult>('STORY_SAVE', { id, payload });
+    if (!result.ok || !result.story) {
+      setStatus(`${t(uiLanguage, 'errorStorySaveFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    await refreshStoryOptions(id); // picks up a renamed title in the select's option text
+    setStatus(t(uiLanguage, 'statusStorySaved'), 'ok');
+  } finally {
+    storySaveBtn.disabled = false;
+  }
+}
+
+async function handleStoryDelete(): Promise<void> {
+  const id = storySelect.value;
+  if (!id) return;
+  if (!window.confirm(t(uiLanguage, 'confirmStoryDelete'))) return;
+  storyDeleteBtn.disabled = true;
+  try {
+    const result = await storyMessage<StoryOkMessageResult>('STORY_DELETE', { id });
+    if (!result.ok) {
+      setStatus(`${t(uiLanguage, 'errorStoryDeleteFailed')}: ${result.error ?? ''}`, 'err');
+      return;
+    }
+    if (settings.activeStoryId === id) {
+      settings.activeStoryId = undefined;
+      await autoSave();
+    }
+    await loadStoryList();
+    setStatus(t(uiLanguage, 'statusStoryDeleted'), 'ok');
+  } finally {
+    storyDeleteBtn.disabled = false;
+  }
+}
+
+function populateCharacterSelect(select: HTMLSelectElement, selectedId?: string): void {
+  const previous = selectedId ?? select.value;
+  select.innerHTML = '';
+  // A native <select> always shows *some* option selected — without an
+  // empty placeholder, a relationship whose referenced character gets
+  // deleted (or renamed away) would silently fall back to whichever
+  // character happens to be first in the list instead of surfacing as
+  // "unselected", quietly re-pointing the relationship at the wrong
+  // character on save.
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = t(uiLanguage, 'placeholderRelationCharacter');
+  select.appendChild(placeholder);
+  for (const charRow of Array.from(storyCharactersList.querySelectorAll<HTMLDivElement>('.story-char-row'))) {
+    const id = charRow.dataset.charId ?? '';
+    const name = charRow.querySelector<HTMLInputElement>('.sc-name')?.value.trim() || t(uiLanguage, 'placeholderCharacterName');
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = name;
+    select.appendChild(opt);
+  }
+  select.value = previous && Array.from(select.options).some((o) => o.value === previous) ? previous : '';
+}
+
+function refreshRelationshipCharacterOptions(): void {
+  for (const relRow of Array.from(storyRelationshipsList.querySelectorAll<HTMLDivElement>('.story-rel-row'))) {
+    const aSelect = relRow.querySelector<HTMLSelectElement>('.sr-char-a');
+    const bSelect = relRow.querySelector<HTMLSelectElement>('.sr-char-b');
+    if (aSelect) populateCharacterSelect(aSelect, aSelect.value);
+    if (bSelect) populateCharacterSelect(bSelect, bSelect.value);
+  }
+}
+
+function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'story-char-row';
+  row.dataset.charId = data?.id ?? crypto.randomUUID();
+
+  const nameField = document.createElement('input');
+  nameField.className = 'input sc-name';
+  nameField.type = 'text';
+  nameField.placeholder = t(uiLanguage, 'placeholderCharacterName');
+  nameField.value = data?.name ?? '';
+  nameField.addEventListener('input', () => { refreshRelationshipCharacterOptions(); });
+
+  const genderField = document.createElement('select');
+  genderField.className = 'select sc-gender';
+  for (const g of GENDER_OPTIONS) {
+    const opt = document.createElement('option');
+    opt.value = g.value;
+    opt.textContent = t(uiLanguage, g.key);
+    genderField.appendChild(opt);
+  }
+  genderField.value = data?.gender ?? 'unknown';
+
+  const roleField = document.createElement('input');
+  roleField.className = 'input sc-role';
+  roleField.type = 'text';
+  roleField.placeholder = t(uiLanguage, 'placeholderCharacterRole');
+  roleField.value = data?.role ?? '';
+
+  const voiceField = document.createElement('input');
+  voiceField.className = 'input sc-voice';
+  voiceField.type = 'text';
+  voiceField.placeholder = t(uiLanguage, 'placeholderCharacterVoice');
+  voiceField.value = data?.voice_notes ?? '';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn-remove-fallback';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => {
+    row.remove();
+    refreshRelationshipCharacterOptions();
+  });
+
+  row.appendChild(nameField);
+  row.appendChild(genderField);
+  row.appendChild(roleField);
+  row.appendChild(voiceField);
+  row.appendChild(removeBtn);
+  return row;
+}
+
+function createStoryRelationshipRow(data?: StoryRelationship): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'story-rel-row';
+
+  const charASelect = document.createElement('select');
+  charASelect.className = 'select sr-char-a';
+  const charBSelect = document.createElement('select');
+  charBSelect.className = 'select sr-char-b';
+
+  const relationField = document.createElement('input');
+  relationField.className = 'input sr-relation';
+  relationField.type = 'text';
+  relationField.placeholder = t(uiLanguage, 'placeholderRelationSurface');
+  relationField.value = data?.surface_relation ?? '';
+
+  const notesField = document.createElement('input');
+  notesField.className = 'input sr-notes';
+  notesField.type = 'text';
+  notesField.placeholder = t(uiLanguage, 'placeholderRelationNotes');
+  notesField.value = data?.address_notes ?? '';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn-remove-fallback';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => { row.remove(); });
+
+  row.appendChild(charASelect);
+  row.appendChild(charBSelect);
+  row.appendChild(relationField);
+  row.appendChild(notesField);
+  row.appendChild(removeBtn);
+
+  populateCharacterSelect(charASelect, data?.character_a_id);
+  populateCharacterSelect(charBSelect, data?.character_b_id);
+
+  return row;
+}
+
+function createStoryGlossaryRow(data?: StoryGlossaryTerm): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'story-glossary-row';
+
+  const termField = document.createElement('input');
+  termField.className = 'input sg-term';
+  termField.type = 'text';
+  termField.placeholder = t(uiLanguage, 'placeholderGlossaryTerm');
+  termField.value = data?.term ?? '';
+
+  const translationField = document.createElement('input');
+  translationField.className = 'input sg-translation';
+  translationField.type = 'text';
+  translationField.placeholder = t(uiLanguage, 'placeholderGlossaryTranslation');
+  translationField.value = data?.translation ?? '';
+
+  const notesField = document.createElement('input');
+  notesField.className = 'input sg-notes';
+  notesField.type = 'text';
+  notesField.placeholder = t(uiLanguage, 'placeholderGlossaryNotes');
+  notesField.value = data?.notes ?? '';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn-remove-fallback';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => { row.remove(); });
+
+  row.appendChild(termField);
+  row.appendChild(translationField);
+  row.appendChild(notesField);
+  row.appendChild(removeBtn);
+  return row;
+}
+
+function createStoryContinuityNoteRow(data?: StoryContinuityNote): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'story-continuity-note-row';
+
+  const textField = document.createElement('input');
+  textField.className = 'input scn-text';
+  textField.type = 'text';
+  textField.placeholder = t(uiLanguage, 'placeholderContinuityNoteText');
+  textField.value = data?.text ?? '';
+
+  const sourceField = document.createElement('input');
+  sourceField.className = 'input scn-source';
+  sourceField.type = 'text';
+  sourceField.placeholder = t(uiLanguage, 'placeholderContinuityNoteSource');
+  sourceField.value = data?.source_label ?? '';
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn-remove-fallback';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => { row.remove(); });
+
+  row.appendChild(textField);
+  row.appendChild(sourceField);
+  row.appendChild(removeBtn);
+  return row;
+}
+
+function renderStoryCharacters(characters: StoryCharacter[]): void {
+  storyCharactersList.innerHTML = '';
+  for (const c of characters) storyCharactersList.appendChild(createStoryCharacterRow(c));
+}
+
+function renderStoryRelationships(relationships: StoryRelationship[]): void {
+  storyRelationshipsList.innerHTML = '';
+  for (const r of relationships) storyRelationshipsList.appendChild(createStoryRelationshipRow(r));
+}
+
+function renderStoryGlossary(glossary: StoryGlossaryTerm[]): void {
+  storyGlossaryList.innerHTML = '';
+  for (const g of glossary) storyGlossaryList.appendChild(createStoryGlossaryRow(g));
+}
+
+function renderStoryContinuityNotes(notes: StoryContinuityNote[]): void {
+  storyContinuityNotesList.innerHTML = '';
+  for (const n of notes) storyContinuityNotesList.appendChild(createStoryContinuityNoteRow(n));
+}
+
+function addStoryCharacterRow(): void {
+  storyCharactersList.appendChild(createStoryCharacterRow());
+  refreshRelationshipCharacterOptions();
+}
+
+function addStoryRelationshipRow(): void {
+  storyRelationshipsList.appendChild(createStoryRelationshipRow());
+}
+
+function addStoryGlossaryRow(): void {
+  storyGlossaryList.appendChild(createStoryGlossaryRow());
+}
+
+function addStoryContinuityNoteRow(): void {
+  storyContinuityNotesList.appendChild(createStoryContinuityNoteRow());
+}
+
+function collectStoryCharacters(): StoryCharacter[] {
+  const out: StoryCharacter[] = [];
+  for (const row of Array.from(storyCharactersList.querySelectorAll<HTMLDivElement>('.story-char-row'))) {
+    const name = row.querySelector<HTMLInputElement>('.sc-name')?.value.trim() ?? '';
+    if (!name) continue;
+    const gender = row.querySelector<HTMLSelectElement>('.sc-gender')?.value || 'unknown';
+    const role = row.querySelector<HTMLInputElement>('.sc-role')?.value.trim() || undefined;
+    const voiceNotes = row.querySelector<HTMLInputElement>('.sc-voice')?.value.trim() || undefined;
+    out.push({ id: row.dataset.charId ?? crypto.randomUUID(), name, gender, role, voice_notes: voiceNotes });
+  }
+  return out;
+}
+
+function collectStoryRelationships(): StoryRelationship[] {
+  const out: StoryRelationship[] = [];
+  for (const row of Array.from(storyRelationshipsList.querySelectorAll<HTMLDivElement>('.story-rel-row'))) {
+    const characterAId = row.querySelector<HTMLSelectElement>('.sr-char-a')?.value ?? '';
+    const characterBId = row.querySelector<HTMLSelectElement>('.sr-char-b')?.value ?? '';
+    const surfaceRelation = row.querySelector<HTMLInputElement>('.sr-relation')?.value.trim() ?? '';
+    if (!characterAId || !characterBId || !surfaceRelation) continue;
+    const addressNotes = row.querySelector<HTMLInputElement>('.sr-notes')?.value.trim() || undefined;
+    out.push({
+      id: crypto.randomUUID(), character_a_id: characterAId, character_b_id: characterBId,
+      surface_relation: surfaceRelation, address_notes: addressNotes,
+    });
+  }
+  return out;
+}
+
+function collectStoryGlossary(): StoryGlossaryTerm[] {
+  const out: StoryGlossaryTerm[] = [];
+  for (const row of Array.from(storyGlossaryList.querySelectorAll<HTMLDivElement>('.story-glossary-row'))) {
+    const term = row.querySelector<HTMLInputElement>('.sg-term')?.value.trim() ?? '';
+    const translation = row.querySelector<HTMLInputElement>('.sg-translation')?.value.trim() ?? '';
+    if (!term || !translation) continue;
+    const notes = row.querySelector<HTMLInputElement>('.sg-notes')?.value.trim() || undefined;
+    out.push({ id: crypto.randomUUID(), term, translation, notes });
+  }
+  return out;
+}
+
+function collectStoryContinuityNotes(): StoryContinuityNote[] {
+  const out: StoryContinuityNote[] = [];
+  for (const row of Array.from(storyContinuityNotesList.querySelectorAll<HTMLDivElement>('.story-continuity-note-row'))) {
+    const text = row.querySelector<HTMLInputElement>('.scn-text')?.value.trim() ?? '';
+    if (!text) continue;
+    const sourceLabel = row.querySelector<HTMLInputElement>('.scn-source')?.value.trim() || undefined;
+    out.push({ id: crypto.randomUUID(), text, source_label: sourceLabel });
+  }
+  return out;
 }
 
 void init();

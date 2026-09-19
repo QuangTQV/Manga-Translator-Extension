@@ -63,6 +63,20 @@ class Settings(BaseSettings):
     # like any other production secret (set once, back it up).
     secret_key: str = ""
 
+    # "Live AI" debug log (core/live_ai_log.py) — off by default. When on,
+    # every LLM call this backend makes (any provider, across /translate,
+    # /translate/batch, /suggest-instructions, and /test-key) is appended
+    # as one JSON line to live_ai_log_path: prompt text, response text,
+    # latency, and errors. Image data is deliberately excluded (just a
+    # count + approximate KB) — manga page images are large and unreadable
+    # in a log; this is meant as a lightweight prompt/response trace, not a
+    # full request replay dump. Independent of require_auth/hosted mode —
+    # useful for a self-hosted operator debugging their own setup too, not
+    # just a centrally-hosted deployment. See GET /admin/live-ai-log
+    # (auth.py:require_live_ai_log_access) to view recent entries.
+    live_ai_log_enabled: bool = False
+    live_ai_log_path: Path = backend_dir / "logs" / "live_ai.jsonl"
+
     # CORS
     cors_origins: list[str] = [
         "chrome-extension://*",
