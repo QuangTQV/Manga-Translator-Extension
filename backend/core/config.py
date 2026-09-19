@@ -202,6 +202,14 @@ class OutsideTextConfig:
     text_box_proximity_ratio: float = 0.02  # 2% of image dimension
     flux_guidance_scale: float = 2.5
     flux_prompt: str = "Remove all text."
+    # When set, Flux inference runs on a remote worker (backend/flux_worker.py)
+    # instead of loading weights locally — e.g. a Kaggle notebook GPU tunneled
+    # out via cloudflared. See FluxKleinInpainter.load_models()/inpaint_mask()
+    # in core/image/inpainting.py. No SSRF/private-network guard here,
+    # deliberately consistent with this repo's other unguarded Base URL
+    # fields (OpenAI-Compatible, Azure OpenAI).
+    flux_remote_base_url: Optional[str] = None
+    flux_remote_timeout_seconds: float = 120.0
 
 
 @dataclass
