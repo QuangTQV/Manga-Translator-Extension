@@ -163,6 +163,16 @@ export interface TranslateConfig {
   sendFullPageContext: boolean;
   imageDetail: string;
   outsideTextEnabled: boolean;
+  // Which algorithm removes outside-bubble text once outsideTextEnabled is
+  // on: "auto" (lightweight OpenCV, default), "flux_klein_4b" (local GPU),
+  // "flux_klein_4b_remote" (POSTs to fluxRemoteBaseUrl — see
+  // backend/flux_worker.py — instead of loading Flux on this machine), or
+  // "none". Unset behaves exactly like "auto" (today's only behavior).
+  inpaintingMethod?: string;
+  // Base URL of a backend/flux_worker.py instance (e.g. a Kaggle notebook
+  // GPU tunneled out via cloudflared) — only sent/used when
+  // inpaintingMethod is "flux_klein_4b_remote".
+  fluxRemoteBaseUrl?: string;
   preTranslate: boolean; // eagerly translate pages as they load, not just near viewport (Auto-translate only)
   previousContextEnabled: boolean; // send prior pages' OCR text for pronoun/name consistency (costs latency)
 }
@@ -259,6 +269,8 @@ export interface TranslateRequest {
   send_full_page_context: boolean;
   image_detail: string;
   outside_text_enabled: boolean;
+  inpainting_method?: string;
+  flux_remote_base_url?: string;
   previous_context_texts?: string[][]; // prior pages' OCR transcripts, oldest-to-newest, for cross-page consistency
   story_id?: string; // id of a logged-in-account Story DB (see popup's Story DB tab) to inject as structured character/relationship/glossary context; ignored when not logged in
 }

@@ -183,6 +183,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'TEST_FLUX_REMOTE') {
+      const { url } = message as { type: string; url: string };
+      sendResponse(await testFluxRemoteConnection(url));
+      return;
+    }
+
     if (message.type === 'ACCOUNT_REGISTER') {
       const { email } = message as { type: string; email: string };
       sendResponse(await accountRegister(email));
@@ -466,6 +472,31 @@ async function fetchTestApiKey(body: TestApiKeyBody): Promise<TestApiKeyResult> 
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: `Could not reach backend: ${msg}` };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flux remote worker (backend/flux_worker.py) — a user-run server (e.g. a
+// Kaggle notebook GPU tunneled out via cloudflared) that FluxKleinInpainter
+// calls instead of loading Flux locally. Checked directly from here (not
+// proxied through the main backend) since a background service worker can
+// fetch cross-origin without CORS issues, same reason it already talks to
+// LLM providers/backend directly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function testFluxRemoteConnection(url: string): Promise<{ ok: boolean; error?: string }> {
+  const trimmed = url.trim();
+  if (!trimmed) return { ok: false, error: 'No URL provided' };
+  const endpoint = `${trimmed.replace(/\/$/, '')}/health`;
+  try {
+    const res = await fetch(endpoint, { method: 'GET' });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const body = await res.json() as { status?: string };
+    if (body.status !== 'ok') return { ok: false, error: 'Unexpected response from worker' };
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Could not reach Flux worker: ${msg}` };
   }
 }
 

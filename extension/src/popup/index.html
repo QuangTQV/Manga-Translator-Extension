@@ -290,6 +290,23 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="field" id="inpainting-method-field" style="display:none">
+          <label class="label" data-i18n="labelInpaintingMethod">Inpainting quality</label>
+          <select id="f-inpainting-method" class="select">
+            <option value="auto" data-i18n="inpaintingMethodAuto">Auto (fast, OpenCV)</option>
+            <option value="flux_klein_4b" data-i18n="inpaintingMethodFluxLocal">Flux Klein 4B (local GPU)</option>
+            <option value="flux_klein_4b_remote" data-i18n="inpaintingMethodFluxRemote">Flux Klein 4B (remote)</option>
+            <option value="none" data-i18n="inpaintingMethodNone">None</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintInpaintingMethod">Auto is fast and needs nothing extra. Flux gives cleaner results but needs a GPU — locally (see setup.bat) or on a remote worker you run yourself (e.g. a free Kaggle GPU — see docs/HUONG-DAN-CHAY.md).</div>
+          <div id="flux-remote-url-row" style="display:none;margin-top:8px">
+            <input id="f-flux-remote-url" class="input" type="url" data-i18n-placeholder="placeholderFluxRemoteUrl" placeholder="https://xxxx.trycloudflare.com" autocomplete="off" />
+            <div class="model-picker-header" style="margin-top:6px">
+              <button id="btn-test-flux-remote" class="btn-fetch-models" type="button" data-i18n="btnTestFluxRemote">Test Connection</button>
+              <span id="flux-remote-test-status" class="bk-test-status"></span>
+            </div>
+          </div>
+        </div>
         <div class="toggle-row">
           <div class="toggle-copy">
             <div class="toggle-title" data-i18n="labelPreTranslate">Pre-translate</div>

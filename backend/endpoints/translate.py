@@ -257,6 +257,8 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
         send_full_page_context=req.send_full_page_context,
         image_detail=req.image_detail,
         outside_text_enabled=req.outside_text_enabled,
+        inpainting_method=req.inpainting_method or "auto",
+        flux_remote_base_url=req.flux_remote_base_url,
         models_dir=models_dir,
         fonts_base_dir=fonts_dir,
     )
@@ -355,6 +357,8 @@ def _translate_single_item(
             send_full_page_context=req.send_full_page_context,
             image_detail=req.image_detail,
             outside_text_enabled=req.outside_text_enabled,
+            inpainting_method=req.inpainting_method or "auto",
+            flux_remote_base_url=req.flux_remote_base_url,
             models_dir=models_dir,
             fonts_base_dir=fonts_dir,
         )
