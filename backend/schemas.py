@@ -63,6 +63,8 @@ class TranslateOptions(BaseModel):
     send_full_page_context: bool = True
     image_detail: str = "auto"
     outside_text_enabled: bool = False
+    inpainting_method: Optional[str] = None  # "auto" (default) | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"
+    flux_remote_base_url: Optional[str] = None  # run Flux on a remote worker (backend/flux_worker.py) instead of loading it locally; only used when inpainting_method is a flux_* variant
     previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
     context_memory_enabled: bool = False  # ask the model for a MEMORY NOTE summary each page
     context_memory: Optional[str] = None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted

@@ -91,7 +91,7 @@ Mở một trang truyện → bấm icon extension → chọn ngôn ngữ Source
 
 Tab **Translate** còn có các tuỳ chọn:
 
-- **Outside text**: nhận diện và dịch cả SFX/lời dẫn/caption nằm ngoài bong bóng thoại.
+- **Outside text**: nhận diện và dịch cả SFX/lời dẫn/caption nằm ngoài bong bóng thoại. Khi bật, hiện thêm ô **Inpainting quality** để chọn thuật toán xoá chữ nền: `Auto` (nhanh, OpenCV, mặc định) / `Flux Klein 4B (local GPU)` / `Flux Klein 4B (remote)` (chạy trên GPU máy khác — xem mục 8 bên dưới) / `None`.
 - **Pre-translate** (mặc định tắt): dịch trang ngay khi vừa tải xong thay vì đợi bạn cuộn tới gần — hữu ích khi hay bị chậm lúc mới sang chương mới. Giới hạn cứng tối đa 15 trang dịch cùng lúc để tránh tốn quá nhiều lượt gọi API.
 - **Previous-page context** (mặc định tắt): gửi kèm chữ đã dịch ở vài trang trước để giữ tên nhân vật/xưng hô nhất quán qua các trang — đổi lại tốn thêm token và chậm hơn một chút.
 - **Context Memory** (mặc định tắt): model tự viết 1 câu tóm tắt mỗi trang và dùng lại ở các trang sau trong cùng truyện để nhân vật/sự kiện nhất quán — rẻ hơn Previous-page context vì không gửi kèm ảnh/toàn bộ chữ trang trước, chỉ vài câu tóm tắt ngắn.
@@ -102,6 +102,61 @@ Tab **LLM Config** còn có:
 - **Image Detail**: `Auto` để provider tự quyết, `Low` nhanh/rẻ hơn nhưng dễ bỏ sót chữ nhỏ, `High` chính xác nhất nhưng chậm/tốn nhất.
 - **Full Page Context** (mặc định bật): gửi kèm cả ảnh trang, không chỉ từng bong bóng cắt riêng — giúp model thấy được tranh vẽ/quan hệ nhân vật để dịch đúng ngữ cảnh hơn (vd chọn đúng xưng hô), đổi lại tốn thêm token mỗi lần dịch.
 - **General LLM Instructions** (tuỳ chọn): chỉ dẫn chung áp dụng cho *mọi* truyện, không riêng truyện đang dịch — vd quy tắc văn phong/hành vi cố định bạn luôn muốn. Khác với Story Notes (riêng theo từng truyện, ở tab Translate).
+
+## 8. (Tuỳ chọn) Chạy Flux từ xa trên GPU free của Kaggle
+
+Flux Klein 4B cho kết quả xoá chữ nền sạch hơn hẳn so với `Auto` (OpenCV), nhưng cần GPU khá mạnh. Nếu máy bạn không có GPU tốt, có thể chạy Flux trên GPU free của Kaggle rồi mở tunnel để backend trên máy bạn gọi sang — không cần cài Flux hay tải model gì trên máy chính.
+
+Đây là cùng một ý tưởng "chạy model AI nặng trên GPU free của Kaggle, tunnel ra ngoài bằng cloudflared" đã dùng cho ComfyUI ở dự án Manga-Creator, áp dụng cho worker `backend/flux_worker.py` của dự án này.
+
+1. Vào [kaggle.com](https://kaggle.com) → Code → New Notebook → Settings bên phải → Accelerator → chọn **GPU T4 x2** (hoặc P100). Dùng **Interactive session** (không dùng "Save & Run All / Commit" — chế độ đó tự tắt máy sau khi chạy xong, không giữ server sống).
+
+2. Trong 1 cell, clone repo và cài backend (giống hệt bước 2 ở trên, nhưng chạy trên Kaggle):
+
+```bash
+!git clone https://github.com/QuangTQV/Manga-Translator-Extension.git
+%cd Manga-Translator-Extension/backend
+!pip install -e . -q
+```
+
+3. Chạy worker (cell riêng — cell này sẽ chạy mãi, giữ server sống):
+
+```bash
+!python flux_worker.py --port 8189 --variant 4b
+```
+
+Lần đầu chạy sẽ tự tải model Flux Klein 4B, có thể mất vài phút.
+
+4. Mở 1 cell/notebook khác (song song, không phải cùng cell đang chạy server ở bước 3) để mở tunnel bằng `cloudflared` (không cần tài khoản):
+
+```python
+import subprocess, time
+
+subprocess.run(["wget", "-q", "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64", "-O", "cloudflared"])
+subprocess.run(["chmod", "+x", "cloudflared"])
+
+tunnel = subprocess.Popen(
+    ["./cloudflared", "tunnel", "--url", "http://localhost:8189"],
+    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+)
+for _ in range(60):
+    line = tunnel.stdout.readline()
+    print(line, end="")
+    if "trycloudflare.com" in line:
+        break
+    time.sleep(0.5)
+```
+
+Copy URL dạng `https://xxxx-xx-xx-xxx-xx.trycloudflare.com` in ra.
+
+5. Trong extension: tab **Translate** → bật **Outside text** → **Inpainting quality** chọn `Flux Klein 4B (remote)` → dán URL cloudflared vừa lấy vào ô **Base URL** → bấm **Test Connection** (phải thấy dấu ✓) → **Save**.
+
+Lưu ý:
+
+- Kaggle interactive session tự tắt sau một khoảng không hoạt động, và có giới hạn giờ GPU/tuần theo tài khoản — mỗi lần notebook restart, URL cloudflared **đổi mới hoàn toàn**, phải dán lại vào popup.
+- Nếu worker không phản hồi (session hết hạn, tunnel chết), MangaTranslator sẽ tự bỏ qua và **giữ nguyên chữ gốc ở vùng đó** thay vì báo lỗi cả trang dịch — không cần lo request bị treo.
+- Chỉ phù hợp dùng cá nhân/test; Kaggle không cam kết SLA cho server chạy liên tục.
+- Có thể chạy `flux_worker.py` ngay trên máy bạn (không qua Kaggle) để test trước khi lên Kaggle thật — chỉ cần trỏ URL remote về `http://127.0.0.1:8189`.
 
 ## Xử lý sự cố thường gặp
 

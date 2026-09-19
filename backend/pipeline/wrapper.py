@@ -369,6 +369,8 @@ def _build_config(
     api_key_weight: float | None = None,
     backup_api_key_weights: list[float] | None = None,
     enable_web_search: bool = False,
+    inpainting_method: str = "auto",
+    flux_remote_base_url: str | None = None,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -521,7 +523,8 @@ def _build_config(
 
     outside_text = OutsideTextConfig(
         enabled=outside_text_enabled,
-        inpainting_method="auto",
+        inpainting_method=inpainting_method or "auto",
+        flux_remote_base_url=flux_remote_base_url or None,
         osb_confidence=0.45,
         osb_outline_width=0.0,
         osb_text_background_enabled=False,

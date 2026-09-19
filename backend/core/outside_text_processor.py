@@ -432,6 +432,8 @@ def process_outside_text(
                     luminance_correction=config.outside_text.flux_luminance_correction,
                     upscale_small_crops=config.outside_text.flux_upscale_small_crops,
                     verbose=verbose,
+                    remote_base_url=config.outside_text.flux_remote_base_url,
+                    remote_timeout_seconds=config.outside_text.flux_remote_timeout_seconds,
                 )
                 log_message("Using Flux.2 Klein 9B for inpainting", verbose=verbose)
             except Exception as e:
@@ -451,6 +453,8 @@ def process_outside_text(
                     luminance_correction=config.outside_text.flux_luminance_correction,
                     upscale_small_crops=config.outside_text.flux_upscale_small_crops,
                     verbose=verbose,
+                    remote_base_url=config.outside_text.flux_remote_base_url,
+                    remote_timeout_seconds=config.outside_text.flux_remote_timeout_seconds,
                 )
                 log_message("Using Flux.2 Klein 4B for inpainting", verbose=verbose)
             except Exception as e:

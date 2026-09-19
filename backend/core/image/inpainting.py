@@ -924,6 +924,8 @@ class FluxKleinInpainter:
         luminance_correction: bool = True,
         upscale_small_crops: bool = True,
         verbose: bool = False,
+        remote_base_url: Optional[str] = None,
+        remote_timeout_seconds: float = 120.0,
     ):
         """Initialize the Flux Klein Inpainter.
 
@@ -936,6 +938,11 @@ class FluxKleinInpainter:
             luminance_correction: If True, match patch luminance to surrounding context.
             upscale_small_crops: If True, scale small crops to ~1MP before inference.
             verbose: Whether to print verbose logging.
+            remote_base_url: When set, inference runs on a remote worker
+                (see backend/flux_worker.py) instead of loading weights
+                locally — load_models() becomes a no-op and inpaint_mask()
+                POSTs each crop to f"{remote_base_url}/inpaint".
+            remote_timeout_seconds: Per-request timeout for the remote call.
         """
         self.variant = variant.lower()
         if self.variant not in ("9b", "4b"):
@@ -946,6 +953,8 @@ class FluxKleinInpainter:
         self.luminance_correction = luminance_correction
         self.upscale_small_crops = upscale_small_crops
         self.verbose = verbose
+        self.remote_base_url = remote_base_url.rstrip("/") if remote_base_url else None
+        self.remote_timeout_seconds = remote_timeout_seconds
 
         self.DEVICE = device if device is not None else get_best_device()
         self.DTYPE = get_best_dtype(self.DEVICE)
@@ -957,7 +966,11 @@ class FluxKleinInpainter:
         self._pooled_prompt_embeds_cpu = None
 
     def load_models(self):
-        """Load Flux Klein models via model manager."""
+        """Load Flux Klein models via model manager. No-op when
+        remote_base_url is set — inference happens on the remote worker
+        instead, so no weights are ever downloaded/loaded locally."""
+        if self.remote_base_url:
+            return
         if self.pipeline is not None:
             return
 
@@ -979,6 +992,95 @@ class FluxKleinInpainter:
         self._prompt_embeds_cpu = None
         self._pooled_prompt_embeds_cpu = None
         self.manager.unload_flux_klein_models()
+
+    def _run_local_inference(
+        self,
+        inference_image: Image.Image,
+        inference_w: int,
+        inference_h: int,
+        seed: int,
+        verbose: bool = False,
+    ) -> Optional[Image.Image]:
+        """Loads the pipeline (if needed) and runs one denoising pass on an
+        already-cropped/resized region. Factored out of inpaint_mask() so
+        backend/flux_worker.py (the remote-GPU worker _run_remote_inference
+        POSTs to) can call the exact same inference path instead of
+        re-deriving Klein's prompt-embedding/generator logic itself.
+        Returns None if the pipeline failed to load."""
+        self.load_models()
+
+        if self.pipeline is None:
+            log_message(
+                f"Warning: Flux Klein {self.variant.upper()} pipeline unavailable.",
+                always_print=True,
+            )
+            return None
+
+        log_message("  - Running inference...", verbose=verbose)
+
+        with self.manager.flux_inference_lock:
+            with torch.inference_mode():
+                gen = torch.Generator(device=self.DEVICE).manual_seed(seed)
+                prompt_device = _pipeline_execution_device(self.pipeline, self.DEVICE)
+                prompt_embeds, pooled_prompt_embeds = self._get_prompt_embeddings(
+                    prompt_device, verbose=verbose or self.verbose
+                )
+                out = self.pipeline(
+                    **_flux_prompt_kwargs(
+                        prompt_embeds,
+                        pooled_prompt_embeds,
+                        include_pooled=False,
+                    ),
+                    image=inference_image,
+                    height=inference_h,
+                    width=inference_w,
+                    guidance_scale=self.KLEIN_GUIDANCE_SCALE,
+                    num_inference_steps=self.num_inference_steps,
+                    generator=gen,
+                )
+                return out.images[0]
+
+    def _run_remote_inference(
+        self, inference_image: Image.Image, inference_w: int, inference_h: int, seed: int
+    ) -> Optional[Image.Image]:
+        """POSTs one already-cropped/resized region to a remote Flux worker
+        (backend/flux_worker.py — e.g. a Kaggle notebook GPU tunneled out
+        via cloudflared) instead of running inference locally. Returns None
+        on any failure (unreachable, timeout, non-200 — exactly what a
+        restarted Kaggle session or rotated tunnel URL produces) so the
+        caller can gracefully leave that one region untouched instead of
+        failing the whole translate request."""
+        import base64
+        import io
+
+        import requests
+
+        buf = io.BytesIO()
+        inference_image.save(buf, format="PNG")
+        payload = {
+            "image_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
+            "width": inference_w,
+            "height": inference_h,
+            "seed": seed,
+            "num_inference_steps": self.num_inference_steps,
+            "variant": self.variant,
+        }
+        try:
+            resp = requests.post(
+                f"{self.remote_base_url}/inpaint",
+                json=payload,
+                timeout=self.remote_timeout_seconds,
+            )
+            resp.raise_for_status()
+            result_b64 = resp.json()["image_base64"]
+            return Image.open(io.BytesIO(base64.b64decode(result_b64))).convert("RGB")
+        except Exception as e:
+            log_message(
+                f"Remote Flux worker at {self.remote_base_url} failed ({e}) — "
+                "leaving this region untouched",
+                always_print=True,
+            )
+            return None
 
     def _get_prompt_embeddings(self, device: torch.device, verbose: bool = False):
         if self._prompt_embeds_cpu is None:
@@ -1378,40 +1480,22 @@ class FluxKleinInpainter:
             if inference_image.mode == "RGBA":
                 inference_image = inference_image.convert("RGB")
 
-            self.load_models()
-
-            if self.pipeline is None:
-                log_message(
-                    f"Warning: Flux Klein {self.variant.upper()} pipeline unavailable.",
-                    always_print=True,
+            if self.remote_base_url:
+                generated_patch_pil = self._run_remote_inference(
+                    inference_image, inference_w, inference_h, seed
                 )
-                return image_pil
-
-            log_message("  - Running inference...", verbose=verbose)
-
-            with self.manager.flux_inference_lock:
-                with torch.inference_mode():
-                    gen = torch.Generator(device=self.DEVICE).manual_seed(seed)
-                    prompt_device = _pipeline_execution_device(
-                        self.pipeline, self.DEVICE
-                    )
-                    prompt_embeds, pooled_prompt_embeds = self._get_prompt_embeddings(
-                        prompt_device, verbose=verbose or self.verbose
-                    )
-                    out = self.pipeline(
-                        **_flux_prompt_kwargs(
-                            prompt_embeds,
-                            pooled_prompt_embeds,
-                            include_pooled=False,
-                        ),
-                        image=inference_image,
-                        height=inference_h,
-                        width=inference_w,
-                        guidance_scale=self.KLEIN_GUIDANCE_SCALE,
-                        num_inference_steps=self.num_inference_steps,
-                        generator=gen,
-                    )
-                    generated_patch_pil = out.images[0]
+                if generated_patch_pil is None:
+                    # Remote worker unreachable/timed out/erroring — same
+                    # graceful-skip shape as "pipeline unavailable" below:
+                    # leave this one region's original text in place rather
+                    # than failing the whole translate request.
+                    return image_pil
+            else:
+                generated_patch_pil = self._run_local_inference(
+                    inference_image, inference_w, inference_h, seed, verbose=verbose
+                )
+                if generated_patch_pil is None:
+                    return image_pil
 
             if (inference_w, inference_h) != (width, height):
                 patch_pil = generated_patch_pil.resize(
