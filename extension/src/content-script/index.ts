@@ -1,5 +1,6 @@
 import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
+import { withEffectiveConfig } from '../shared/economy.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -1306,7 +1307,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     const body = buildTranslateRequest(
       imgData,
       settings,
-      settings.config.previousContextEnabled ?? false ? orderedPreviousContextTexts(img) : undefined,
+      withEffectiveConfig(settings).config.previousContextEnabled ?? false ? orderedPreviousContextTexts(img) : undefined,
       contextMemoryText,
     );
 
@@ -3974,10 +3975,11 @@ function buildProviderRotation(settings: AppSettings): {
 
 function buildTranslateRequest(
   image: string,
-  settings: AppSettings,
+  rawSettings: AppSettings,
   previousContextTexts?: string[][],
   contextMemoryText?: string,
 ): TranslateRequest {
+  const settings = withEffectiveConfig(rawSettings);
   const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
   const rotation = buildProviderRotation(settings);
   return {
@@ -4003,6 +4005,7 @@ function buildTranslateRequest(
     supersampling_factor: settings.config.supersamplingFactor,
     send_full_page_context: settings.config.sendFullPageContext,
     image_detail: settings.config.imageDetail,
+    economy_mode: settings.config.economyMode ? true : undefined,
     outside_text_enabled: settings.config.outsideTextEnabled ?? false,
     // The popup's "flux_klein_*_remote" options are a UI-only convenience
     // (one dropdown covers both "which model" and "where it runs") — the

@@ -175,6 +175,7 @@ class TranslateOptions(BaseModel):
     supersampling_factor: int = 4
     send_full_page_context: bool = True
     image_detail: str = "auto"
+    economy_mode: bool = False  # cut LLM spend: downscale the full-page context image and lower its media resolution (the client also turns off the costlier context options)
     outside_text_enabled: bool = False
     inpainting_method: Optional[str] = None  # "auto" (default) | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"
     flux_remote_token: Optional[str] = None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one

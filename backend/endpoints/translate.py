@@ -289,6 +289,7 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
         inpainting_method=req.inpainting_method or "auto",
         flux_remote_base_url=req.flux_remote_base_url,
         flux_remote_token=req.flux_remote_token,
+        economy_mode=req.economy_mode,
         models_dir=models_dir,
         fonts_base_dir=fonts_dir,
     )
@@ -392,6 +393,7 @@ def _translate_single_item(
             inpainting_method=req.inpainting_method or "auto",
             flux_remote_base_url=req.flux_remote_base_url,
             flux_remote_token=req.flux_remote_token,
+            economy_mode=req.economy_mode,
             models_dir=models_dir,
             fonts_base_dir=fonts_dir,
         )

@@ -107,6 +107,7 @@ const storyGraphSvg = document.getElementById('story-graph') as unknown as SVGSV
 const storyGraphInfo = qs<HTMLDivElement>('story-graph-info');
 const storyGraphConnectBtn = qs<HTMLButtonElement>('btn-graph-connect');
 const storyGraphResetBtn = qs<HTMLButtonElement>('btn-graph-reset');
+const economyModeToggle = qs<HTMLInputElement>('f-economy-mode');
 const storyRefImagesToggle = qs<HTMLInputElement>('f-story-ref-images');
 const storySaveBtn = qs<HTMLButtonElement>('btn-story-save');
 const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
@@ -282,6 +283,7 @@ async function loadAndBind(): Promise<void> {
   renderLanguageSelects();
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   storyRefImagesToggle.checked = settings.config.useStoryReferenceImages ?? false;
+  economyModeToggle.checked = settings.config.economyMode ?? false;
   inpaintingMethodSelect.value = settings.config.inpaintingMethod || 'auto';
   fluxRemoteUrlInput.value = settings.config.fluxRemoteBaseUrl ?? '';
   fluxRemoteTokenInput.value = settings.config.fluxRemoteToken ?? '';
@@ -341,7 +343,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -995,6 +997,7 @@ function collectAllSettings(): AppSettings {
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       useStoryReferenceImages: storyRefImagesToggle.checked,
+      economyMode: economyModeToggle.checked,
       inpaintingMethod: inpaintingMethodSelect.value || 'auto',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
       fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,

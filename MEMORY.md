@@ -66,3 +66,8 @@ One test gotcha worth remembering for this popup: the on/off toggles here (`.tog
 - **Bug found & fixed on the way:** the LLM translation cache key ignored the Story DB context entirely (editing a glossary kept serving the old cached translation when temperature was deterministic). It now hashes it.
 - **Gotchas:** Playwright file choosers work with the detached `<input type=file>` the popup creates; the test PNG must be a *valid* PNG (`createImageBitmap` rejects a made-up one).
 - **Not verified:** a real LLM actually using the reference images (only that they are sent and described in the prompt).
+
+
+## Feature: Economy mode (API-cost saver) — IMPLEMENTED
+
+Popup Translate-tab toggle (`TranslateConfig.economyMode`). Non-destructive by design: `extension/src/shared/economy.ts:effectiveConfig()` returns a *copy* with `imageDetail:'low'`, full-page and previous-page context off and Story DB reference images off, applied at request time only (content-script `buildTranslateRequest`, background request builder) — the user's stored values are never rewritten, so turning it off restores them. Context memory is left as-is (it's the cheap consistency option). Request field `economy_mode` also makes the backend (`pipeline/wrapper.py:_build_config`) shrink the full-page context image (768px vs 1536, media resolution medium vs high); bubble crops stay high-res. Playwright `tests/economy-mode.spec.ts` checks both the request and that stored settings are untouched.

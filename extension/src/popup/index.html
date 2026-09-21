@@ -325,6 +325,16 @@
         </div>
         <div class="toggle-row">
           <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelEconomyMode">Economy mode</div>
+            <div class="toggle-hint" data-i18n="hintEconomyMode">Cut API cost: sends low-detail images, skips the full-page and previous-page context and Story DB reference images, and shrinks the context image it still sends. Slightly less context-aware. Your own settings are kept and come back when you turn this off.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-economy-mode" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-copy">
             <div class="toggle-title" data-i18n="labelPreTranslate">Pre-translate</div>
             <div class="toggle-hint" data-i18n="hintPreTranslate">Translate pages as soon as they load instead of waiting until you scroll near them (capped, uses more API calls)</div>
           </div>

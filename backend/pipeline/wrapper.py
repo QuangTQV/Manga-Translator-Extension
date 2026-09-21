@@ -417,6 +417,7 @@ def _build_config(
     inpainting_method: str = "auto",
     flux_remote_base_url: str | None = None,
     flux_remote_token: str | None = None,
+    economy_mode: bool = False,
 ) -> MangaTranslatorConfig:
     """Build a MangaTranslatorConfig from request parameters."""
 
@@ -522,10 +523,12 @@ def _build_config(
         whiteout_conjoined_bubbles=True,
         upscale_method="lanczos",
         bubble_min_side_pixels=96,
-        context_image_max_side_pixels=1536,
+        # Economy mode shrinks only the full-page context image — bubble crops
+        # are small already and are what actually carries the text to read.
+        context_image_max_side_pixels=768 if economy_mode else 1536,
         media_resolution="high",
         media_resolution_bubbles="high",
-        media_resolution_context="high",
+        media_resolution_context="medium" if economy_mode else "high",
         image_detail=image_detail,
         enable_web_search=enable_web_search,
         enable_code_execution=False,
