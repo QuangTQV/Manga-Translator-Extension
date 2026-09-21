@@ -16,6 +16,7 @@ from config import settings
 from core.db import DatabaseNotConfiguredError
 from endpoints.account import router as account_router
 from endpoints.admin import router as admin_router
+from endpoints.regions import router as regions_router
 from endpoints.stories import router as stories_router
 from endpoints.translate import router as translate_router
 
@@ -76,6 +77,7 @@ app.include_router(translate_router)
 app.include_router(account_router)
 app.include_router(admin_router)
 app.include_router(stories_router)
+app.include_router(regions_router)
 
 
 @app.get("/")

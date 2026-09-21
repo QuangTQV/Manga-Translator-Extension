@@ -37,6 +37,7 @@ const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
 const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
 const contextMemorySequentialToggle = qs<HTMLInputElement>('f-context-memory-sequential');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
+const regionBtn = qs<HTMLButtonElement>('btn-region');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
 const saveConfigBtn = qs<HTMLButtonElement>('btn-save-config');
@@ -393,6 +394,23 @@ function bind(): void {
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err), 'err');
       scanBtn.disabled = false;
+    }
+  });
+
+  // Manual region tool: box one spot on the page, read/type/AI-translate its text.
+  regionBtn.addEventListener('click', async () => {
+    regionBtn.disabled = true;
+    try {
+      await autoSave();
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) throw new Error(t(uiLanguage, 'errorNoActiveTab'));
+      const injected = await ensureContentScript(tab.id);
+      if (!injected) throw new Error(t(uiLanguage, 'errorInjectContent'));
+      await chrome.tabs.sendMessage(tab.id, { type: 'START_REGION_SELECT' });
+      window.close();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err), 'err');
+      regionBtn.disabled = false;
     }
   });
 

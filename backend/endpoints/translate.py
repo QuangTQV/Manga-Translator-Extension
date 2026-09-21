@@ -223,16 +223,9 @@ def _build_bubble_info(bubbles: list[dict]) -> list:
     return results
 
 
-@router.post("/translate", response_model=TranslateResponse)
-async def translate_single(req: TranslateRequest, account=Depends(verify_token)) -> TranslateResponse:
-    """Translate a single image.
-
-    Accepts a base64-encoded image and returns the translated image
-    plus bubble metadata.
-    """
-    _apply_shared_llm_config(req, account)
-    _resolve_story_context(req, account)
-    _reject_oversized_image(req.image)
+def _config_for_request(req):
+    """Flat TranslateOptions fields -> MangaTranslatorConfig, shared by
+    /translate and the manual-region endpoints (endpoints/regions.py)."""
     models_dir = settings.models_dir
     fonts_dir = settings.fonts_base_dir
 
@@ -293,6 +286,20 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
         models_dir=models_dir,
         fonts_base_dir=fonts_dir,
     )
+    return config
+
+
+@router.post("/translate", response_model=TranslateResponse)
+async def translate_single(req: TranslateRequest, account=Depends(verify_token)) -> TranslateResponse:
+    """Translate a single image.
+
+    Accepts a base64-encoded image and returns the translated image
+    plus bubble metadata.
+    """
+    _apply_shared_llm_config(req, account)
+    _resolve_story_context(req, account)
+    _reject_oversized_image(req.image)
+    config = _config_for_request(req)
 
     start = time.time()
     try:

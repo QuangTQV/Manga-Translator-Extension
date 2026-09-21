@@ -1,6 +1,7 @@
 import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
 import { withEffectiveConfig } from '../shared/economy.js';
+import { initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startRegionSelect } from './region-tool.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -45,6 +46,21 @@ const EN_MESSAGES = {
   noResult: 'No result',
   bubbles: '{count} bubbles - {time}s',
   doneWithTime: 'Done - {time}s',
+  regionPickHint: 'Drag over the text you want to change · Esc to cancel',
+  regionTooSmall: 'That area is too small.',
+  regionNoImage: 'Could not find a page image under that selection.',
+  regionTitle: 'Text area',
+  regionOriginalLabel: 'Original text',
+  regionTranslationLabel: 'Translation',
+  regionTranslateAi: 'Translate with AI',
+  regionApply: 'Apply',
+  regionCancel: 'Cancel',
+  regionDelete: 'Delete',
+  regionNeedText: 'Enter or read some text first.',
+  regionTranslating: 'Translating…',
+  regionApplying: 'Applying…',
+  regionReading: 'Reading text…',
+  regionOcrFailed: 'Could not read any text — type it in.',
   networkError: 'Network error',
   fluxRemoteUnreachable: 'Flux remote worker is unreachable — outside-bubble text was left as-is on this page. Check that your Kaggle session/tunnel is still running and the URL is current.',
   fluxRemoteUnauthorized: 'Flux remote worker rejected the token — outside-bubble text was left as-is. Check the Token field in the popup.',
@@ -114,6 +130,21 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     noResult: 'Khong co ket qua',
     bubbles: '{count} bubble - {time}s',
     doneWithTime: 'Xong - {time}s',
+    regionPickHint: 'Keo chon vung chu can sua · Esc de huy',
+    regionTooSmall: 'Vung chon qua nho.',
+    regionNoImage: 'Khong tim thay anh trang o vung da chon.',
+    regionTitle: 'Vung chu',
+    regionOriginalLabel: 'Chu goc',
+    regionTranslationLabel: 'Ban dich',
+    regionTranslateAi: 'Dich bang AI',
+    regionApply: 'Ap dung',
+    regionCancel: 'Huy',
+    regionDelete: 'Xoa',
+    regionNeedText: 'Hay nhap hoac doc chu truoc.',
+    regionTranslating: 'Dang dich…',
+    regionApplying: 'Dang ap dung…',
+    regionReading: 'Dang doc chu…',
+    regionOcrFailed: 'Khong doc duoc chu — hay tu nhap.',
     networkError: 'Loi mang',
     fluxRemoteUnreachable: 'Khong ket noi duoc Flux worker tu xa — chu ngoai bong bong thoai duoc giu nguyen o trang nay. Kiem tra session Kaggle/tunnel con chay va URL con moi khong.',
     fluxRemoteUnauthorized: 'Flux worker tu xa tu choi token — chu ngoai bong bong thoai duoc giu nguyen. Kiem tra o Token trong popup.',
@@ -178,6 +209,21 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     noResult: '无结果',
     bubbles: '{count} 个气泡 - {time}s',
     doneWithTime: '完成 - {time}s',
+    regionPickHint: '拖动框选要修改的文字 · Esc 取消',
+    regionTooSmall: '选区太小。',
+    regionNoImage: '在选区下未找到页面图片。',
+    regionTitle: '文字区域',
+    regionOriginalLabel: '原文',
+    regionTranslationLabel: '译文',
+    regionTranslateAi: '用 AI 翻译',
+    regionApply: '应用',
+    regionCancel: '取消',
+    regionDelete: '删除',
+    regionNeedText: '请先输入或识别文字。',
+    regionTranslating: '翻译中…',
+    regionApplying: '应用中…',
+    regionReading: '识别文字中…',
+    regionOcrFailed: '未能识别文字——请手动输入。',
     networkError: '网络错误',
     fluxRemoteUnreachable: '无法连接远程 Flux worker——本页气泡外文字保持原样。请检查 Kaggle 会话/隧道是否仍在运行，URL 是否为最新。',
     fluxRemoteUnauthorized: '远程 Flux worker 拒绝了令牌——气泡外文字保持原样。请检查弹窗中的 Token 字段。',
@@ -242,6 +288,21 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     noResult: '結果なし',
     bubbles: '{count} 吹き出し - {time}s',
     doneWithTime: '完了 - {time}s',
+    regionPickHint: '変更したい文字をドラッグで囲む · Esc でキャンセル',
+    regionTooSmall: '選択範囲が小さすぎます。',
+    regionNoImage: '選択範囲の下にページ画像が見つかりません。',
+    regionTitle: '文字エリア',
+    regionOriginalLabel: '原文',
+    regionTranslationLabel: '翻訳',
+    regionTranslateAi: 'AI で翻訳',
+    regionApply: '適用',
+    regionCancel: 'キャンセル',
+    regionDelete: '削除',
+    regionNeedText: '先に文字を入力または読み取ってください。',
+    regionTranslating: '翻訳中…',
+    regionApplying: '適用中…',
+    regionReading: '文字を読み取り中…',
+    regionOcrFailed: '文字を読み取れませんでした — 入力してください。',
     networkError: 'ネットワークエラー',
     fluxRemoteUnreachable: 'リモート Flux worker に接続できません——このページの吹き出し外の文字はそのままです。Kaggle セッション/トンネルが動いているか、URL が最新か確認してください。',
     fluxRemoteUnauthorized: 'リモート Flux worker がトークンを拒否しました——吹き出し外の文字はそのままです。ポップアップの Token 欄を確認してください。',
@@ -306,6 +367,21 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     noResult: '결과 없음',
     bubbles: '말풍선 {count}개 - {time}s',
     doneWithTime: '완료 - {time}s',
+    regionPickHint: '바꿀 글자를 드래그로 선택 · Esc로 취소',
+    regionTooSmall: '선택 영역이 너무 작습니다.',
+    regionNoImage: '선택 영역 아래에서 페이지 이미지를 찾을 수 없습니다.',
+    regionTitle: '글자 영역',
+    regionOriginalLabel: '원문',
+    regionTranslationLabel: '번역',
+    regionTranslateAi: 'AI로 번역',
+    regionApply: '적용',
+    regionCancel: '취소',
+    regionDelete: '삭제',
+    regionNeedText: '먼저 글자를 입력하거나 읽어 오세요.',
+    regionTranslating: '번역 중…',
+    regionApplying: '적용 중…',
+    regionReading: '글자 읽는 중…',
+    regionOcrFailed: '글자를 읽지 못했습니다 — 직접 입력하세요.',
     networkError: '네트워크 오류',
     fluxRemoteUnreachable: '원격 Flux worker에 연결할 수 없습니다 — 이 페이지의 말풍선 밖 글자는 그대로 남았습니다. Kaggle 세션/터널이 실행 중인지, URL이 최신인지 확인하세요.',
     fluxRemoteUnauthorized: '원격 Flux worker가 토큰을 거부했습니다 — 말풍선 밖 글자는 그대로 남았습니다. 팝업의 Token 필드를 확인하세요.',
@@ -352,6 +428,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   if (msg.type === 'OPEN_SCANNER') {
     void openScanner().then(() => send({ ok: true })).catch((e) => send({ ok: false, error: String(e) }));
     return true;
+  }
+  if (msg.type === 'START_REGION_SELECT') {
+    startRegionSelect();
+    send({ ok: true });
+    return false;
   }
   if (msg.type === 'START_AUTO_TRANSLATE') {
     void startAutoTranslate().then(() => send({ ok: true })).catch((e) => send({ ok: false, error: String(e) }));
@@ -1295,6 +1376,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
       rememberTranslated(url, contentCached);
       rememberTranslatedThumbnail(img, contentCached, settings.config.outputLanguage);
       applyTranslatedImage(img, `data:image/png;base64,${contentCached}`, url);
+      void reapplyManualRegions(img, url);
       if (isNearViewport(img)) queueAutoTranslateLookahead(img);
       updateAutoTranslateCounter();
       return;
@@ -1364,6 +1446,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     // Apply to the image element on page
     applyTranslatedImage(img, dataUrl, url);
     renderBubbleFixTargets(img, bubbles);
+    void reapplyManualRegions(img, url);
     if (isNearViewport(img)) queueAutoTranslateLookahead(img);
     console.log('[MT] applied:', url);
     updateAutoTranslateCounter();
@@ -4603,3 +4686,26 @@ function injectStyles(shadow: ShadowRoot): void {
   `;
   shadow.appendChild(s);
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Manual region tool wiring (see region-tool.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+initRegionTool({
+  requestOptions: async () => {
+    const { image: _image, ...options } = buildTranslateRequest('', await loadSettings());
+    void _image;
+    return options as unknown as Record<string, unknown>;
+  },
+  fetchSource: (rawUrl) => fetchImageData(rawUrl, window.location.href),
+  translatedBase: (rawUrl) => translatedCache.get(rawUrl) ?? null,
+  applyImage: (rawUrl, dataUrl) => { applyTranslatedImageToPage(rawUrl, dataUrl); },
+  restoreOriginal: (img) => { resetRecycledTranslatedImage(img); },
+  resolveUrl: resolveMangaUrl,
+  tr: (key) => tr(key as ContentMessageKey),
+  toast,
+});
+// Saved regions come back on reload; lazy-loaded pages get a second chance.
+setTimeout(() => { void restoreManualRegionsOnLoad(); }, 1500);
+setTimeout(() => { void restoreManualRegionsOnLoad(); }, 5000);

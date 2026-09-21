@@ -457,3 +457,15 @@ export const PROVIDERS = [
   'Google', 'OpenAI', 'Azure OpenAI', 'Anthropic', 'xAI', 'DeepSeek',
   'Z.ai', 'Moonshot AI', 'OpenRouter', 'OpenAI-Compatible',
 ] as const;
+
+// A text area the user boxed by hand on a manga page (see
+// content-script/region-tool.ts). `box` is normalised 0..1 relative to the
+// page image so it survives resizing/upscaled translations; `text` is what
+// OCR/the user read there and `translation` what gets drawn over it.
+export interface RegionBoxNorm { x1: number; y1: number; x2: number; y2: number; }
+export interface StoredRegion {
+  id: string;
+  box: RegionBoxNorm;
+  text: string;
+  translation: string;
+}
