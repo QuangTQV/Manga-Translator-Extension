@@ -238,4 +238,58 @@ test.describe('popup — Flux remote inpainting', () => {
     expect(capturedBody.inpainting_method).toBe('auto');
     expect(capturedBody.flux_remote_base_url).toBeUndefined();
   });
+
+  test('the token is sent as flux_remote_token, and a backend warning shows a toast', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ config: { outsideTextEnabled: true, inpaintingMethod: 'flux_klein_4b_remote', fluxRemoteBaseUrl: 'https://abcd.trycloudflare.com', fluxRemoteToken: 'sekret' } }),
+      firstKeyMatches('seed-key'),
+    );
+
+    let capturedBody: any = null;
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+          warnings: ['flux_remote_unreachable'],
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    // Later toasts replace earlier ones, so record every toast's text.
+    await mangaPage.addInitScript(() => {
+      (window as any).__toasts = [];
+      new MutationObserver((muts) => {
+        for (const m of muts) m.addedNodes.forEach((n) => {
+          if ((n as HTMLElement).id === 'mt-toast') (window as any).__toasts.push((n as HTMLElement).textContent);
+        });
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await mangaPage.goto(TEST_SITE_URL);
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await expect(popup.locator('#f-flux-remote-token')).toHaveValue('sekret');
+
+    await mangaPage.bringToFront();
+    await popup.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await mangaPage.waitForTimeout(2000);
+
+    expect(capturedBody.flux_remote_token).toBe('sekret');
+    const toasts: string[] = await mangaPage.evaluate(() => (window as any).__toasts);
+    expect(toasts.some((t) => /Flux remote worker is unreachable/.test(t))).toBe(true);
+  });
 });

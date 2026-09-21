@@ -115,6 +115,22 @@ def _resolve_story_context(req, account: "Account | None") -> None:
         req.story_continuity_notes = [StoryContinuityNote(**n) for n in story.continuity_notes]
 
 
+def _run_with_warnings(fn, *args):
+    """Runs fn(*args) with a fresh per-request warning sink installed (see
+    core/image/inpainting.py:remote_warning_sink) and returns (result,
+    warnings). Runs inside the worker thread the pipeline itself runs in, so
+    the ContextVar is visible to the inpainter without changing
+    translate_image_base64's return shape."""
+    from core.image.inpainting import remote_warning_sink
+
+    sink: list[str] = []
+    token = remote_warning_sink.set(sink)
+    try:
+        return fn(*args), sink
+    finally:
+        remote_warning_sink.reset(token)
+
+
 def _apply_shared_llm_config(req, account: "Account | None") -> None:
     """When authenticated (hosted mode) and the request didn't supply its
     own api_key, overrides provider/model_name/api_key/base_url in place
@@ -259,6 +275,7 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
         outside_text_enabled=req.outside_text_enabled,
         inpainting_method=req.inpainting_method or "auto",
         flux_remote_base_url=req.flux_remote_base_url,
+        flux_remote_token=req.flux_remote_token,
         models_dir=models_dir,
         fonts_base_dir=fonts_dir,
     )
@@ -266,9 +283,10 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
     start = time.time()
     try:
         async with _pipeline_slot(req.fix_hint is not None):
-            result_image, bubbles, elapsed, ocr_texts, memory_note = await asyncio.wait_for(
+            (result_image, bubbles, elapsed, ocr_texts, memory_note), warnings = await asyncio.wait_for(
                 asyncio.to_thread(
-                    translate_image_base64, req.image, config, req.previous_context_texts
+                    _run_with_warnings,
+                    translate_image_base64, req.image, config, req.previous_context_texts,
                 ),
                 timeout=settings.request_timeout_seconds,
             )
@@ -291,6 +309,7 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
         provider=req.provider,
         ocr_texts=ocr_texts,
         memory_note=memory_note,
+        warnings=warnings,
     )
 
 
@@ -359,12 +378,13 @@ def _translate_single_item(
             outside_text_enabled=req.outside_text_enabled,
             inpainting_method=req.inpainting_method or "auto",
             flux_remote_base_url=req.flux_remote_base_url,
+            flux_remote_token=req.flux_remote_token,
             models_dir=models_dir,
             fonts_base_dir=fonts_dir,
         )
 
-        result_image, bubbles, _, ocr_texts, memory_note = translate_image_base64(
-            item.image, config, req.previous_context_texts
+        (result_image, bubbles, _, ocr_texts, memory_note), warnings = _run_with_warnings(
+            translate_image_base64, item.image, config, req.previous_context_texts
         )
         translated_b64 = image_to_base64_raw(result_image)
         return TranslateBatchItemResponse(
@@ -374,6 +394,7 @@ def _translate_single_item(
             processing_time_seconds=t.time() - item_start,
             ocr_texts=ocr_texts,
             memory_note=memory_note,
+            warnings=warnings,
         )
     except Exception as e:
         return TranslateBatchItemResponse(

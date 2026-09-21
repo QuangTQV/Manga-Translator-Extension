@@ -173,6 +173,9 @@ export interface TranslateConfig {
   // GPU tunneled out via cloudflared) — only sent/used when
   // inpaintingMethod is "flux_klein_4b_remote".
   fluxRemoteBaseUrl?: string;
+  // Shared secret for the worker (started with --token / FLUX_WORKER_TOKEN);
+  // sent as X-Flux-Worker-Token. Leave unset for a worker with no auth.
+  fluxRemoteToken?: string;
   preTranslate: boolean; // eagerly translate pages as they load, not just near viewport (Auto-translate only)
   previousContextEnabled: boolean; // send prior pages' OCR text for pronoun/name consistency (costs latency)
 }
@@ -208,6 +211,7 @@ export interface TranslateResponse {
   provider: string;
   ocr_texts?: string[]; // this page's OCR transcripts, in reading order
   memory_note?: string; // this page's one-sentence context-memory summary, if enabled
+  warnings?: string[]; // non-fatal issues to surface, e.g. "flux_remote_unreachable"
 }
 
 export interface TranslateBatchItemResponse {
@@ -271,6 +275,7 @@ export interface TranslateRequest {
   outside_text_enabled: boolean;
   inpainting_method?: string;
   flux_remote_base_url?: string;
+  flux_remote_token?: string;
   previous_context_texts?: string[][]; // prior pages' OCR transcripts, oldest-to-newest, for cross-page consistency
   story_id?: string; // id of a logged-in-account Story DB (see popup's Story DB tab) to inject as structured character/relationship/glossary context; ignored when not logged in
 }

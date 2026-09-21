@@ -258,6 +258,7 @@ class OutsideTextConfig:
     # fields (OpenAI-Compatible, Azure OpenAI).
     flux_remote_base_url: Optional[str] = None
     flux_remote_timeout_seconds: float = 120.0
+    flux_remote_token: Optional[str] = None  # sent as X-Flux-Worker-Token
 
 
 @dataclass

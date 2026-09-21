@@ -1,3 +1,13 @@
+
+
+## Feature: remote Flux worker (Kaggle GPU) + hardening — IMPLEMENTED
+
+**What:** `outside_text` inpainting can run Flux Klein 4B/9B on a user's remote GPU instead of locally. Popup `Inpainting quality` values `flux_klein_{4b,9b}_remote` are UI-only — `content-script buildTranslateRequest()` maps any `*_remote` to the real backend `inpainting_method` (`flux_klein_4b`/`_9b`) plus `flux_remote_base_url` / `flux_remote_token`. Docs: `docs/HUONG-DAN-CHAY.md` section 8.
+- **Boundary:** `core/image/inpainting.py:FluxKleinInpainter.inpaint_mask()` — only the inference step goes remote (`_run_remote_inference`, `POST {base}/inpaint`); crop/blend/cache stay local. `backend/flux_worker.py` (run on the GPU box) reuses `_run_local_inference`. Protocol: `POST /inpaint {image_base64,width,height,seed,num_inference_steps,variant}` -> `{image_base64}`, `GET /health`.
+- **Auth:** worker `--token` / `FLUX_WORKER_TOKEN`, header `X-Flux-Worker-Token`, `hmac.compare_digest`, on `/health` and `/inpaint`. 9B is HF-gated: worker `--hf-token`/`HF_TOKEN`.
+- **Failure = graceful skip**, never a failed page: returns the original region. Module-level circuit breaker (2 failures -> skip that URL for 60s; connect timeout 5s; success resets). Reason surfaces as `warnings` (`flux_remote_unreachable` / `flux_remote_unauthorized`) on `TranslateResponse`/`TranslateBatchItemResponse`, collected per request via the `remote_warning_sink` ContextVar + `translate.py:_run_with_warnings` (ContextVar again because tests mock signatures). Content script shows a toast (`notifyBackendWarnings`, deduped 1/min per code) — content script has its OWN i18n tables, separate from `shared/i18n.ts`.
+- **Gotchas:** inpaint disk cache leaks between tests (monkeypatch `should_use_inpaint_cache`); zero-size toggle inputs need `evaluate` + dispatch `change` in Playwright; toasts replace each other, so tests record them with a MutationObserver.
+- **Not verified:** a real Kaggle GPU run (protocol verified locally worker<->backend only).
 # MEMORY.md
 
 Living planning notes for in-progress feature work in this repo, meant to be read by AI coding agents picking up the project (complements `CLAUDE.md`, which documents the architecture as it exists today). Keep this flat and up to date — prune sections once the work they describe is done, rather than letting them go stale.

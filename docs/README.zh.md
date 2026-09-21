@@ -212,6 +212,9 @@ Flux 不包含在常规 release 中，因为它会增加数 GB 体积。默认�
 backend/models/flux/
 ```
 
+**没有 GPU？可在远程 GPU 上运行 Flux。** 弹窗的 *Inpainting quality* 还提供 `Flux Klein 4B (remote)` 和 `Flux Klein 9B (remote)`：在免费的 Kaggle GPU（或任意 GPU 机器）上运行 `backend/flux_worker.py`，用 `cloudflared` 隧道暴露后把 URL 粘贴到弹窗中，本机无需安装任何重型组件。建议用 `--token` / `FLUX_WORKER_TOKEN` 保护 worker，并在弹窗的 Token 字段填入相同的值。如果 worker 不可用或拒绝令牌，页面仍会翻译（气泡外文字保持原样），并弹出警告提示原因，后端约 60 秒内不再重试失效的 worker。分步指南（越南语）：[HUONG-DAN-CHAY.md](HUONG-DAN-CHAY.md#8-tuỳ-chọn-chạy-flux-từ-xa-trên-gpu-free-của-kaggle)。
+
+
 只有在你明确把 outside-text inpainting 配置为 Flux 模式（例如 `flux_klein_4b`）时才使用 Flux。对大多数用户来说，默认 `auto` 更轻、更快。
 
 ## 使用流程

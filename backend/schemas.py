@@ -142,6 +142,7 @@ class TranslateOptions(BaseModel):
     image_detail: str = "auto"
     outside_text_enabled: bool = False
     inpainting_method: Optional[str] = None  # "auto" (default) | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"
+    flux_remote_token: Optional[str] = None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one
     flux_remote_base_url: Optional[str] = None  # run Flux on a remote worker (backend/flux_worker.py) instead of loading it locally; only used when inpainting_method is a flux_* variant
     previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
     context_memory_enabled: bool = False  # ask the model for a MEMORY NOTE summary each page
@@ -175,6 +176,7 @@ class TranslateResponse(BaseModel):
     provider: str
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
     memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
+    warnings: List[str] = []  # non-fatal issues the UI should surface, e.g. "flux_remote_unreachable", "flux_remote_unauthorized"
 
 
 class TranslateBatchItem(BaseModel):
@@ -194,6 +196,7 @@ class TranslateBatchItemResponse(BaseModel):
     processing_time_seconds: Optional[float] = None
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
     memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
+    warnings: List[str] = []
 
 
 class TranslateBatchResponse(BaseModel):

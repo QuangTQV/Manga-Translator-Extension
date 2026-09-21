@@ -214,6 +214,8 @@ backend/models/flux/
 
 Chỉ dùng Flux khi bạn cấu hình outside-text inpainting sang một mode Flux như `flux_klein_4b`. Với đa số người dùng, mặc định `auto` nhẹ hơn và nhanh hơn.
 
+**Không có GPU? Chạy Flux trên GPU từ xa.** Mục *Inpainting quality* trong popup còn có `Flux Klein 4B (remote)` và `Flux Klein 9B (remote)`: chạy `backend/flux_worker.py` trên GPU free của Kaggle (hoặc máy có GPU khác), mở tunnel `cloudflared` rồi dán URL vào popup — máy bạn không phải cài gì nặng. Nên bảo vệ worker bằng `--token` / `FLUX_WORKER_TOKEN` và điền cùng giá trị vào ô Token trong popup. Nếu worker chết hoặc từ chối token, trang vẫn được dịch (chữ ngoài bubble giữ nguyên), có toast cảnh báo lý do, và backend tạm ngừng gọi worker chết khoảng 60 giây. Hướng dẫn từng bước: [HUONG-DAN-CHAY.md](HUONG-DAN-CHAY.md#8-tuỳ-chọn-chạy-flux-từ-xa-trên-gpu-free-của-kaggle).
+
 ## Quy Trình Sử Dụng
 
 1. Chạy backend bằng `start-backend.bat`.

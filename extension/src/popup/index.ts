@@ -27,6 +27,7 @@ const inpaintingMethodField = qs<HTMLDivElement>('inpainting-method-field');
 const inpaintingMethodSelect = qs<HTMLSelectElement>('f-inpainting-method');
 const fluxRemoteUrlRow = qs<HTMLDivElement>('flux-remote-url-row');
 const fluxRemoteUrlInput = qs<HTMLInputElement>('f-flux-remote-url');
+const fluxRemoteTokenInput = qs<HTMLInputElement>('f-flux-remote-token');
 const testFluxRemoteBtn = qs<HTMLButtonElement>('btn-test-flux-remote');
 const fluxRemoteTestStatus = qs<HTMLSpanElement>('flux-remote-test-status');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
@@ -275,6 +276,7 @@ async function loadAndBind(): Promise<void> {
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   inpaintingMethodSelect.value = settings.config.inpaintingMethod || 'auto';
   fluxRemoteUrlInput.value = settings.config.fluxRemoteBaseUrl ?? '';
+  fluxRemoteTokenInput.value = settings.config.fluxRemoteToken ?? '';
   updateInpaintingMethodVisibility();
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
@@ -331,7 +333,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -939,7 +941,7 @@ async function handleTestFluxRemote(): Promise<void> {
   fluxRemoteTestStatus.title = t(uiLanguage, 'testKeyPending');
   try {
     const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-      chrome.runtime.sendMessage({ type: 'TEST_FLUX_REMOTE', url }, (resp: unknown) => {
+      chrome.runtime.sendMessage({ type: 'TEST_FLUX_REMOTE', url, token: fluxRemoteTokenInput.value.trim() || undefined }, (resp: unknown) => {
         const lastError = chrome.runtime.lastError;
         if (lastError) { resolve({ ok: false, error: lastError.message }); return; }
         resolve((resp as { ok: boolean; error?: string }) ?? { ok: false, error: 'no response' });
@@ -986,6 +988,7 @@ function collectAllSettings(): AppSettings {
       outsideTextEnabled: outsideTextToggle.checked,
       inpaintingMethod: inpaintingMethodSelect.value || 'auto',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
+      fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,
       preTranslate: preTranslateToggle.checked,
       previousContextEnabled: previousContextToggle.checked,
       contextMemoryEnabled: contextMemoryToggle.checked,

@@ -184,8 +184,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message.type === 'TEST_FLUX_REMOTE') {
-      const { url } = message as { type: string; url: string };
-      sendResponse(await testFluxRemoteConnection(url));
+      const { url, token } = message as { type: string; url: string; token?: string };
+      sendResponse(await testFluxRemoteConnection(url, token));
       return;
     }
 
@@ -376,6 +376,7 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
       processing_time_seconds: data.processing_time_seconds,
       ocr_texts: data.ocr_texts,
       memory_note: data.memory_note,
+      warnings: data.warnings,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -484,12 +485,13 @@ async function fetchTestApiKey(body: TestApiKeyBody): Promise<TestApiKeyResult> 
 // LLM providers/backend directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function testFluxRemoteConnection(url: string): Promise<{ ok: boolean; error?: string }> {
+async function testFluxRemoteConnection(url: string, token?: string): Promise<{ ok: boolean; error?: string }> {
   const trimmed = url.trim();
   if (!trimmed) return { ok: false, error: 'No URL provided' };
   const endpoint = `${trimmed.replace(/\/$/, '')}/health`;
   try {
-    const res = await fetch(endpoint, { method: 'GET' });
+    const res = await fetch(endpoint, { method: 'GET', headers: token ? { 'X-Flux-Worker-Token': token } : {} });
+    if (res.status === 401) return { ok: false, error: 'Token rejected (401) — check the Token field' };
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const body = await res.json() as { status?: string };
     if (body.status !== 'ok') return { ok: false, error: 'Unexpected response from worker' };
@@ -758,6 +760,7 @@ interface TranslateResult {
   processing_time_seconds?: number;
   ocr_texts?: string[];
   memory_note?: string;
+  warnings?: string[];
   error?: string;
 }
 

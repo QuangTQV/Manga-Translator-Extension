@@ -155,6 +155,8 @@ Lưu ý:
 
 - Kaggle interactive session tự tắt sau một khoảng không hoạt động, và có giới hạn giờ GPU/tuần theo tài khoản — mỗi lần notebook restart, URL cloudflared **đổi mới hoàn toàn**, phải dán lại vào popup.
 - Nếu worker không phản hồi (session hết hạn, tunnel chết), MangaTranslator sẽ tự bỏ qua và **giữ nguyên chữ gốc ở vùng đó** thay vì báo lỗi cả trang dịch — không cần lo request bị treo.
+- **Bảo vệ worker bằng token (khuyên dùng):** URL trycloudflare là công khai, ai biết URL đều dùng được GPU của bạn. Chạy worker với `--token mat_khau_dai` (hoặc `FLUX_WORKER_TOKEN=...`) rồi điền cùng giá trị vào ô **Token** trong popup; token gửi qua header `X-Flux-Worker-Token`, sai/thiếu token thì worker trả 401 (kể cả `/health`, nên Test Connection sẽ báo ✗).
+- **Cảnh báo khi worker lỗi:** nếu worker không tới được hoặc từ chối token, trang vẫn dịch bình thường nhưng extension hiện toast cảnh báo (tối đa 1 lần/phút). Sau 2 lần lỗi liên tiếp, backend tạm ngừng gọi worker đó 60 giây (kết nối chờ tối đa 5 giây) để không bị treo từng vùng chữ — sau 60 giây nó thử lại tự động.
 - Chỉ phù hợp dùng cá nhân/test; Kaggle không cam kết SLA cho server chạy liên tục.
 - Muốn dùng **Flux Klein 9B** (chất lượng cao hơn, nặng hơn): chạy worker với `--variant 9b --hf-token hf_xxx` (model 9B là gated trên Hugging Face, cần token đã được cấp quyền; hoặc set biến môi trường `HF_TOKEN`), rồi chọn `Flux Klein 9B (remote)` trong popup. 9B cần nhiều VRAM hơn 4B nên GPU T4 free của Kaggle có thể không đủ.
 - Có thể chạy `flux_worker.py` ngay trên máy bạn (không qua Kaggle) để test trước khi lên Kaggle thật — chỉ cần trỏ URL remote về `http://127.0.0.1:8189`.
