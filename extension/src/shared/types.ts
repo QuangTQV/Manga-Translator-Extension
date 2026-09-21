@@ -289,6 +289,9 @@ export interface StoryCharacter {
   gender: string; // male | female | other | unknown
   role?: string;
   voice_notes?: string;
+  // Relationship-map position, set once the user drags the node.
+  x?: number;
+  y?: number;
 }
 
 // How two characters relate/address each other — a "surface" description
