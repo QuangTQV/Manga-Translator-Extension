@@ -1,3 +1,4 @@
+import { initRelationshipGraph } from './relationship-graph.js';
 import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig, type StoryCharacter, type StoryRelationship, type StoryGlossaryTerm, type StoryContinuityNote, type StoryDetail, type StorySummary } from '../shared/types.js';
 import { UI_LANGUAGES, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
 
@@ -101,6 +102,10 @@ const addStoryGlossaryBtn = qs<HTMLButtonElement>('btn-add-story-glossary');
 const storyContinuityEnabledToggle = qs<HTMLInputElement>('f-story-continuity-enabled');
 const storyContinuityNotesList = qs<HTMLDivElement>('story-continuity-notes-list');
 const addStoryContinuityNoteBtn = qs<HTMLButtonElement>('btn-add-story-continuity-note');
+const storyGraphSvg = document.getElementById('story-graph') as unknown as SVGSVGElement;
+const storyGraphInfo = qs<HTMLDivElement>('story-graph-info');
+const storyGraphConnectBtn = qs<HTMLButtonElement>('btn-graph-connect');
+const storyGraphResetBtn = qs<HTMLButtonElement>('btn-graph-reset');
 const storySaveBtn = qs<HTMLButtonElement>('btn-story-save');
 const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
 
@@ -1528,6 +1533,10 @@ function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'story-char-row';
   row.dataset.charId = data?.id ?? crypto.randomUUID();
+  if (data?.x !== undefined && data?.y !== undefined) {
+    row.dataset.x = String(data.x);
+    row.dataset.y = String(data.y);
+  }
 
   const nameField = document.createElement('input');
   nameField.className = 'input sc-name';
@@ -1706,6 +1715,23 @@ function addStoryRelationshipRow(): void {
   storyRelationshipsList.appendChild(createStoryRelationshipRow());
 }
 
+// The relationship map is a live view over the character/relationship rows
+// above; "Connect" mode in it appends a pre-filled relationship row.
+initRelationshipGraph({
+  svg: storyGraphSvg,
+  info: storyGraphInfo,
+  connectBtn: storyGraphConnectBtn,
+  resetBtn: storyGraphResetBtn,
+  charactersList: storyCharactersList,
+  relationshipsList: storyRelationshipsList,
+  t: (key) => t(uiLanguage, key as Parameters<typeof t>[1]),
+  addRelationship: (aId, bId) => {
+    const row = createStoryRelationshipRow({ id: crypto.randomUUID(), character_a_id: aId, character_b_id: bId, surface_relation: '' });
+    storyRelationshipsList.appendChild(row);
+    return row;
+  },
+});
+
 function addStoryGlossaryRow(): void {
   storyGlossaryList.appendChild(createStoryGlossaryRow());
 }
@@ -1722,7 +1748,9 @@ function collectStoryCharacters(): StoryCharacter[] {
     const gender = row.querySelector<HTMLSelectElement>('.sc-gender')?.value || 'unknown';
     const role = row.querySelector<HTMLInputElement>('.sc-role')?.value.trim() || undefined;
     const voiceNotes = row.querySelector<HTMLInputElement>('.sc-voice')?.value.trim() || undefined;
-    out.push({ id: row.dataset.charId ?? crypto.randomUUID(), name, gender, role, voice_notes: voiceNotes });
+    const x = row.dataset.x !== undefined ? Number(row.dataset.x) : undefined;
+    const y = row.dataset.y !== undefined ? Number(row.dataset.y) : undefined;
+    out.push({ id: row.dataset.charId ?? crypto.randomUUID(), name, gender, role, voice_notes: voiceNotes, x, y });
   }
   return out;
 }

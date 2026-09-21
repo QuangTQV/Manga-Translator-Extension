@@ -52,6 +52,11 @@
     .tab-pane { display: none; }
     .tab-pane.active { display: flex; flex-direction: column; gap: 12px; }
     .config-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .graph-toolbar { display: flex; gap: 6px; margin: 4px 0; }
+    .graph-toolbar .btn-add-fallback { flex: 1; }
+    .graph-toolbar .btn-add-fallback.active { background: rgba(122,162,255,0.25); border-color: #7aa2ff; }
+    .story-graph { width: 100%; height: 260px; display: block; background: #0b1120; border: 1px solid rgba(59,130,246,0.15); border-radius: 10px; touch-action: none; user-select: none; }
+    .story-graph-info { min-height: 16px; margin: 4px 0 10px; font-size: 11px; line-height: 1.5; color: #9fb0cf; white-space: pre-line; }
     .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
     .label {
       font-size: 11px; font-weight: 700; color: #7a90b8;
@@ -579,6 +584,14 @@
               <label class="label" data-i18n="labelStoryName">Story name</label>
               <input id="f-story-name" class="input" type="text" autocomplete="off" />
             </div>
+
+            <label class="label" data-i18n="labelStoryGraph">Relationship map</label>
+            <div class="graph-toolbar">
+              <button id="btn-graph-connect" class="btn-add-fallback" type="button" data-i18n="btnGraphConnect">🔗 Connect</button>
+              <button id="btn-graph-reset" class="btn-add-fallback" type="button" data-i18n="btnGraphReset">Reset layout</button>
+            </div>
+            <svg id="story-graph" class="story-graph" xmlns="http://www.w3.org/2000/svg" role="img"></svg>
+            <div id="story-graph-info" class="story-graph-info"></div>
 
             <label class="label" data-i18n="labelStoryCharacters">Characters</label>
             <div class="toggle-hint" data-i18n="hintStoryCharacters">Name, gender (for correct pronouns), role, and a short voice/tone note.</div>

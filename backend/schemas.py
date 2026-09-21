@@ -47,6 +47,10 @@ class StoryCharacter(BaseModel):
     gender: str = "unknown"  # male | female | other | unknown
     role: Optional[str] = None
     voice_notes: Optional[str] = None  # personality/tone, for consistent voice across pages
+    # Position on the popup's relationship map (0-360 x 0-260). Presentation
+    # only — never sent to the model. Unset until the user drags the node.
+    x: Optional[float] = None
+    y: Optional[float] = None
 
 
 class StoryRelationship(BaseModel):

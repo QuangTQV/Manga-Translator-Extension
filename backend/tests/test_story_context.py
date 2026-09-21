@@ -275,3 +275,23 @@ def test_stories_route_404s_for_another_accounts_story_id():
 
     resp = client.get(f"/stories/{story_id}", headers={"Authorization": f"Bearer {other.token}"})
     assert resp.status_code == 404
+
+
+def test_character_map_position_round_trips_and_is_optional():
+    account = register_account("layout-user@example.com")
+    headers = {"Authorization": f"Bearer {account.token}"}
+    story_id = client.post("/stories", json={"name": "Layout"}, headers=headers).json()["id"]
+
+    payload = {
+        "name": "Layout",
+        "characters": [
+            {"id": "c1", "name": "Aoi", "gender": "female", "x": 120.5, "y": 44.0},
+            {"id": "c2", "name": "Ren", "gender": "male"},  # never dragged -> no saved position
+        ],
+        "relationships": [], "glossary": [], "continuity_notes": [], "continuity_notes_enabled": False,
+    }
+    assert client.put(f"/stories/{story_id}", json=payload, headers=headers).status_code == 200
+
+    chars = {c["id"]: c for c in client.get(f"/stories/{story_id}", headers=headers).json()["characters"]}
+    assert (chars["c1"]["x"], chars["c1"]["y"]) == (120.5, 44.0)
+    assert chars["c2"]["x"] is None and chars["c2"]["y"] is None

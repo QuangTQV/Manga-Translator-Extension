@@ -233,4 +233,74 @@ test.describe('popup — Story DB tab', () => {
     await popup.locator('#btn-story-delete').click();
     await expect(popup.locator('#story-content-fields')).toBeHidden({ timeout: 5_000 });
   });
+
+  test('the relationship map mirrors the form, and Connect mode adds a pre-filled relationship', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }),
+      firstKeyMatches('seed-key'),
+    );
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'story-1', name: 'My Manga', updated_at: 0,
+          characters: [
+            { id: 'c1', name: 'Ren', gender: 'male', role: 'rival' },
+            { id: 'c2', name: 'Aoi', gender: 'female' },
+            { id: 'c3', name: 'Sora', gender: 'other' },
+          ],
+          relationships: [{ id: 'r1', character_a_id: 'c1', character_b_id: 'c2', surface_relation: 'rivals' }],
+          glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+        }),
+      });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('#story-content-fields')).toBeVisible({ timeout: 5_000 });
+
+    const nodes = popup.locator('#story-graph g[data-id]');
+    await expect(nodes).toHaveCount(3);
+    await expect(popup.locator('#story-graph text', { hasText: 'rivals' })).toHaveCount(1);
+
+    // Selecting a character summarises their relationships.
+    await popup.locator('#story-graph g[data-id="c1"]').click();
+    await expect(popup.locator('#story-graph-info')).toContainText('Ren ↔ Aoi: rivals');
+
+    // Dragging a node moves it.
+    const before = await popup.locator('#story-graph g[data-id="c2"]').boundingBox();
+    await popup.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+    await popup.mouse.down();
+    await popup.mouse.move(before!.x + 40, before!.y + 40, { steps: 5 });
+    await popup.mouse.up();
+    const after = await popup.locator('#story-graph g[data-id="c2"]').boundingBox();
+    expect(Math.abs(after!.x - before!.x) + Math.abs(after!.y - before!.y)).toBeGreaterThan(20);
+    await expect(popup.locator('.story-char-row').nth(1)).toHaveAttribute('data-x', /\d/);
+    await popup.locator('#story-graph').screenshot({ path: process.env.GRAPH_SHOT ?? 'test-results/graph.png' });
+
+    // Editing the form updates the map live.
+    await popup.locator('.story-char-row').nth(2).locator('.sc-name').fill('Kaze');
+    await expect(popup.locator('#story-graph text', { hasText: 'Kaze' })).toHaveCount(1);
+    await popup.locator('.story-char-row').nth(2).locator('.btn-remove-fallback').click();
+    await expect(nodes).toHaveCount(2);
+
+    // Connect mode: click two characters -> a pre-filled relationship row.
+    await popup.locator('#btn-graph-connect').click();
+    await popup.locator('#story-graph g[data-id="c2"]').click();
+    await popup.locator('#story-graph g[data-id="c1"]').click();
+    await expect(popup.locator('.story-rel-row')).toHaveCount(2);
+    const newRow = popup.locator('.story-rel-row').nth(1);
+    await expect(newRow.locator('.sr-char-a')).toHaveValue('c2');
+    await expect(newRow.locator('.sr-char-b')).toHaveValue('c1');
+    await expect(newRow.locator('.sr-relation')).toBeFocused();
+  });
 });
