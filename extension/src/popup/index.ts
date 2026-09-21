@@ -924,7 +924,7 @@ async function runKeyTest(
 
 function updateInpaintingMethodVisibility(): void {
   inpaintingMethodField.style.display = outsideTextToggle.checked ? '' : 'none';
-  fluxRemoteUrlRow.style.display = inpaintingMethodSelect.value === 'flux_klein_4b_remote' ? '' : 'none';
+  fluxRemoteUrlRow.style.display = inpaintingMethodSelect.value.endsWith('_remote') ? '' : 'none';
 }
 
 async function handleTestFluxRemote(): Promise<void> {

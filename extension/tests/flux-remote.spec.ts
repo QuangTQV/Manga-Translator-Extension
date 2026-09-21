@@ -142,6 +142,52 @@ test.describe('popup — Flux remote inpainting', () => {
     expect(capturedBody.flux_remote_base_url).toBe('https://abcd.trycloudflare.com');
   });
 
+  test('the 9B remote option maps to flux_klein_9b and shows the URL row', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ config: { outsideTextEnabled: true, inpaintingMethod: 'flux_klein_9b_remote', fluxRemoteBaseUrl: 'https://nine.trycloudflare.com' } }),
+      firstKeyMatches('seed-key'),
+    );
+
+    let capturedBody: any = null;
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(TEST_SITE_URL);
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await expect(popup.locator('#flux-remote-url-row')).toBeVisible();
+
+    await mangaPage.bringToFront();
+    await popup.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await mangaPage.waitForTimeout(2000);
+
+    expect(capturedBody).toBeTruthy();
+    expect(capturedBody.inpainting_method).toBe('flux_klein_9b');
+    expect(capturedBody.flux_remote_base_url).toBe('https://nine.trycloudflare.com');
+  });
+
   test('a translate request with inpainting_method "auto" never sends flux_remote_base_url', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
