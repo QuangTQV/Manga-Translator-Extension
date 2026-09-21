@@ -1,4 +1,6 @@
+import dataclasses
 import hashlib
+import json
 import pickle
 import threading
 from typing import Any, Dict, List, Optional
@@ -284,6 +286,18 @@ class UnifiedCache:
                 config, "context_image_max_side_pixels", None
             ),
         }
+        # Story DB context (characters, relationships, glossary, continuity
+        # notes, reference images) changes what the model is told, so it has to
+        # be part of the key — otherwise editing e.g. a glossary term keeps
+        # serving the old cached translation.
+        story_payload = {
+            name: [dataclasses.asdict(item) for item in getattr(config, name, None) or []]
+            for name in ("story_characters", "story_relationships", "story_glossary", "story_continuity_notes")
+        }
+        if any(story_payload.values()):
+            cache_params["story_context_hash"] = hashlib.sha256(
+                json.dumps(story_payload, sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest()[:16]
         if previous_context_images:
             previous_hash = hashlib.sha256(
                 "".join(

@@ -1,7 +1,21 @@
 """Pydantic request/response schemas for the translation endpoints."""
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+# Character assets are stored inline as small data URLs (the popup downscales
+# them before upload) — these caps keep a single story document bounded.
+MAX_AVATAR_CHARS = 60_000
+MAX_REFERENCE_IMAGE_CHARS = 200_000
+MAX_REFERENCE_IMAGES_PER_CHARACTER = 2
+
+
+def _check_data_url(value: str, limit: int, what: str) -> str:
+    if not value.startswith("data:image/"):
+        raise ValueError(f"{what} must be an image data URL")
+    if len(value) > limit:
+        raise ValueError(f"{what} is too large (max {limit} characters)")
+    return value
 
 
 class BubbleInfo(BaseModel):
@@ -51,6 +65,23 @@ class StoryCharacter(BaseModel):
     # only — never sent to the model. Unset until the user drags the node.
     x: Optional[float] = None
     y: Optional[float] = None
+    # Character assets — data URLs. `avatar` is display-only (popup + map).
+    # `reference_images` (character sheets etc.) are only ever sent to the model
+    # when the request opts in via story_use_reference_images.
+    avatar: Optional[str] = None
+    reference_images: List[str] = []
+
+    @field_validator("avatar")
+    @classmethod
+    def _valid_avatar(cls, v):
+        return _check_data_url(v, MAX_AVATAR_CHARS, "avatar") if v else None
+
+    @field_validator("reference_images")
+    @classmethod
+    def _valid_references(cls, v):
+        if len(v) > MAX_REFERENCE_IMAGES_PER_CHARACTER:
+            raise ValueError(f"at most {MAX_REFERENCE_IMAGES_PER_CHARACTER} reference images per character")
+        return [_check_data_url(i, MAX_REFERENCE_IMAGE_CHARS, "reference image") for i in v]
 
 
 class StoryRelationship(BaseModel):
@@ -158,6 +189,7 @@ class TranslateOptions(BaseModel):
     cooldown_seconds: Optional[float] = None  # how long a rate-limited key/provider is skipped before being retried (default 15s)
     api_key_weight: Optional[float] = None  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
     backup_api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
+    story_use_reference_images: bool = False  # also send each character's reference images (character sheets) to the model — more tokens; only applies with LLM OCR
     story_id: Optional[str] = None  # id of a logged-in-account Story DB (see core/story_context.py) to inject as structured context; ignored when not logged in or the id doesn't resolve
     # Populated server-side by endpoints/translate.py:_resolve_story_context() when story_id
     # resolves against the logged-in account — not meant to be set by the client directly.

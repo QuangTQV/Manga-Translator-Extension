@@ -197,6 +197,7 @@ def _build_story_context_configs(
         StoryCharacterConfig(
             id=c["id"], name=c["name"], gender=c.get("gender") or "unknown",
             role=c.get("role"), voice_notes=c.get("voice_notes"),
+            reference_images=list(c.get("reference_images") or []),
         )
         for c in (characters or [])
     ]

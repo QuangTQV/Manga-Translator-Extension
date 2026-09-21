@@ -4029,6 +4029,7 @@ function buildTranslateRequest(
     // Only sent when logged in — a no-op for the normal local/self-hosted
     // setup, where accountToken is unset (see backend/auth.py:require_login).
     story_id: settings.accountToken ? settings.activeStoryId || undefined : undefined,
+    story_use_reference_images: settings.accountToken && settings.activeStoryId && settings.config.useStoryReferenceImages ? true : undefined,
   };
 }
 

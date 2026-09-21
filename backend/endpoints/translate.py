@@ -87,6 +87,9 @@ async def _pipeline_slot(is_priority: bool):
                 yield
 
 
+MAX_STORY_REFERENCE_IMAGES = 6
+
+
 def _resolve_story_context(req, account: "Account | None") -> None:
     """When authenticated and the request carries a story_id, fetches that
     logged-in account's Story DB (character database / relationships /
@@ -108,7 +111,17 @@ def _resolve_story_context(req, account: "Account | None") -> None:
         story = get_story(req.story_id, account.email)
     except StoryNotFoundError:
         return
-    req.story_characters = [StoryCharacter(**c) for c in story.characters]
+    # The avatar is display-only and never leaves this function; reference
+    # images are kept only when the request opted in, capped overall so a
+    # cast-heavy story can't balloon the LLM request.
+    characters = [StoryCharacter(**c) for c in story.characters]
+    budget = MAX_STORY_REFERENCE_IMAGES if req.story_use_reference_images else 0
+    for c in characters:
+        c.avatar = None
+        c.x = c.y = None
+        c.reference_images = c.reference_images[: max(0, budget)]
+        budget -= len(c.reference_images)
+    req.story_characters = characters
     req.story_relationships = [StoryRelationship(**r) for r in story.relationships]
     req.story_glossary = [StoryGlossaryTerm(**g) for g in story.glossary]
     if story.continuity_notes_enabled:

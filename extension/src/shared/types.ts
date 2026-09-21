@@ -163,6 +163,10 @@ export interface TranslateConfig {
   sendFullPageContext: boolean;
   imageDetail: string;
   outsideTextEnabled: boolean;
+  // Also send each Story DB character's reference images (character sheets)
+  // to the model with every page — more tokens, and only takes effect with
+  // LLM OCR. Ignored when logged out / no story is selected.
+  useStoryReferenceImages?: boolean;
   // Which algorithm removes outside-bubble text once outsideTextEnabled is
   // on: "auto" (lightweight OpenCV, default), "flux_klein_4b" (local GPU),
   // "flux_klein_4b_remote"/"flux_klein_9b_remote" (POSTs to fluxRemoteBaseUrl — see
@@ -277,6 +281,7 @@ export interface TranslateRequest {
   flux_remote_base_url?: string;
   flux_remote_token?: string;
   previous_context_texts?: string[][]; // prior pages' OCR transcripts, oldest-to-newest, for cross-page consistency
+  story_use_reference_images?: boolean; // see TranslateConfig.useStoryReferenceImages
   story_id?: string; // id of a logged-in-account Story DB (see popup's Story DB tab) to inject as structured character/relationship/glossary context; ignored when not logged in
 }
 
@@ -292,6 +297,11 @@ export interface StoryCharacter {
   // Relationship-map position, set once the user drags the node.
   x?: number;
   y?: number;
+  // Character assets (small JPEG data URLs, downscaled in the popup).
+  // `avatar` is display-only; `reference_images` are sent to the model only
+  // when TranslateConfig.useStoryReferenceImages is on.
+  avatar?: string;
+  reference_images?: string[];
 }
 
 // How two characters relate/address each other — a "surface" description

@@ -8,10 +8,12 @@ if str(_backend_dir) not in sys.path:
     sys.path.insert(0, str(_backend_dir))
 
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config import settings
+from core.db import DatabaseNotConfiguredError
 from endpoints.account import router as account_router
 from endpoints.admin import router as admin_router
 from endpoints.stories import router as stories_router
@@ -62,6 +64,14 @@ app.add_middleware(
 )
 
 # Mount routes
+@app.exception_handler(DatabaseNotConfiguredError)
+async def _database_not_configured(_request: Request, exc: DatabaseNotConfiguredError) -> JSONResponse:
+    # Account/Story DB routes need Postgres. A client still holding an account
+    # token (e.g. the extension after switching to a local backend without
+    # MT_DATABASE_URL) should get a clear 503, not an opaque 500 + traceback.
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
 app.include_router(translate_router)
 app.include_router(account_router)
 app.include_router(admin_router)

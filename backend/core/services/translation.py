@@ -1874,6 +1874,43 @@ def _format_previous_context_texts(
     )
 
 
+def _story_reference_images(config: TranslationConfig) -> List[Tuple[str, Dict[str, str]]]:
+    """(character name, {mime_type, data}) for every reference image the
+    request opted into (see endpoints/translate.py:_resolve_story_context),
+    decoded from their data URLs. Malformed entries are skipped."""
+    out: List[Tuple[str, Dict[str, str]]] = []
+    for c in config.story_characters:
+        for url in c.reference_images:
+            match = re.match(r"^data:(image/[\w.+-]+);base64,(.+)$", url, re.DOTALL)
+            if match:
+                out.append((c.name, {"mime_type": match.group(1), "data": match.group(2)}))
+    return out
+
+
+def _story_reference_image_parts(references, supports_per_part_res: bool, media_resolution) -> List[dict]:
+    parts = []
+    for _name, image in references:
+        part = {"inline_data": {"mime_type": image["mime_type"], "data": image["data"]}}
+        if supports_per_part_res:
+            part = _add_media_resolution_to_part(part, media_resolution)
+        parts.append(part)
+    return parts
+
+
+def _format_story_reference_note(references) -> str:
+    if not references:
+        return ""
+    lines = [f"- Reference image {i}: {name}" for i, (name, _img) in enumerate(references, 1)]
+    return (
+        "\n### Character reference images\n"
+        "The last {n} image(s) attached to this request are character reference sheets, in this order. "
+        "Use them only to recognise who is speaking/being addressed and their gender/age/appearance for "
+        "pronouns and register — never transcribe or translate them.\n".format(n=len(references))
+        + "\n".join(lines)
+        + "\n"
+    )
+
+
 def _format_story_context(config: TranslationConfig) -> str:
     """Format a logged-in account's Story DB (character database /
     relationships / glossary / continuity notes — see
@@ -2350,6 +2387,9 @@ def call_translation_api_batch(
     previous_context_images = previous_context_images or []
     if not config.send_full_page_context or config.ocr_method != "LLM":
         previous_context_images = []
+    # Character reference sheets ride along with the page images, so — like
+    # them — they only apply when the model actually receives images.
+    story_reference_images = _story_reference_images(config) if config.ocr_method == "LLM" else []
 
     if provider == "OpenAI-Compatible" and config.ocr_method == "LLM":
         has_full_page_context = config.send_full_page_context and bool(full_image_b64)
@@ -2397,8 +2437,14 @@ def call_translation_api_batch(
                 ocr_texts_output.extend(combined_ocr_texts)
             return combined_translations
 
-        max_previous_images = (
-            OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS - current_page_media_count
+        story_reference_images = story_reference_images[
+            : max(0, OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS - current_page_media_count)
+        ]
+        max_previous_images = max(
+            0,
+            OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS
+            - current_page_media_count
+            - len(story_reference_images),
         )
         if len(previous_context_images) > max_previous_images:
             log_message(
@@ -2484,6 +2530,8 @@ def call_translation_api_batch(
         )
 
     story_context_section = _format_story_context(config)
+    if story_reference_images:
+        story_context_section += _format_story_reference_note(story_reference_images)
 
     cache = get_cache()
     cache_key = cache.get_translation_cache_key(
@@ -2539,6 +2587,11 @@ def call_translation_api_batch(
                 previous_part, config.media_resolution_context
             )
         base_parts.append(previous_part)
+
+    reference_parts = _story_reference_image_parts(
+        story_reference_images, supports_per_part_res, config.media_resolution_context
+    )
+    base_parts.extend(reference_parts)
 
     try:
         if translation_mode == "two-step":
@@ -2659,6 +2712,7 @@ The target language is {output_language}. Use the appropriate translation approa
                         previous_part, config.media_resolution_context
                     )
                 translation_parts.append(previous_part)
+            translation_parts.extend(reference_parts)
 
             use_rosetta = is_rosetta_model(model_name)
             if use_rosetta:

@@ -39,6 +39,7 @@ class StoryCharacterConfig:
     gender: str = "unknown"
     role: Optional[str] = None
     voice_notes: Optional[str] = None
+    reference_images: List[str] = field(default_factory=list)  # data URLs; only populated when the request opted in (never the avatar)
 
 
 @dataclass
