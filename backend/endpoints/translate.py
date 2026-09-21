@@ -12,6 +12,10 @@ from PIL import Image
 from auth import verify_token
 from core.accounts import Account
 from schemas import (
+    StoryCharacter,
+    StoryContinuityNote,
+    StoryGlossaryTerm,
+    StoryRelationship,
     SuggestInstructionsRequest,
     SuggestInstructionsResponse,
     TestApiKeyRequest,
@@ -81,6 +85,34 @@ async def _pipeline_slot(is_priority: bool):
         async with _regular_pipeline_gate:
             async with _pipeline_semaphore:
                 yield
+
+
+def _resolve_story_context(req, account: "Account | None") -> None:
+    """When authenticated and the request carries a story_id, fetches that
+    logged-in account's Story DB (character database / relationships /
+    glossary / continuity notes — see core/story_context.py) and populates
+    req's story_characters/story_relationships/story_glossary/
+    story_continuity_notes in place, so _build_config() below can pick them
+    up the same way it already reads req.special_instructions etc.
+    Continuity notes are only populated when the story's own
+    continuity_notes_enabled toggle is on — unlike the other three, which
+    are always sent once non-empty. A no-op for anonymous requests,
+    requests without a story_id, or a stale/foreign story_id (silently
+    ignored rather than failing the whole translate call — same isinstance
+    guard as _apply_shared_llm_config, for the same direct-call-in-tests
+    reason)."""
+    if not isinstance(account, Account) or not req.story_id:
+        return
+    from core.story_context import StoryNotFoundError, get_story
+    try:
+        story = get_story(req.story_id, account.email)
+    except StoryNotFoundError:
+        return
+    req.story_characters = [StoryCharacter(**c) for c in story.characters]
+    req.story_relationships = [StoryRelationship(**r) for r in story.relationships]
+    req.story_glossary = [StoryGlossaryTerm(**g) for g in story.glossary]
+    if story.continuity_notes_enabled:
+        req.story_continuity_notes = [StoryContinuityNote(**n) for n in story.continuity_notes]
 
 
 def _apply_shared_llm_config(req, account: "Account | None") -> None:
@@ -170,6 +202,7 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
     plus bubble metadata.
     """
     _apply_shared_llm_config(req, account)
+    _resolve_story_context(req, account)
     _reject_oversized_image(req.image)
     models_dir = settings.models_dir
     fonts_dir = settings.fonts_base_dir
@@ -190,6 +223,18 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
         reasoning_effort=req.reasoning_effort,
         special_instructions=req.special_instructions,
         llm_instructions=req.llm_instructions,
+        story_characters=(
+            [c.model_dump() for c in req.story_characters] if req.story_characters else None
+        ),
+        story_relationships=(
+            [r.model_dump() for r in req.story_relationships] if req.story_relationships else None
+        ),
+        story_glossary=(
+            [g.model_dump() for g in req.story_glossary] if req.story_glossary else None
+        ),
+        story_continuity_notes=(
+            [n.model_dump() for n in req.story_continuity_notes] if req.story_continuity_notes else None
+        ),
         context_memory_enabled=req.context_memory_enabled,
         context_memory=req.context_memory,
         backup_api_keys=req.backup_api_keys,
@@ -278,6 +323,18 @@ def _translate_single_item(
             reasoning_effort=req.reasoning_effort,
             special_instructions=req.special_instructions,
             llm_instructions=req.llm_instructions,
+            story_characters=(
+                [c.model_dump() for c in req.story_characters] if req.story_characters else None
+            ),
+            story_relationships=(
+                [r.model_dump() for r in req.story_relationships] if req.story_relationships else None
+            ),
+            story_glossary=(
+                [g.model_dump() for g in req.story_glossary] if req.story_glossary else None
+            ),
+            story_continuity_notes=(
+                [n.model_dump() for n in req.story_continuity_notes] if req.story_continuity_notes else None
+            ),
             context_memory_enabled=req.context_memory_enabled,
             context_memory=req.context_memory,
             backup_api_keys=req.backup_api_keys,
@@ -365,6 +422,7 @@ async def translate_batch(req: TranslateBatchRequest, account=Depends(verify_tok
     model would likely want to count per-image here instead.
     """
     _apply_shared_llm_config(req, account)
+    _resolve_story_context(req, account)
     if len(req.images) > 20:
         raise HTTPException(
             status_code=400, detail="Maximum 20 images per batch"

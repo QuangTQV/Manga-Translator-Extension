@@ -1,4 +1,5 @@
 import base64
+import contextvars
 import json
 import random
 import re
@@ -15,6 +16,7 @@ from PIL import Image
 
 from core.caching import get_cache
 from core.config import TranslationConfig, calculate_reasoning_budget
+from core.live_ai_log import log_ai_call
 from core.image.image_utils import cv2_to_pil, pil_to_cv2, process_bubble_image_cached
 from core.image.ocr_detection import (
     extract_text_with_manga_ocr,
@@ -1172,12 +1174,26 @@ def _iter_llm_candidates(config: TranslationConfig):
             )
 
 
+# Read by _call_llm_endpoint_impl for the optional Live AI debug log
+# (core/live_ai_log.py) — a ContextVar rather than a parameter on
+# _call_llm_endpoint_impl, because that exact call signature is patched
+# directly with fixed-arity mock functions in ~15 places in
+# tests/test_rotation.py; adding a parameter there breaks all of them.
+# Always set immediately before use (by _call_llm_endpoint or
+# test_api_key), so no reset/token bookkeeping is needed despite
+# ThreadPoolExecutor reusing worker threads across unrelated calls.
+_live_ai_call_type: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "live_ai_call_type", default="translate"
+)
+
+
 def _call_llm_endpoint(
     config: TranslationConfig,
     parts: List[Dict[str, Any]],
     prompt_text: str,
     debug: bool = False,
     system_prompt: Optional[str] = None,
+    call_type: str = "translate",
 ) -> Optional[str]:
     """Dispatch an LLM API call, rotating through backup keys and fallback
     providers on rate limit, and log how long each attempt took.
@@ -1188,6 +1204,7 @@ def _call_llm_endpoint(
     in Xs" lumps together — and the single choke point for key/provider
     rotation, so OCR and translation calls both benefit automatically.
     """
+    _live_ai_call_type.set(call_type)
     all_candidates = list(_iter_llm_candidates(config))
 
     # Skip anything still cooling down from a recent rate-limit/credit
@@ -1350,7 +1367,7 @@ def _call_llm_endpoint(
     raise TranslationError("LLM call failed: no candidates were configured.")
 
 
-def _call_llm_endpoint_impl(
+def _dispatch_llm_call(
     config: TranslationConfig,
     parts: List[Dict[str, Any]],
     prompt_text: str,
@@ -1579,11 +1596,50 @@ def _call_llm_endpoint_impl(
         raise
 
 
+def _call_llm_endpoint_impl(
+    config: TranslationConfig,
+    parts: List[Dict[str, Any]],
+    prompt_text: str,
+    debug: bool = False,
+    system_prompt: Optional[str] = None,
+    max_retries: Optional[int] = None,
+    timeout: Optional[int] = None,
+) -> Optional[str]:
+    """Thin wrapper around _dispatch_llm_call that records every LLM
+    call's input/output for the optional "Live AI" debug log
+    (core/live_ai_log.py, gated by MT_LIVE_AI_LOG_ENABLED — a no-op when
+    that's off). Kept separate from _dispatch_llm_call rather than
+    inlining logging into its ~10 provider branches, each of which returns
+    directly from inside a shared try/except; wrapping the call from
+    outside instead means the actual per-provider dispatch stays a plain
+    function that returns/raises normally. call_type (translate/
+    suggest_instructions/test_key) comes from _live_ai_call_type, not a
+    parameter here — see that ContextVar's comment for why."""
+    call_type = _live_ai_call_type.get()
+    start = time.time()
+    try:
+        result = _dispatch_llm_call(config, parts, prompt_text, debug, system_prompt, max_retries, timeout)
+    except Exception as e:
+        log_ai_call(
+            provider=config.provider, model_name=config.model_name, call_type=call_type,
+            system_prompt=system_prompt, prompt_text=prompt_text, parts_for_size_estimate=parts,
+            response_text=None, error=str(e), latency_ms=(time.time() - start) * 1000,
+        )
+        raise
+    log_ai_call(
+        provider=config.provider, model_name=config.model_name, call_type=call_type,
+        system_prompt=system_prompt, prompt_text=prompt_text, parts_for_size_estimate=parts,
+        response_text=result, error=None, latency_ms=(time.time() - start) * 1000,
+    )
+    return result
+
+
 def test_api_key(config: TranslationConfig, debug: bool = False) -> tuple[bool, Optional[str]]:
     """Single, non-rotating LLM call for the popup's "Test API Key" button
     — deliberately bypasses _call_llm_endpoint's key/provider rotation so a
     failure is reported against exactly the one key under test, not
     silently retried against a different one that happens to work."""
+    _live_ai_call_type.set("test_key")
     try:
         result = _call_llm_endpoint_impl(
             config, parts=[], prompt_text="Reply with exactly: OK", debug=debug,
@@ -1816,6 +1872,75 @@ def _format_previous_context_texts(
         + "\n\n".join(page_blocks)
         + "\n"
     )
+
+
+def _format_story_context(config: TranslationConfig) -> str:
+    """Format a logged-in account's Story DB (character database /
+    relationships / glossary / continuity notes — see
+    core/story_context.py, resolved server-side in
+    endpoints/translate.py:_resolve_story_context) for the prompt. Empty
+    string if the account isn't logged in, has no story selected, or the
+    story is empty. story_continuity_notes is only ever non-empty when the
+    story's own continuity_notes_enabled toggle is on."""
+    if (
+        not config.story_characters
+        and not config.story_relationships
+        and not config.story_glossary
+        and not config.story_continuity_notes
+    ):
+        return ""
+
+    blocks = []
+
+    if config.story_characters:
+        char_lines = []
+        for c in config.story_characters:
+            details = []
+            if c.gender and c.gender != "unknown":
+                details.append(c.gender)
+            if c.role:
+                details.append(c.role)
+            if c.voice_notes:
+                details.append(f"voice/tone: {c.voice_notes}")
+            line = f"- {c.name}"
+            if details:
+                line += " (" + "; ".join(details) + ")"
+            char_lines.append(line)
+        blocks.append("### Characters\n" + "\n".join(char_lines))
+
+    if config.story_relationships:
+        names_by_id = {c.id: c.name for c in config.story_characters}
+        rel_lines = []
+        for r in config.story_relationships:
+            a = names_by_id.get(r.character_a_id, r.character_a_id)
+            b = names_by_id.get(r.character_b_id, r.character_b_id)
+            line = f"- {a} <-> {b}: {r.surface_relation}"
+            if r.address_notes:
+                line += f" ({r.address_notes})"
+            rel_lines.append(line)
+        blocks.append("### Relationships\n" + "\n".join(rel_lines))
+
+    if config.story_glossary:
+        term_lines = []
+        for g in config.story_glossary:
+            line = f"- {g.term} -> {g.translation}"
+            if g.notes:
+                line += f" ({g.notes})"
+            term_lines.append(line)
+        blocks.append(
+            "### Glossary (use these exact translations)\n" + "\n".join(term_lines)
+        )
+
+    if config.story_continuity_notes:
+        note_lines = []
+        for n in config.story_continuity_notes:
+            prefix = f"[{n.source_label}] " if n.source_label else ""
+            note_lines.append(f"- {prefix}{n.text}")
+        blocks.append(
+            "### Continuity Notes (established earlier in this story)\n" + "\n".join(note_lines)
+        )
+
+    return "\n## STORY CONTEXT (character database)\n" + "\n\n".join(blocks) + "\n"
 
 
 def _format_special_instructions(config: TranslationConfig) -> str:
@@ -2358,6 +2483,8 @@ def call_translation_api_batch(
             f"{pronoun_map_reuse_note}"
         )
 
+    story_context_section = _format_story_context(config)
+
     cache = get_cache()
     cache_key = cache.get_translation_cache_key(
         images_b64,
@@ -2494,6 +2621,7 @@ You have been provided with a list of {total_elements} transcribed text segments
 {context_hints}
 {previous_text_section}
 {context_memory_section}
+{story_context_section}
 {ocr_input_section}
 
 ## TASK
@@ -2646,6 +2774,7 @@ You have been provided with {total_elements} individual text images from a manga
 {context_hints}
 {previous_text_section}
 {context_memory_section}
+{story_context_section}
 ## TASK
 For each image, you must perform two steps:
 1.  **Transcribe:** Extract the original text exactly as it appears.
@@ -2840,7 +2969,8 @@ guessing.
 """
 
     result = _call_llm_endpoint(
-        config, parts, prompt_text, debug=debug, system_prompt=system_prompt
+        config, parts, prompt_text, debug=debug, system_prompt=system_prompt,
+        call_type="suggest_instructions",
     )
     if not result or not result.strip():
         raise TranslationError("Empty response while generating suggested instructions.")

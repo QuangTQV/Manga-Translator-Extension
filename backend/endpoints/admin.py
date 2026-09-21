@@ -7,15 +7,17 @@ untouched by) the normal local/self-hosted setup.
 """
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth import require_admin
+from auth import require_admin, require_live_ai_log_access
+from config import settings
 from core.accounts import Account
+from core.live_ai_log import read_recent_live_ai_log
 from core.server_config import (
     SecretKeyMismatchError,
     SecretKeyNotConfiguredError,
     get_shared_llm_config,
     set_shared_llm_config,
 )
-from schemas import SharedLlmConfigRequest, SharedLlmConfigResponse
+from schemas import LiveAiLogResponse, SharedLlmConfigRequest, SharedLlmConfigResponse
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -62,3 +64,22 @@ async def set_llm_config(
     except SecretKeyNotConfiguredError as e:
         raise HTTPException(status_code=503, detail=str(e))
     return _to_response(config)
+
+
+@router.get("/live-ai-log", response_model=LiveAiLogResponse)
+async def get_live_ai_log(
+    limit: int = 200, _access: Account | None = Depends(require_live_ai_log_access),
+) -> LiveAiLogResponse:
+    """Recent entries from the optional "Live AI" debug log (every LLM
+    call this backend has made, any provider — see core/live_ai_log.py),
+    for an operator to inspect without SSH-ing in to tail the file
+    directly. 404s when the feature itself is off (MT_LIVE_AI_LOG_ENABLED)
+    rather than silently returning an empty list, so "disabled" and "no
+    calls logged yet" aren't indistinguishable."""
+    if not settings.live_ai_log_enabled:
+        raise HTTPException(
+            status_code=404,
+            detail="Live AI logging is disabled (set MT_LIVE_AI_LOG_ENABLED=true)",
+        )
+    entries = read_recent_live_ai_log(min(max(limit, 1), 1000))
+    return LiveAiLogResponse(entries=entries)

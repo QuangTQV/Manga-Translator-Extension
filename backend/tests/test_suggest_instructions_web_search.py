@@ -20,7 +20,7 @@ def _capture_prompt(**kwargs):
     and return the prompt_text it was actually called with."""
     captured = {}
 
-    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None):
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **_kwargs):
         captured["prompt_text"] = prompt_text
         captured["system_prompt"] = system_prompt
         return "- some note"

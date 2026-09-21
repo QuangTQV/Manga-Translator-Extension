@@ -32,6 +32,10 @@ from core.config import (
     OutsideTextConfig,
     PreprocessingConfig,
     RenderingConfig,
+    StoryCharacterConfig,
+    StoryContinuityNoteConfig,
+    StoryGlossaryTermConfig,
+    StoryRelationshipConfig,
     TranslationConfig,
     OutputConfig,
 )
@@ -178,6 +182,42 @@ def _build_fallback_provider_configs(
             )
         )
     return built
+
+
+def _build_story_context_configs(
+    characters: list[dict] | None,
+    relationships: list[dict] | None,
+    glossary: list[dict] | None,
+    continuity_notes: list[dict] | None,
+) -> tuple[list[StoryCharacterConfig], list[StoryRelationshipConfig], list[StoryGlossaryTermConfig], list[StoryContinuityNoteConfig]]:
+    """Normalize a resolved Story DB's raw dicts (see
+    endpoints/translate.py:_resolve_story_context) into the dataclasses
+    core/services/translation.py's prompt builder reads."""
+    built_characters = [
+        StoryCharacterConfig(
+            id=c["id"], name=c["name"], gender=c.get("gender") or "unknown",
+            role=c.get("role"), voice_notes=c.get("voice_notes"),
+        )
+        for c in (characters or [])
+    ]
+    built_relationships = [
+        StoryRelationshipConfig(
+            character_a_id=r["character_a_id"], character_b_id=r["character_b_id"],
+            surface_relation=r["surface_relation"], address_notes=r.get("address_notes"),
+        )
+        for r in (relationships or [])
+    ]
+    built_glossary = [
+        StoryGlossaryTermConfig(
+            term=g["term"], translation=g["translation"], notes=g.get("notes"),
+        )
+        for g in (glossary or [])
+    ]
+    built_continuity_notes = [
+        StoryContinuityNoteConfig(text=n["text"], source_label=n.get("source_label"))
+        for n in (continuity_notes or [])
+    ]
+    return built_characters, built_relationships, built_glossary, built_continuity_notes
 
 
 def build_test_key_config(
@@ -369,6 +409,10 @@ def _build_config(
     api_key_weight: float | None = None,
     backup_api_key_weights: list[float] | None = None,
     enable_web_search: bool = False,
+    story_characters: list[dict] | None = None,
+    story_relationships: list[dict] | None = None,
+    story_glossary: list[dict] | None = None,
+    story_continuity_notes: list[dict] | None = None,
     inpainting_method: str = "auto",
     flux_remote_base_url: str | None = None,
 ) -> MangaTranslatorConfig:
@@ -417,6 +461,9 @@ def _build_config(
     resolved_backup_api_keys, resolved_backup_api_key_weights = _filter_keys_with_weights(
         backup_api_keys or [], backup_api_key_weights
     )
+    resolved_story_characters, resolved_story_relationships, resolved_story_glossary, resolved_story_continuity_notes = (
+        _build_story_context_configs(story_characters, story_relationships, story_glossary, story_continuity_notes)
+    )
 
     detection = DetectionConfig(
         confidence=0.35,
@@ -453,6 +500,10 @@ def _build_config(
         reasoning_effort=reasoning_effort,
         special_instructions=special_instructions,
         llm_instructions=llm_instructions,
+        story_characters=resolved_story_characters,
+        story_relationships=resolved_story_relationships,
+        story_glossary=resolved_story_glossary,
+        story_continuity_notes=resolved_story_continuity_notes,
         context_memory_enabled=context_memory_enabled,
         context_memory=context_memory,
         backup_api_keys=resolved_backup_api_keys,

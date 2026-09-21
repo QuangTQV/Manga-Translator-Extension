@@ -158,6 +158,43 @@ Lưu ý:
 - Chỉ phù hợp dùng cá nhân/test; Kaggle không cam kết SLA cho server chạy liên tục.
 - Có thể chạy `flux_worker.py` ngay trên máy bạn (không qua Kaggle) để test trước khi lên Kaggle thật — chỉ cần trỏ URL remote về `http://127.0.0.1:8189`.
 
+## 9. (Tuỳ chọn) Đăng nhập & CSDL truyện (Story DB)
+
+Tính năng CSDL truyện — nhân vật (tên/giới tính/vai trò/giọng điệu), mối quan hệ, thuật ngữ dịch cố định, ghi chú diễn biến, giữ riêng theo từng truyện — là **tuỳ chọn và cần đăng nhập**. Khác với mọi thứ ở trên, phần này cần thêm một database Postgres chạy cùng backend.
+
+1. Chạy Postgres cục bộ bằng Docker (chỉ cần làm 1 lần, container giữ dữ liệu lâu dài):
+
+```bash
+cd backend
+docker compose up -d
+```
+
+2. Set biến môi trường trước khi chạy backend:
+
+```bash
+export MT_DATABASE_URL="postgresql+psycopg2://manga_translator:manga_translator@localhost:5432/manga_translator"
+```
+
+3. Chạy lại backend (`./.venv/bin/python main.py`) như bình thường. **Không cần bật `MT_REQUIRE_AUTH`** — đăng nhập ở đây chỉ để dùng CSDL truyện, không bắt buộc cả backend phải yêu cầu tài khoản cho mọi yêu cầu dịch.
+4. Mở popup → tab **Account** → đăng nhập bằng email (nút Register) hoặc Google.
+5. Sang tab **Story DB** → bấm **+ Create** để tạo 1 truyện → nhập nhân vật/mối quan hệ/thuật ngữ/ghi chú diễn biến → bấm **Save story**. Truyện đang chọn sẽ tự động được dùng khi bạn dịch trang.
+
+## 10. (Tuỳ chọn) Live AI — log input/output của mọi lệnh gọi AI
+
+Công cụ debug: ghi lại prompt gửi đi và response nhận về của mọi lệnh gọi tới LLM (mọi provider, mọi tính năng dịch/suggest/test key). Mặc định tắt, không ảnh hưởng gì nếu không bật.
+
+```bash
+export MT_LIVE_AI_LOG_ENABLED=true
+```
+
+Xem các lệnh gọi gần nhất qua API (không cần đăng nhập nếu chưa bật `MT_REQUIRE_AUTH`):
+
+```bash
+curl http://localhost:7677/admin/live-ai-log
+```
+
+Log cũng được ghi ra file `backend/logs/live_ai.jsonl` — không lưu ảnh (chỉ ghi số lượng ảnh + KB ước tính), chỉ lưu phần text.
+
 ## Xử lý sự cố thường gặp
 
 | Vấn đề | Cách xử lý |

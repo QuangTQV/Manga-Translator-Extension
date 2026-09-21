@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from endpoints.account import router as account_router
 from endpoints.admin import router as admin_router
+from endpoints.stories import router as stories_router
 from endpoints.translate import router as translate_router
 
 
@@ -33,6 +34,12 @@ async def _lifespan(_app: FastAPI):
         from core.server_config import ensure_schema as ensure_server_config_schema
         ensure_accounts_schema()
         ensure_server_config_schema()
+    # Story DB (character database) is opt-in per logged-in user and
+    # doesn't depend on require_auth (see auth.py:require_login) — only on
+    # a database actually being configured.
+    if settings.database_url:
+        from core.story_context import ensure_schema as ensure_story_context_schema
+        ensure_story_context_schema()
     yield
 
 
@@ -58,6 +65,7 @@ app.add_middleware(
 app.include_router(translate_router)
 app.include_router(account_router)
 app.include_router(admin_router)
+app.include_router(stories_router)
 
 
 @app.get("/")

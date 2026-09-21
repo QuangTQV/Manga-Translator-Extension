@@ -272,6 +272,63 @@ export interface TranslateRequest {
   inpainting_method?: string;
   flux_remote_base_url?: string;
   previous_context_texts?: string[][]; // prior pages' OCR transcripts, oldest-to-newest, for cross-page consistency
+  story_id?: string; // id of a logged-in-account Story DB (see popup's Story DB tab) to inject as structured character/relationship/glossary context; ignored when not logged in
+}
+
+// One character in a logged-in account's Story DB (backend/schemas.py's
+// StoryCharacter) — a client-generated id links it to StoryRelationship
+// entries below.
+export interface StoryCharacter {
+  id: string;
+  name: string;
+  gender: string; // male | female | other | unknown
+  role?: string;
+  voice_notes?: string;
+}
+
+// How two characters relate/address each other — a "surface" description
+// (not a psychology model), just enough to get pronouns/honorifics/register
+// right.
+export interface StoryRelationship {
+  id: string;
+  character_a_id: string;
+  character_b_id: string;
+  surface_relation: string;
+  address_notes?: string;
+}
+
+// A fixed term translation (skill/item/nickname/place name) to keep
+// consistent across pages instead of leaving it to the model each time.
+export interface StoryGlossaryTerm {
+  id: string;
+  term: string;
+  translation: string;
+  notes?: string;
+}
+
+// A short, user-maintained note about something that's happened/been
+// revealed in the story (e.g. "Ch.5: Ren is revealed to be Aoi's
+// half-brother") — free text plus an optional source label, not an
+// auto-extracted/categorized fact ledger. Only sent to the model when the
+// story's continuity_notes_enabled toggle is on.
+export interface StoryContinuityNote {
+  id: string;
+  text: string;
+  source_label?: string; // e.g. "Chapter 5" or "Page 12"
+}
+
+export interface StorySummary {
+  id: string;
+  name: string;
+  updated_at: number;
+}
+
+export interface StoryDetail extends StorySummary {
+  characters: StoryCharacter[];
+  relationships: StoryRelationship[];
+  glossary: StoryGlossaryTerm[];
+  continuity_notes: StoryContinuityNote[];
+  continuity_notes_enabled: boolean;
 }
 
 export interface UrlPattern {
@@ -306,6 +363,11 @@ export interface AppSettings {
   // request (see background/index.ts's authHeaders()).
   accountToken?: string;
   accountEmail?: string;
+  // The Story DB (character database/relationships/glossary — see the
+  // popup's "Story DB" tab) currently selected to inject into translate
+  // requests. Only meaningful when accountToken is set; a logged-out user
+  // never sends story_id regardless of this value.
+  activeStoryId?: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {

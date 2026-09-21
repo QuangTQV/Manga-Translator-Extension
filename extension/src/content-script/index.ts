@@ -3993,6 +3993,9 @@ function buildTranslateRequest(
     fallback_providers: rotation.fallback_providers,
     rotation_strategy: settings.config.rotationStrategy,
     cooldown_seconds: settings.config.cooldownSeconds,
+    // Only sent when logged in — a no-op for the normal local/self-hosted
+    // setup, where accountToken is unset (see backend/auth.py:require_login).
+    story_id: settings.accountToken ? settings.activeStoryId || undefined : undefined,
   };
 }
 

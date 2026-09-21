@@ -38,6 +38,84 @@ class FixHintConfig(BaseModel):
     instruction: str
 
 
+class StoryCharacter(BaseModel):
+    """One character in a Story DB (see core/story_context.py) — a
+    client-generated id links it to StoryRelationship entries below."""
+
+    id: str
+    name: str
+    gender: str = "unknown"  # male | female | other | unknown
+    role: Optional[str] = None
+    voice_notes: Optional[str] = None  # personality/tone, for consistent voice across pages
+
+
+class StoryRelationship(BaseModel):
+    """How two characters relate/address each other — a "surface"
+    description (not a psychology model), just enough to get pronouns/
+    honorifics/register right."""
+
+    id: str
+    character_a_id: str
+    character_b_id: str
+    surface_relation: str  # e.g. "boss and employee", "secretly in love"
+    address_notes: Optional[str] = None  # how they address each other, if not obvious from surface_relation
+
+
+class StoryGlossaryTerm(BaseModel):
+    """A fixed term translation (skill/item/nickname/place name) to keep
+    consistent across pages instead of leaving it to the model each time."""
+
+    id: str
+    term: str
+    translation: str
+    notes: Optional[str] = None
+
+
+class StoryContinuityNote(BaseModel):
+    """A short, user-maintained note about something that happened/was
+    revealed in the story (e.g. "Ch.5: Ren is revealed to be Aoi's
+    half-brother") — simpler than a categorized fact ledger: just free
+    text plus an optional source label, manually kept by the user rather
+    than auto-extracted. Only sent to the model when the story's
+    continuity_notes_enabled toggle is on."""
+
+    id: str
+    text: str
+    source_label: Optional[str] = None  # e.g. "Chapter 5" or "Page 12" — where this was established
+
+
+class StoryContextPayload(BaseModel):
+    """Body of PUT /stories/{id} — a full replace of one story's content."""
+
+    name: str
+    characters: List[StoryCharacter] = []
+    relationships: List[StoryRelationship] = []
+    glossary: List[StoryGlossaryTerm] = []
+    continuity_notes: List[StoryContinuityNote] = []
+    continuity_notes_enabled: bool = False  # on/off switch — notes are kept even when off, just not sent to the model
+
+
+class CreateStoryRequest(BaseModel):
+    """Body of POST /stories — creates an empty story the user then fills
+    in via PUT /stories/{id}."""
+
+    name: str
+
+
+class StorySummary(BaseModel):
+    """One row of GET /stories — enough to populate a picker without
+    fetching every story's full content."""
+
+    id: str
+    name: str
+    updated_at: float
+
+
+class StoryDetail(StoryContextPayload):
+    id: str
+    updated_at: float
+
+
 class TranslateOptions(BaseModel):
     """Fields shared by single and batch translation requests."""
 
@@ -75,6 +153,13 @@ class TranslateOptions(BaseModel):
     cooldown_seconds: Optional[float] = None  # how long a rate-limited key/provider is skipped before being retried (default 15s)
     api_key_weight: Optional[float] = None  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
     backup_api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
+    story_id: Optional[str] = None  # id of a logged-in-account Story DB (see core/story_context.py) to inject as structured context; ignored when not logged in or the id doesn't resolve
+    # Populated server-side by endpoints/translate.py:_resolve_story_context() when story_id
+    # resolves against the logged-in account — not meant to be set by the client directly.
+    story_characters: List[StoryCharacter] = []
+    story_relationships: List[StoryRelationship] = []
+    story_glossary: List[StoryGlossaryTerm] = []
+    story_continuity_notes: List[StoryContinuityNote] = []  # only populated when the story's continuity_notes_enabled is on
 
 
 class TranslateRequest(TranslateOptions):
@@ -213,3 +298,24 @@ class SharedLlmConfigResponse(BaseModel):
     # every time an admin opens the tab.
     api_key_set: bool = False
     base_url: Optional[str] = None
+
+
+class LiveAiLogEntry(BaseModel):
+    """One recorded LLM call — see core/live_ai_log.py. Image data is
+    deliberately excluded (just a count + approximate KB)."""
+
+    timestamp: float
+    provider: str
+    model: Optional[str] = None
+    call_type: str  # "translate" | "suggest_instructions" | "test_key"
+    system_prompt: Optional[str] = None
+    prompt_text: str
+    images_count: int
+    images_kb: float
+    response_text: Optional[str] = None
+    error: Optional[str] = None
+    latency_ms: float
+
+
+class LiveAiLogResponse(BaseModel):
+    entries: List[LiveAiLogEntry]

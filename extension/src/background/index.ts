@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
-import type { TranslateRequest, TranslateResponse } from '../shared/types.js';
+import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary } from '../shared/types.js';
 import { normalizeUiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -226,6 +226,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'ADMIN_SET_LLM_CONFIG') {
       const { body } = message as { type: string; body: { provider: string; model_name?: string; api_key?: string; base_url?: string } };
       sendResponse(await adminSetLlmConfig(body));
+      return;
+    }
+
+    if (message.type === 'STORY_LIST') {
+      sendResponse(await storiesList());
+      return;
+    }
+
+    if (message.type === 'STORY_GET') {
+      const { id } = message as { type: string; id: string };
+      sendResponse(await storyGet(id));
+      return;
+    }
+
+    if (message.type === 'STORY_CREATE') {
+      const { name } = message as { type: string; name: string };
+      sendResponse(await storyCreate(name));
+      return;
+    }
+
+    if (message.type === 'STORY_SAVE') {
+      const { id, payload } = message as { type: string; id: string; payload: StoryContextPayload };
+      sendResponse(await storySave(id, payload));
+      return;
+    }
+
+    if (message.type === 'STORY_DELETE') {
+      const { id } = message as { type: string; id: string };
+      sendResponse(await storyDelete(id));
       return;
     }
   })();
@@ -608,6 +637,83 @@ async function adminSetLlmConfig(body: { provider: string; model_name?: string; 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story DB (character database / relationships / glossary) — the popup's
+// "Story DB" tab. Opt-in per logged-in account, independent of whether the
+// deployment enforces MT_REQUIRE_AUTH — see backend/auth.py:require_login
+// and backend/core/story_context.py.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StoryContextPayload {
+  name: string;
+  characters: StoryDetail['characters'];
+  relationships: StoryDetail['relationships'];
+  glossary: StoryDetail['glossary'];
+}
+
+interface StoryListResult { ok: boolean; stories?: StorySummary[]; error?: string; }
+interface StoryDetailResult { ok: boolean; story?: StoryDetail; error?: string; }
+interface StoryOkResult { ok: boolean; error?: string; }
+
+async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data?: T; error?: string }> {
+  const settings = await getSettings();
+  if (!settings.accountToken) return { ok: false, error: 'No account token' };
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const endpoint = `${backendUrl.replace(/\/$/, '')}${path}`;
+  try {
+    const res = await fetch(endpoint, {
+      ...init,
+      headers: { ...(init.headers ?? {}), Authorization: `Bearer ${settings.accountToken}` },
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+        else detail = JSON.stringify(errBody).slice(0, 200);
+      } catch { /* ignore */ }
+      return { ok: false, error: detail };
+    }
+    return { ok: true, data: (await res.json()) as T };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: `Could not reach backend: ${msg}` };
+  }
+}
+
+async function storiesList(): Promise<StoryListResult> {
+  const result = await storiesApiCall<StorySummary[]>('/stories', {});
+  return { ok: result.ok, stories: result.data, error: result.error };
+}
+
+async function storyGet(id: string): Promise<StoryDetailResult> {
+  const result = await storiesApiCall<StoryDetail>(`/stories/${encodeURIComponent(id)}`, {});
+  return { ok: result.ok, story: result.data, error: result.error };
+}
+
+async function storyCreate(name: string): Promise<StoryDetailResult> {
+  const result = await storiesApiCall<StoryDetail>('/stories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return { ok: result.ok, story: result.data, error: result.error };
+}
+
+async function storySave(id: string, payload: StoryContextPayload): Promise<StoryDetailResult> {
+  const result = await storiesApiCall<StoryDetail>(`/stories/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { ok: result.ok, story: result.data, error: result.error };
+}
+
+async function storyDelete(id: string): Promise<StoryOkResult> {
+  const result = await storiesApiCall<{ ok: boolean }>(`/stories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return { ok: result.ok, error: result.error };
 }
 
 // "Sign in with Google" — chrome.identity.getAuthToken() needs manifest.json's
