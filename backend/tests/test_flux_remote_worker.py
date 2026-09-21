@@ -81,8 +81,9 @@ def test_remote_base_url_none_stays_none():
 def test_run_remote_inference_sends_the_expected_payload_and_decodes_the_result(monkeypatch):
     captured = {}
 
-    def fake_post(url, json=None, timeout=None):
+    def fake_post(url, json=None, timeout=None, headers=None):
         captured["url"] = url
+        captured["headers"] = headers
         captured["json"] = json
         captured["timeout"] = timeout
         return _FakeResponse(200, {"image_base64": _fake_png_b64((16, 20))})
@@ -99,7 +100,7 @@ def test_run_remote_inference_sends_the_expected_payload_and_decodes_the_result(
     assert result is not None
     assert result.size == (16, 20)
     assert captured["url"] == "http://example.com:8189/inpaint"
-    assert captured["timeout"] == 42.0
+    assert captured["timeout"] == (5.0, 42.0)  # (connect, read)
     payload = captured["json"]
     assert payload["width"] == 16
     assert payload["height"] == 20
@@ -153,7 +154,7 @@ def test_run_remote_inference_returns_none_on_malformed_response_body(monkeypatc
 def test_inpaint_mask_uses_remote_inference_when_configured(monkeypatch):
     import numpy as np
 
-    def fake_post(url, json=None, timeout=None):
+    def fake_post(url, json=None, timeout=None, headers=None):
         # Echo back a same-size image so the composite step has something
         # valid to work with.
         w, h = json["width"], json["height"]
@@ -277,3 +278,145 @@ def test_worker_inpaint_returns_503_when_inference_unavailable(monkeypatch):
         "width": 8, "height": 8,
     })
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Token auth, circuit breaker, warnings
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_remote_breaker():
+    import core.image.inpainting as inp
+
+    inp._remote_state.clear()
+    yield
+    inp._remote_state.clear()
+
+
+def test_token_is_sent_as_a_header_only_when_configured(monkeypatch):
+    seen = []
+
+    def fake_post(url, json=None, timeout=None, headers=None):
+        seen.append(headers)
+        return _FakeResponse(200, {"image_base64": _fake_png_b64((8, 8))})
+
+    monkeypatch.setattr("requests.post", fake_post)
+    with_token = FluxKleinInpainter(remote_base_url="http://w.example.com", remote_token="s3cret")
+    without = FluxKleinInpainter(remote_base_url="http://w.example.com")
+    with_token._run_remote_inference(Image.new("RGB", (8, 8)), 8, 8, seed=1)
+    without._run_remote_inference(Image.new("RGB", (8, 8)), 8, 8, seed=1)
+    assert seen == [{"X-Flux-Worker-Token": "s3cret"}, {}]
+
+
+def test_401_reports_unauthorized_warning_and_returns_none(monkeypatch):
+    from core.image.inpainting import remote_warning_sink
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: _FakeResponse(401, {}))
+    sink = []
+    tok = remote_warning_sink.set(sink)
+    try:
+        result = FluxKleinInpainter(remote_base_url="http://w.example.com")._run_remote_inference(
+            Image.new("RGB", (8, 8)), 8, 8, seed=1
+        )
+    finally:
+        remote_warning_sink.reset(tok)
+    assert result is None
+    assert sink == ["flux_remote_unauthorized"]
+
+
+def test_circuit_breaker_skips_calls_after_repeated_failures(monkeypatch):
+    calls = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        raise ConnectionError("down")
+
+    monkeypatch.setattr("requests.post", fake_post)
+    inpainter = FluxKleinInpainter(remote_base_url="http://dead.example.com")
+    img = Image.new("RGB", (8, 8))
+    for _ in range(5):
+        assert inpainter._run_remote_inference(img, 8, 8, seed=1) is None
+    # Two real attempts trip the breaker (threshold 2); the other three are
+    # skipped instantly instead of each waiting on a timeout.
+    assert len(calls) == 2
+
+
+def test_circuit_breaker_closes_again_after_the_cooldown(monkeypatch):
+    import core.image.inpainting as inp
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: (_ for _ in ()).throw(ConnectionError("down")))
+    inpainter = FluxKleinInpainter(remote_base_url="http://flaky.example.com")
+    img = Image.new("RGB", (8, 8))
+    for _ in range(2):
+        inpainter._run_remote_inference(img, 8, 8, seed=1)
+    assert inp._remote_is_open("http://flaky.example.com")
+    inp._remote_state["http://flaky.example.com"]["open_until"] = 0.0  # cooldown elapsed
+    assert not inp._remote_is_open("http://flaky.example.com")
+
+
+def test_success_resets_the_failure_count(monkeypatch):
+    import core.image.inpainting as inp
+
+    outcomes = iter([ConnectionError("x"), "ok", ConnectionError("x")])
+
+    def fake_post(*a, **k):
+        o = next(outcomes)
+        if isinstance(o, Exception):
+            raise o
+        return _FakeResponse(200, {"image_base64": _fake_png_b64((8, 8))})
+
+    monkeypatch.setattr("requests.post", fake_post)
+    inpainter = FluxKleinInpainter(remote_base_url="http://blip.example.com")
+    img = Image.new("RGB", (8, 8))
+    for _ in range(3):
+        inpainter._run_remote_inference(img, 8, 8, seed=1)
+    assert not inp._remote_is_open("http://blip.example.com")
+
+
+def test_failure_reports_unreachable_warning_once(monkeypatch):
+    from core.image.inpainting import remote_warning_sink
+
+    monkeypatch.setattr("requests.post", lambda *a, **k: (_ for _ in ()).throw(ConnectionError("down")))
+    sink = []
+    tok = remote_warning_sink.set(sink)
+    try:
+        inpainter = FluxKleinInpainter(remote_base_url="http://dead2.example.com")
+        for _ in range(4):
+            inpainter._run_remote_inference(Image.new("RGB", (8, 8)), 8, 8, seed=1)
+    finally:
+        remote_warning_sink.reset(tok)
+    assert sink == ["flux_remote_unreachable"]  # deduped across regions/breaker skips
+
+
+def test_worker_requires_the_token_when_configured(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import flux_worker
+
+    monkeypatch.setattr(flux_worker, "_auth_token", "s3cret")
+    monkeypatch.setattr(FluxKleinInpainter, "load_models", lambda self: None)
+    monkeypatch.setattr(
+        FluxKleinInpainter, "_run_local_inference",
+        lambda self, image, w, h, seed, verbose=False: Image.new("RGB", (w, h)),
+    )
+    client = TestClient(flux_worker.app)
+    body = {"image_base64": _fake_png_b64((8, 8)), "width": 8, "height": 8}
+
+    assert client.get("/health").status_code == 401
+    assert client.post("/inpaint", json=body).status_code == 401
+    assert client.post("/inpaint", json=body, headers={"X-Flux-Worker-Token": "wrong"}).status_code == 401
+    good = {"X-Flux-Worker-Token": "s3cret"}
+    assert client.get("/health", headers=good).status_code == 200
+    assert client.post("/inpaint", json=body, headers=good).status_code == 200
+
+
+def test_translate_helper_returns_the_warnings_collected_in_the_same_thread():
+    from endpoints.translate import _run_with_warnings
+    from core.image.inpainting import _report_remote_warning
+
+    def fake_pipeline(x):
+        _report_remote_warning("flux_remote_unreachable")
+        return x * 2
+
+    result, warnings = _run_with_warnings(fake_pipeline, 21)
+    assert result == 42
+    assert warnings == ["flux_remote_unreachable"]

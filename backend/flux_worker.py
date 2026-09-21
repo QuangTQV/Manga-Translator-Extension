@@ -9,7 +9,7 @@ here instead of running inference itself.
 See docs/HUONG-DAN-CHAY.md for the full Kaggle + cloudflared walkthrough.
 
 Usage:
-    python flux_worker.py [--host 0.0.0.0] [--port 8189] [--variant 4b|9b] [--hf-token hf_xxx]
+    python flux_worker.py [--host 0.0.0.0] [--port 8189] [--variant 4b|9b] [--hf-token hf_xxx] [--token secret]
 
 Needs the exact same installed environment as the main backend
 (`pip install -e .` from this directory) — it reuses this repo's own
@@ -28,7 +28,10 @@ if str(_backend_dir) not in sys.path:
 
 import torch
 import uvicorn
-from fastapi import FastAPI, HTTPException
+import hmac
+import os
+
+from fastapi import Depends, FastAPI, Header, HTTPException
 from PIL import Image
 from pydantic import BaseModel
 
@@ -47,6 +50,19 @@ _inpainters: dict[str, FluxKleinInpainter] = {}
 # Optional Hugging Face token (--hf-token, or the HF_TOKEN env var, which
 # huggingface_hub also picks up on its own) — required for the gated 9B repo.
 _hf_token = ""
+
+# Optional shared secret (--token, or the FLUX_WORKER_TOKEN env var). When
+# set, both endpoints require a matching X-Flux-Worker-Token header — the
+# tunnel URL is random but otherwise anyone who learns it could spend your
+# GPU. Empty means no auth, same as before.
+_auth_token = os.environ.get("FLUX_WORKER_TOKEN", "")
+
+
+def _require_token(x_flux_worker_token: str | None = Header(None)) -> None:
+    if not _auth_token:
+        return
+    if not x_flux_worker_token or not hmac.compare_digest(x_flux_worker_token, _auth_token):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-Flux-Worker-Token")
 
 
 def _get_inpainter(variant: str, num_inference_steps: int) -> FluxKleinInpainter:
@@ -74,7 +90,7 @@ class InpaintResponse(BaseModel):
     image_base64: str
 
 
-@app.get("/health")
+@app.get("/health", dependencies=[Depends(_require_token)])
 async def health() -> dict:
     device = (
         "cuda" if torch.cuda.is_available()
@@ -84,7 +100,7 @@ async def health() -> dict:
     return {"status": "ok", "loaded_variants": list(_inpainters.keys()), "device": device}
 
 
-@app.post("/inpaint", response_model=InpaintResponse)
+@app.post("/inpaint", response_model=InpaintResponse, dependencies=[Depends(_require_token)])
 async def inpaint(req: InpaintRequest) -> InpaintResponse:
     try:
         image = Image.open(io.BytesIO(base64.b64decode(req.image_base64))).convert("RGB")
@@ -113,8 +129,11 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8189)
     parser.add_argument("--variant", default="4b", choices=["4b", "9b"])
     parser.add_argument("--hf-token", default="", help="Hugging Face token (needed for the gated 9B model)")
+    parser.add_argument("--token", default="", help="Shared secret clients must send as X-Flux-Worker-Token (or set FLUX_WORKER_TOKEN)")
     args = parser.parse_args()
     _hf_token = args.hf_token
+    if args.token:
+        _auth_token = args.token
 
     print(f"Pre-loading Flux Klein {args.variant.upper()} (first run downloads weights, can take a few minutes)...")
     _get_inpainter(args.variant, num_inference_steps=4)

@@ -434,6 +434,7 @@ def process_outside_text(
                     verbose=verbose,
                     remote_base_url=config.outside_text.flux_remote_base_url,
                     remote_timeout_seconds=config.outside_text.flux_remote_timeout_seconds,
+                    remote_token=config.outside_text.flux_remote_token,
                 )
                 log_message("Using Flux.2 Klein 9B for inpainting", verbose=verbose)
             except Exception as e:
@@ -455,6 +456,7 @@ def process_outside_text(
                     verbose=verbose,
                     remote_base_url=config.outside_text.flux_remote_base_url,
                     remote_timeout_seconds=config.outside_text.flux_remote_timeout_seconds,
+                    remote_token=config.outside_text.flux_remote_token,
                 )
                 log_message("Using Flux.2 Klein 4B for inpainting", verbose=verbose)
             except Exception as e:

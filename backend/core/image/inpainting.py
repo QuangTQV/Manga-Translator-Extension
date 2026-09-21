@@ -1,5 +1,8 @@
+import contextvars
 import math
-from typing import Dict, Optional, Tuple
+import threading
+import time
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -889,6 +892,49 @@ class FluxKontextInpainter:
         return composited_pil
 
 
+# --- Remote Flux worker resilience -----------------------------------------
+# A dead worker (Kaggle session ended, tunnel URL rotated) used to cost every
+# text region on every page a full read-timeout. After FAILURE_THRESHOLD
+# consecutive failures against one URL, calls to it are skipped instantly for
+# COOLDOWN seconds. State is module-level (keyed by URL) because inpainters
+# are created per page, so per-instance state would never accumulate.
+_REMOTE_FAILURE_THRESHOLD = 2
+_REMOTE_COOLDOWN_SECONDS = 60.0
+_REMOTE_CONNECT_TIMEOUT_SECONDS = 5.0
+_remote_state: Dict[str, Dict[str, float]] = {}
+_remote_state_lock = threading.Lock()
+
+# Per-request sink for user-visible warning codes (see
+# endpoints/translate.py:_run_with_warnings). None outside a request.
+remote_warning_sink: contextvars.ContextVar[Optional[List[str]]] = contextvars.ContextVar(
+    "flux_remote_warning_sink", default=None
+)
+
+
+def _report_remote_warning(code: str) -> None:
+    sink = remote_warning_sink.get()
+    if sink is not None and code not in sink:
+        sink.append(code)
+
+
+def _remote_is_open(url: str) -> bool:
+    with _remote_state_lock:
+        state = _remote_state.get(url)
+        return bool(state and state.get("open_until", 0.0) > time.time())
+
+
+def _remote_record(url: str, ok: bool) -> None:
+    with _remote_state_lock:
+        if ok:
+            _remote_state.pop(url, None)
+            return
+        state = _remote_state.setdefault(url, {"fails": 0.0, "open_until": 0.0})
+        state["fails"] += 1
+        if state["fails"] >= _REMOTE_FAILURE_THRESHOLD:
+            state["open_until"] = time.time() + _REMOTE_COOLDOWN_SECONDS
+            state["fails"] = 0.0
+
+
 class FluxKleinInpainter:
     """Inpainter using Flux.2 Klein models for text removal.
 
@@ -926,6 +972,7 @@ class FluxKleinInpainter:
         verbose: bool = False,
         remote_base_url: Optional[str] = None,
         remote_timeout_seconds: float = 120.0,
+        remote_token: Optional[str] = None,
     ):
         """Initialize the Flux Klein Inpainter.
 
@@ -942,7 +989,9 @@ class FluxKleinInpainter:
                 (see backend/flux_worker.py) instead of loading weights
                 locally — load_models() becomes a no-op and inpaint_mask()
                 POSTs each crop to f"{remote_base_url}/inpaint".
-            remote_timeout_seconds: Per-request timeout for the remote call.
+            remote_timeout_seconds: Per-request read timeout for the remote call.
+            remote_token: Shared secret sent as X-Flux-Worker-Token, when the
+                worker was started with --token / FLUX_WORKER_TOKEN.
         """
         self.variant = variant.lower()
         if self.variant not in ("9b", "4b"):
@@ -955,6 +1004,7 @@ class FluxKleinInpainter:
         self.verbose = verbose
         self.remote_base_url = remote_base_url.rstrip("/") if remote_base_url else None
         self.remote_timeout_seconds = remote_timeout_seconds
+        self.remote_token = remote_token or None
 
         self.DEVICE = device if device is not None else get_best_device()
         self.DTYPE = get_best_dtype(self.DEVICE)
@@ -1055,6 +1105,10 @@ class FluxKleinInpainter:
 
         import requests
 
+        if _remote_is_open(self.remote_base_url):
+            _report_remote_warning("flux_remote_unreachable")
+            return None
+
         buf = io.BytesIO()
         inference_image.save(buf, format="PNG")
         payload = {
@@ -1065,16 +1119,30 @@ class FluxKleinInpainter:
             "num_inference_steps": self.num_inference_steps,
             "variant": self.variant,
         }
+        headers = {"X-Flux-Worker-Token": self.remote_token} if self.remote_token else {}
         try:
             resp = requests.post(
                 f"{self.remote_base_url}/inpaint",
                 json=payload,
-                timeout=self.remote_timeout_seconds,
+                headers=headers,
+                timeout=(_REMOTE_CONNECT_TIMEOUT_SECONDS, self.remote_timeout_seconds),
             )
+            if resp.status_code == 401:
+                _remote_record(self.remote_base_url, False)
+                _report_remote_warning("flux_remote_unauthorized")
+                log_message(
+                    f"Remote Flux worker at {self.remote_base_url} rejected the token (401)",
+                    always_print=True,
+                )
+                return None
             resp.raise_for_status()
             result_b64 = resp.json()["image_base64"]
-            return Image.open(io.BytesIO(base64.b64decode(result_b64))).convert("RGB")
+            image = Image.open(io.BytesIO(base64.b64decode(result_b64))).convert("RGB")
+            _remote_record(self.remote_base_url, True)
+            return image
         except Exception as e:
+            _remote_record(self.remote_base_url, False)
+            _report_remote_warning("flux_remote_unreachable")
             log_message(
                 f"Remote Flux worker at {self.remote_base_url} failed ({e}) — "
                 "leaving this region untouched",

@@ -45,6 +45,8 @@ const EN_MESSAGES = {
   bubbles: '{count} bubbles - {time}s',
   doneWithTime: 'Done - {time}s',
   networkError: 'Network error',
+  fluxRemoteUnreachable: 'Flux remote worker is unreachable — outside-bubble text was left as-is on this page. Check that your Kaggle session/tunnel is still running and the URL is current.',
+  fluxRemoteUnauthorized: 'Flux remote worker rejected the token — outside-bubble text was left as-is. Check the Token field in the popup.',
   extensionDisabled: 'Extension is disabled',
   suggestInstructions: 'Suggest Notes',
   suggestInstructionsHint: 'Analyze selected pages and draft Story Notes (cast, relationships, tone)',
@@ -112,6 +114,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} bubble - {time}s',
     doneWithTime: 'Xong - {time}s',
     networkError: 'Loi mang',
+    fluxRemoteUnreachable: 'Khong ket noi duoc Flux worker tu xa — chu ngoai bong bong thoai duoc giu nguyen o trang nay. Kiem tra session Kaggle/tunnel con chay va URL con moi khong.',
+    fluxRemoteUnauthorized: 'Flux worker tu xa tu choi token — chu ngoai bong bong thoai duoc giu nguyen. Kiem tra o Token trong popup.',
     extensionDisabled: 'Tien ich dang tat',
     suggestInstructions: 'Goi y ghi chu',
     suggestInstructionsHint: 'Phan tich cac trang da chon va soan Ghi chu truyen (nhan vat, quan he, van phong)',
@@ -174,6 +178,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} 个气泡 - {time}s',
     doneWithTime: '完成 - {time}s',
     networkError: '网络错误',
+    fluxRemoteUnreachable: '无法连接远程 Flux worker——本页气泡外文字保持原样。请检查 Kaggle 会话/隧道是否仍在运行，URL 是否为最新。',
+    fluxRemoteUnauthorized: '远程 Flux worker 拒绝了令牌——气泡外文字保持原样。请检查弹窗中的 Token 字段。',
     extensionDisabled: '扩展已停用',
     suggestInstructions: '生成建议',
     suggestInstructionsHint: '分析已选页面并起草故事笔记（角色、关系、语气）',
@@ -236,6 +242,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} 吹き出し - {time}s',
     doneWithTime: '完了 - {time}s',
     networkError: 'ネットワークエラー',
+    fluxRemoteUnreachable: 'リモート Flux worker に接続できません——このページの吹き出し外の文字はそのままです。Kaggle セッション/トンネルが動いているか、URL が最新か確認してください。',
+    fluxRemoteUnauthorized: 'リモート Flux worker がトークンを拒否しました——吹き出し外の文字はそのままです。ポップアップの Token 欄を確認してください。',
     extensionDisabled: '拡張機能は無効です',
     suggestInstructions: 'ノートを提案',
     suggestInstructionsHint: '選択したページを分析し、ストーリーメモ（登場人物・関係・トーン）を作成します',
@@ -298,6 +306,8 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '말풍선 {count}개 - {time}s',
     doneWithTime: '완료 - {time}s',
     networkError: '네트워크 오류',
+    fluxRemoteUnreachable: '원격 Flux worker에 연결할 수 없습니다 — 이 페이지의 말풍선 밖 글자는 그대로 남았습니다. Kaggle 세션/터널이 실행 중인지, URL이 최신인지 확인하세요.',
+    fluxRemoteUnauthorized: '원격 Flux worker가 토큰을 거부했습니다 — 말풍선 밖 글자는 그대로 남았습니다. 팝업의 Token 필드를 확인하세요.',
     extensionDisabled: '확장 프로그램이 꺼져 있습니다',
     suggestInstructions: '메모 제안',
     suggestInstructionsHint: '선택한 페이지를 분석해 스토리 메모(등장인물, 관계, 어조)를 작성합니다',
@@ -3150,7 +3160,24 @@ function updateAutoTranslateCounter(): void {
 // Background helpers (bypass CORS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; error?: string }> {
+const shownWarningAt = new Map<string, number>();
+
+// Backend warnings (e.g. the Flux remote worker being down) are non-fatal —
+// the page still translates — so surface them as a toast, at most once a
+// minute per code, instead of once per page.
+function notifyBackendWarnings(warnings: string[] | undefined): void {
+  for (const code of warnings ?? []) {
+    const key = code === 'flux_remote_unreachable' ? 'fluxRemoteUnreachable'
+      : code === 'flux_remote_unauthorized' ? 'fluxRemoteUnauthorized' : null;
+    if (!key) continue;
+    const last = shownWarningAt.get(code) ?? 0;
+    if (Date.now() - last < 60_000) continue;
+    shownWarningAt.set(code, Date.now());
+    toast(tr(key), true);
+  }
+}
+
+function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; warnings?: string[]; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 5 minutes' }), 300_000);
     chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE_WITH_BODY', imageUrl, pageUrl, body }, (resp: unknown) => {
@@ -3160,7 +3187,9 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
         resolve({ error: `extension error: ${lastError.message}` });
         return;
       }
-      resolve((resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; error?: string }) ?? { error: 'no response' });
+      const typed = (resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; warnings?: string[]; error?: string }) ?? { error: 'no response' };
+      notifyBackendWarnings(typed.warnings);
+      resolve(typed);
     });
   });
 }
@@ -3984,6 +4013,9 @@ function buildTranslateRequest(
       : (settings.config.inpaintingMethod || undefined),
     flux_remote_base_url: settings.config.inpaintingMethod?.endsWith('_remote')
       ? (settings.config.fluxRemoteBaseUrl || undefined)
+      : undefined,
+    flux_remote_token: settings.config.inpaintingMethod?.endsWith('_remote')
+      ? (settings.config.fluxRemoteToken || undefined)
       : undefined,
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,
     context_memory_enabled: contextMemoryEnabled,
