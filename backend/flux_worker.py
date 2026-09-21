@@ -9,7 +9,7 @@ here instead of running inference itself.
 See docs/HUONG-DAN-CHAY.md for the full Kaggle + cloudflared walkthrough.
 
 Usage:
-    python flux_worker.py [--host 0.0.0.0] [--port 8189] [--variant 4b]
+    python flux_worker.py [--host 0.0.0.0] [--port 8189] [--variant 4b|9b] [--hf-token hf_xxx]
 
 Needs the exact same installed environment as the main backend
 (`pip install -e .` from this directory) — it reuses this repo's own
@@ -44,11 +44,17 @@ app = FastAPI(title="MangaTranslator Flux Worker")
 _inpainters: dict[str, FluxKleinInpainter] = {}
 
 
+# Optional Hugging Face token (--hf-token, or the HF_TOKEN env var, which
+# huggingface_hub also picks up on its own) — required for the gated 9B repo.
+_hf_token = ""
+
+
 def _get_inpainter(variant: str, num_inference_steps: int) -> FluxKleinInpainter:
     inpainter = _inpainters.get(variant)
     if inpainter is None:
         inpainter = FluxKleinInpainter(
-            variant=variant, num_inference_steps=num_inference_steps, verbose=True
+            variant=variant, num_inference_steps=num_inference_steps, verbose=True,
+            huggingface_token=_hf_token,
         )
         inpainter.load_models()
         _inpainters[variant] = inpainter
@@ -106,7 +112,9 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8189)
     parser.add_argument("--variant", default="4b", choices=["4b", "9b"])
+    parser.add_argument("--hf-token", default="", help="Hugging Face token (needed for the gated 9B model)")
     args = parser.parse_args()
+    _hf_token = args.hf_token
 
     print(f"Pre-loading Flux Klein {args.variant.upper()} (first run downloads weights, can take a few minutes)...")
     _get_inpainter(args.variant, num_inference_steps=4)

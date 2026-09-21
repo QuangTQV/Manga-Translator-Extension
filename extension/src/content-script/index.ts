@@ -3975,13 +3975,14 @@ function buildTranslateRequest(
     send_full_page_context: settings.config.sendFullPageContext,
     image_detail: settings.config.imageDetail,
     outside_text_enabled: settings.config.outsideTextEnabled ?? false,
-    // The popup's "flux_klein_4b_remote" option is a UI-only convenience
+    // The popup's "flux_klein_*_remote" options are a UI-only convenience
     // (one dropdown covers both "which model" and "where it runs") — the
-    // backend only knows "flux_klein_4b" plus a separate flux_remote_base_url.
-    inpainting_method: settings.config.inpaintingMethod === 'flux_klein_4b_remote'
-      ? 'flux_klein_4b'
+    // backend only knows e.g. "flux_klein_4b" plus a separate
+    // flux_remote_base_url.
+    inpainting_method: settings.config.inpaintingMethod?.endsWith('_remote')
+      ? settings.config.inpaintingMethod.replace(/_remote$/, '')
       : (settings.config.inpaintingMethod || undefined),
-    flux_remote_base_url: settings.config.inpaintingMethod === 'flux_klein_4b_remote'
+    flux_remote_base_url: settings.config.inpaintingMethod?.endsWith('_remote')
       ? (settings.config.fluxRemoteBaseUrl || undefined)
       : undefined,
     previous_context_texts: previousContextTexts?.length ? previousContextTexts : undefined,

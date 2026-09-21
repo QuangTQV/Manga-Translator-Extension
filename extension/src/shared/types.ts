@@ -165,7 +165,7 @@ export interface TranslateConfig {
   outsideTextEnabled: boolean;
   // Which algorithm removes outside-bubble text once outsideTextEnabled is
   // on: "auto" (lightweight OpenCV, default), "flux_klein_4b" (local GPU),
-  // "flux_klein_4b_remote" (POSTs to fluxRemoteBaseUrl — see
+  // "flux_klein_4b_remote"/"flux_klein_9b_remote" (POSTs to fluxRemoteBaseUrl — see
   // backend/flux_worker.py — instead of loading Flux on this machine), or
   // "none". Unset behaves exactly like "auto" (today's only behavior).
   inpaintingMethod?: string;
