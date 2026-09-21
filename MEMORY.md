@@ -71,3 +71,14 @@ One test gotcha worth remembering for this popup: the on/off toggles here (`.tog
 ## Feature: Economy mode (API-cost saver) — IMPLEMENTED
 
 Popup Translate-tab toggle (`TranslateConfig.economyMode`). Non-destructive by design: `extension/src/shared/economy.ts:effectiveConfig()` returns a *copy* with `imageDetail:'low'`, full-page and previous-page context off and Story DB reference images off, applied at request time only (content-script `buildTranslateRequest`, background request builder) — the user's stored values are never rewritten, so turning it off restores them. Context memory is left as-is (it's the cheap consistency option). Request field `economy_mode` also makes the backend (`pipeline/wrapper.py:_build_config`) shrink the full-page context image (768px vs 1536, media resolution medium vs high); bubble crops stay high-res. Playwright `tests/economy-mode.spec.ts` checks both the request and that stored settings are untouched.
+
+
+## Feature: manual region tool (box a spot -> OCR -> type/AI translation -> redraw) — IMPLEMENTED
+
+Popup Translate tab button "Select text area" -> content script `region-tool.ts` (drag box, editor card in a shadow root: original text (OCR'd, editable), "Translate with AI", translation, Apply/Cancel/Delete). Backend `/region/ocr|translate|render` (`endpoints/regions.py`, `core/manual_region.py`). See CLAUDE.md for the design. Verified for real (not just mocks): live backend + real manga-ocr read `こんにちは元気ですか` from a synthetic bubble and `/region/render` redrew Vietnamese text into it.
+- **Gotchas:** running `npx playwright test <file>` uses the *existing* `dist/` — rebuild after source edits (`npm test` builds first) or you debug stale code (cost me a wrong theory about storage). Pointer capture on the selection layer is fine here (unlike the graph). The popup closes itself after starting the tool, so a second start needs a fresh popup page in tests. The user's own backend may already own port 7677 — use `MT_PORT`/`PORT` env to run a second one.
+- **TODO (later) — manual region tool:**
+  1. Only works on pages that use `<img>` tags; CSS `background-image` pages are not supported (`findTargetImage` in `region-tool.ts` only scans `img`).
+  2. Vertical or rotated text is not laid out specially (`render_regions` calls `render_text_skia` without `vertical_stack`/`rotation_deg`).
+  3. No screen listing a page's saved regions — to edit one you must re-select the same spot (overlap > 50% opens it in edit mode).
+  4. Not tried on a real manga site yet, only on the test fixture pages (and a synthetic bubble against the live backend). Try MangaDex-style `blob:` pages and lazy-loading readers.

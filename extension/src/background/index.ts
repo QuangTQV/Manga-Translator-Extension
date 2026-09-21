@@ -230,6 +230,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'REGION_API') {
+      const { path, body } = message as { type: string; path: string; body: Record<string, unknown> };
+      sendResponse(await regionApiCall(path, body));
+      return;
+    }
+
     if (message.type === 'STORY_LIST') {
       sendResponse(await storiesList());
       return;
@@ -683,6 +689,34 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: `Could not reach backend: ${msg}` };
+  }
+}
+
+// Manual region tools (backend /region/*): OCR a boxed area, translate its
+// text, render text over it. Only these three paths are proxied.
+const REGION_PATHS = new Set(['/region/ocr', '/region/translate', '/region/render']);
+
+async function regionApiCall(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  if (!REGION_PATHS.has(path)) return { ok: false, error: 'Unsupported region endpoint' };
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  try {
+    const res = await fetch(`${backendUrl.replace(/\/$/, '')}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+      } catch { /* ignore */ }
+      return { ok: false, error: detail };
+    }
+    return { ok: true, data: await res.json() };
+  } catch (e) {
+    return { ok: false, error: `Could not reach backend: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

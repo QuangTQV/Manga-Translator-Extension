@@ -359,3 +359,58 @@ class LiveAiLogEntry(BaseModel):
 
 class LiveAiLogResponse(BaseModel):
     entries: List[LiveAiLogEntry]
+
+
+# ---------------------------------------------------------------------------
+# Manual region tools (endpoints/regions.py, core/manual_region.py) — the user
+# boxes one spot on a page; we read its text, optionally translate it, and
+# draw the chosen translation over a cleaned patch. They reuse TranslateOptions
+# so the extension can send the same provider/language/story fields it already
+# builds for /translate.
+# ---------------------------------------------------------------------------
+class RegionBox(BaseModel):
+    """Normalised (0..1) box, so it stays valid across image sizes."""
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+    @field_validator("x1", "y1", "x2", "y2")
+    @classmethod
+    def _in_unit_range(cls, v):
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("region coordinates must be between 0 and 1")
+        return v
+
+
+class RegionOcrRequest(TranslateOptions):
+    image: str  # raw base64 of the page (the untranslated source)
+    box: RegionBox
+
+
+class RegionOcrResponse(BaseModel):
+    text: str
+    warning: Optional[str] = None  # e.g. "ocr_failed" — the user should type the text in
+
+
+class RegionTranslateRequest(TranslateOptions):
+    text: str
+
+
+class RegionTranslateResponse(BaseModel):
+    translation: str
+
+
+class RegionItem(BaseModel):
+    box: RegionBox
+    text: str = ""  # empty = just clean the spot
+
+
+class RegionRenderRequest(TranslateOptions):
+    image: str  # raw base64 of the image to draw on
+    regions: List[RegionItem]
+
+
+class RegionRenderResponse(BaseModel):
+    image: str  # raw base64 PNG
