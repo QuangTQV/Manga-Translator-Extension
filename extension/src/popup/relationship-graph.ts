@@ -15,7 +15,7 @@ const GENDER_COLORS: Record<string, string> = {
   unknown: '#94a3b8',
 };
 
-interface GraphNode { id: string; name: string; gender: string; role: string; row: HTMLDivElement; }
+interface GraphNode { id: string; name: string; gender: string; role: string; avatar: string; row: HTMLDivElement; }
 interface GraphEdge { row: HTMLDivElement; a: string; b: string; label: string; notes: string; }
 
 export interface RelationshipGraphOptions {
@@ -60,6 +60,7 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
         name,
         gender: row.querySelector<HTMLSelectElement>('.sc-gender')?.value || 'unknown',
         role: row.querySelector<HTMLInputElement>('.sc-role')?.value.trim() ?? '',
+        avatar: row.dataset.avatar ?? '',
         row,
       });
     }
@@ -185,7 +186,9 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
       }
     }
 
-    for (const n of nodes) {
+    const defs = svgEl('defs');
+    svg.prepend(defs);
+    nodes.forEach((n, i) => {
       const p = positions.get(n.id)!;
       const dim = !!selectedId && !neighbours.has(n.id);
       const g = svgEl('g', { transform: `translate(${p.x} ${p.y})`, 'data-id': n.id, style: `cursor:${connectMode ? 'crosshair' : 'grab'}`, opacity: dim ? 0.35 : 1 });
@@ -194,8 +197,16 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
         r: NODE_R, fill: GENDER_COLORS[n.gender] ?? GENDER_COLORS.unknown,
         stroke: isSel ? '#ffffff' : '#080c18', 'stroke-width': isSel ? 3 : 2,
       }));
+      if (n.avatar) {
+        const clip = svgEl('clipPath', { id: `mt-avatar-clip-${i}` });
+        clip.appendChild(svgEl('circle', { r: NODE_R - 1 }));
+        defs.appendChild(clip);
+        const image = svgEl('image', { x: -NODE_R, y: -NODE_R, width: NODE_R * 2, height: NODE_R * 2, 'clip-path': `url(#mt-avatar-clip-${i})`, preserveAspectRatio: 'xMidYMid slice', 'pointer-events': 'none' });
+        image.setAttribute('href', n.avatar);
+        g.appendChild(image);
+      }
       const initial = svgEl('text', { y: 1, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 13, 'font-weight': 700, fill: '#080c18', 'pointer-events': 'none' });
-      initial.textContent = Array.from(n.name)[0]?.toUpperCase() ?? '?';
+      initial.textContent = n.avatar ? '' : (Array.from(n.name)[0]?.toUpperCase() ?? '?');
       const label = svgEl('text', {
         y: NODE_R + 11, 'text-anchor': 'middle', 'font-size': 11, fill: '#dde6f5',
         stroke: '#080c18', 'stroke-width': 3.5, 'paint-order': 'stroke', 'pointer-events': 'none',
@@ -203,7 +214,7 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
       label.textContent = truncate(n.name, 14);
       g.append(initial, label);
       nodeLayer.appendChild(g);
-    }
+    });
 
     renderInfo(nodes, edges);
   }

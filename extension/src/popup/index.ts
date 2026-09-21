@@ -1,3 +1,4 @@
+import { fileToDataUrl } from './image-utils.js';
 import { initRelationshipGraph } from './relationship-graph.js';
 import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig, type StoryCharacter, type StoryRelationship, type StoryGlossaryTerm, type StoryContinuityNote, type StoryDetail, type StorySummary } from '../shared/types.js';
 import { UI_LANGUAGES, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
@@ -106,6 +107,8 @@ const storyGraphSvg = document.getElementById('story-graph') as unknown as SVGSV
 const storyGraphInfo = qs<HTMLDivElement>('story-graph-info');
 const storyGraphConnectBtn = qs<HTMLButtonElement>('btn-graph-connect');
 const storyGraphResetBtn = qs<HTMLButtonElement>('btn-graph-reset');
+const economyModeToggle = qs<HTMLInputElement>('f-economy-mode');
+const storyRefImagesToggle = qs<HTMLInputElement>('f-story-ref-images');
 const storySaveBtn = qs<HTMLButtonElement>('btn-story-save');
 const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
 
@@ -279,6 +282,8 @@ async function loadAndBind(): Promise<void> {
   urlDisplay.textContent = settings.backendUrl.replace(/^https?:\/\//, '');
   renderLanguageSelects();
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
+  storyRefImagesToggle.checked = settings.config.useStoryReferenceImages ?? false;
+  economyModeToggle.checked = settings.config.economyMode ?? false;
   inpaintingMethodSelect.value = settings.config.inpaintingMethod || 'auto';
   fluxRemoteUrlInput.value = settings.config.fluxRemoteBaseUrl ?? '';
   fluxRemoteTokenInput.value = settings.config.fluxRemoteToken ?? '';
@@ -338,7 +343,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -991,6 +996,8 @@ function collectAllSettings(): AppSettings {
       cooldownSeconds: Math.max(0, parseFloat(cooldownSecondsInput.value)) || 15,
       sendFullPageContext: contextToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
+      useStoryReferenceImages: storyRefImagesToggle.checked,
+      economyMode: economyModeToggle.checked,
       inpaintingMethod: inpaintingMethodSelect.value || 'auto',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
       fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,
@@ -1533,6 +1540,8 @@ function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'story-char-row';
   row.dataset.charId = data?.id ?? crypto.randomUUID();
+  if (data?.avatar) row.dataset.avatar = data.avatar;
+  if (data?.reference_images?.length) row.dataset.refs = JSON.stringify(data.reference_images);
   if (data?.x !== undefined && data?.y !== undefined) {
     row.dataset.x = String(data.x);
     row.dataset.y = String(data.y);
@@ -1581,7 +1590,121 @@ function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
   row.appendChild(roleField);
   row.appendChild(voiceField);
   row.appendChild(removeBtn);
+  row.appendChild(createCharacterAssets(row));
   return row;
+}
+
+const MAX_REFERENCE_IMAGES_PER_CHARACTER = 2;
+
+function readRowRefs(row: HTMLElement): string[] {
+  try {
+    const parsed = JSON.parse(row.dataset.refs ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+// Avatar + reference-image pickers for one character row. The data lives on
+// the row (dataset.avatar / dataset.refs) like the map position does, so
+// collectStoryCharacters() and the relationship map read it from the same
+// place; a bubbling 'change' tells the map to redraw.
+function createCharacterAssets(row: HTMLDivElement): HTMLDivElement {
+  const box = document.createElement('div');
+  box.className = 'sc-assets';
+
+  const pickImages = (multiple: boolean, onFiles: (files: File[]) => Promise<void>): void => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = multiple;
+    input.addEventListener('change', () => {
+      void onFiles(Array.from(input.files ?? [])).catch(() => setStatus(t(uiLanguage, 'errorStoryImageFailed'), 'err'));
+    });
+    input.click();
+  };
+
+  const render = (): void => {
+    box.replaceChildren();
+
+    // Avatar
+    const avatar = row.dataset.avatar;
+    if (avatar) {
+      const thumb = document.createElement('div');
+      thumb.className = 'sc-thumb round';
+      thumb.title = t(uiLanguage, 'titleCharacterAvatar');
+      const img = document.createElement('img');
+      img.src = avatar;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'sc-thumb-x';
+      x.textContent = '×';
+      x.addEventListener('click', () => {
+        delete row.dataset.avatar;
+        render();
+        row.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      thumb.append(img, x);
+      box.appendChild(thumb);
+    } else {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'sc-add-btn round';
+      add.textContent = '👤';
+      add.title = t(uiLanguage, 'titleCharacterAvatar');
+      add.addEventListener('click', () => pickImages(false, async ([file]) => {
+        if (!file) return;
+        row.dataset.avatar = await fileToDataUrl(file, { maxSide: 96, crop: true, quality: 0.8 });
+        render();
+        row.dispatchEvent(new Event('change', { bubbles: true }));
+      }));
+      box.appendChild(add);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'sc-assets-label';
+    label.textContent = t(uiLanguage, 'labelCharacterReferences');
+    box.appendChild(label);
+
+    // Reference images
+    const refs = readRowRefs(row);
+    refs.forEach((src, i) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'sc-thumb';
+      const img = document.createElement('img');
+      img.src = src;
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'sc-thumb-x';
+      x.textContent = '×';
+      x.addEventListener('click', () => {
+        const next = readRowRefs(row).filter((_, j) => j !== i);
+        if (next.length) row.dataset.refs = JSON.stringify(next); else delete row.dataset.refs;
+        render();
+      });
+      thumb.append(img, x);
+      box.appendChild(thumb);
+    });
+    if (refs.length < MAX_REFERENCE_IMAGES_PER_CHARACTER) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'sc-add-btn';
+      add.textContent = '🖼';
+      add.title = t(uiLanguage, 'titleCharacterReferences');
+      add.addEventListener('click', () => pickImages(true, async (files) => {
+        const room = MAX_REFERENCE_IMAGES_PER_CHARACTER - readRowRefs(row).length;
+        const added: string[] = [];
+        for (const file of files.slice(0, room)) added.push(await fileToDataUrl(file, { maxSide: 448, quality: 0.8 }));
+        if (!added.length) return;
+        row.dataset.refs = JSON.stringify([...readRowRefs(row), ...added]);
+        render();
+      }));
+      box.appendChild(add);
+    }
+  };
+
+  render();
+  return box;
 }
 
 function createStoryRelationshipRow(data?: StoryRelationship): HTMLDivElement {
@@ -1750,7 +1873,8 @@ function collectStoryCharacters(): StoryCharacter[] {
     const voiceNotes = row.querySelector<HTMLInputElement>('.sc-voice')?.value.trim() || undefined;
     const x = row.dataset.x !== undefined ? Number(row.dataset.x) : undefined;
     const y = row.dataset.y !== undefined ? Number(row.dataset.y) : undefined;
-    out.push({ id: row.dataset.charId ?? crypto.randomUUID(), name, gender, role, voice_notes: voiceNotes, x, y });
+    const refs = readRowRefs(row);
+    out.push({ id: row.dataset.charId ?? crypto.randomUUID(), name, gender, role, voice_notes: voiceNotes, x, y, avatar: row.dataset.avatar || undefined, reference_images: refs });
   }
   return out;
 }

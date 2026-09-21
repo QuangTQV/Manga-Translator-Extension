@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
 import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary } from '../shared/types.js';
+import { effectiveConfig } from '../shared/economy.js';
 import { normalizeUiLanguage } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -818,8 +819,9 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
     max_font_size: settings.config.maxFontSize,
     min_font_size: settings.config.minFontSize,
     supersampling_factor: settings.config.supersamplingFactor,
-    send_full_page_context: settings.config.sendFullPageContext,
-    image_detail: settings.config.imageDetail,
+    send_full_page_context: effectiveConfig(settings.config).sendFullPageContext,
+    image_detail: effectiveConfig(settings.config).imageDetail,
+    economy_mode: settings.config.economyMode ? true : undefined,
     outside_text_enabled: settings.config.outsideTextEnabled ?? false,
   };
 

@@ -1,5 +1,11 @@
-import { expect, test } from './fixtures';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expect, FAKE_TRANSLATED_IMAGE_B64, test } from './fixtures';
+import { clickScannerAction } from './shadow-dom';
 import { baseSeed, firstKeyMatches, seedSettings } from './storage';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TEST_SITE_URL = `file://${path.resolve(__dirname, 'fixtures/test-site/index.html')}`;
 
 // The Story DB tab (character database / relationships / glossary) is only
 // usable when logged in (see backend/auth.py:require_login) — for a logged
@@ -277,6 +283,7 @@ test.describe('popup — Story DB tab', () => {
     await expect(popup.locator('#story-graph-info')).toContainText('Ren ↔ Aoi: rivals');
 
     // Dragging a node moves it.
+    await popup.locator('#story-graph').scrollIntoViewIfNeeded();
     const before = await popup.locator('#story-graph g[data-id="c2"]').boundingBox();
     await popup.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
     await popup.mouse.down();
@@ -303,4 +310,112 @@ test.describe('popup — Story DB tab', () => {
     await expect(newRow.locator('.sr-char-b')).toHaveValue('c1');
     await expect(newRow.locator('.sr-relation')).toBeFocused();
   });
+
+  test('character avatar and reference images can be added, show on the map, and are saved', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }),
+      firstKeyMatches('seed-key'),
+    );
+    const detail = {
+      id: 'story-1', name: 'My Manga', updated_at: 0,
+      characters: [{ id: 'c1', name: 'Aoi', gender: 'female' }],
+      relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+    };
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    let putBody: any = null;
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() === 'PUT') {
+        putBody = route.request().postDataJSON();
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...detail, ...putBody }) });
+        return;
+      }
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail) });
+    });
+
+    // A real (4x4 red) PNG, so createImageBitmap can decode it.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP4z8AARwzEcQCukw/x0F8jngAAAABJRU5ErkJggg==', 'base64');
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('.story-char-row')).toHaveCount(1, { timeout: 5_000 });
+
+    const row = popup.locator('.story-char-row').first();
+    const [avatarChooser] = await Promise.all([popup.waitForEvent('filechooser'), row.locator('.sc-add-btn.round').click()]);
+    await avatarChooser.setFiles({ name: 'a.png', mimeType: 'image/png', buffer: png });
+    await expect(row.locator('.sc-thumb.round img')).toBeVisible();
+    await expect(popup.locator('#story-graph image')).toHaveCount(1);
+
+    for (let i = 0; i < 2; i++) {
+      const [refChooser] = await Promise.all([popup.waitForEvent('filechooser'), row.locator('.sc-add-btn:not(.round)').click()]);
+      await refChooser.setFiles({ name: `r${i}.png`, mimeType: 'image/png', buffer: png });
+      await expect(row.locator('.sc-thumb:not(.round)')).toHaveCount(i + 1);
+    }
+    // The cap is 2 per character: the add button goes away.
+    await expect(row.locator('.sc-add-btn:not(.round)')).toHaveCount(0);
+
+    await popup.locator('#btn-story-save').click();
+    await expect.poll(() => putBody, { timeout: 5_000 }).not.toBeNull();
+    expect(putBody.characters[0].avatar).toMatch(/^data:image\/jpeg;base64,/);
+    expect(putBody.characters[0].reference_images).toHaveLength(2);
+
+    // Removing the avatar clears it from the map too.
+    await row.locator('.sc-thumb.round .sc-thumb-x').click();
+    await expect(popup.locator('#story-graph image')).toHaveCount(0);
+  });
+
+  for (const enabled of [true, false]) {
+    test(`translate requests ${enabled ? 'carry' : 'omit'} story_use_reference_images when the toggle is ${enabled ? 'on' : 'off'}`, async ({ context, extensionId }) => {
+      let [worker] = context.serviceWorkers();
+      if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+      await seedSettings(
+        worker,
+        baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1', config: { useStoryReferenceImages: enabled } }),
+        firstKeyMatches('seed-key'),
+      );
+      let capturedBody: any = null;
+      await context.route('**/translate', async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        capturedBody = route.request().postDataJSON();
+        await route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({
+            translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+            source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+          }),
+        });
+      });
+
+      const mangaPage = await context.newPage();
+      await mangaPage.goto(TEST_SITE_URL);
+      const popup = await context.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+      await popup.getByRole('button', { name: 'Story DB' }).click();
+      if (enabled) await expect(popup.locator('#f-story-ref-images')).toBeChecked();
+      else await expect(popup.locator('#f-story-ref-images')).not.toBeChecked();
+
+      await popup.locator('.tab-btn[data-tab="translate"]').click();
+      await mangaPage.bringToFront();
+      await popup.locator('#btn-scan').click();
+      await mangaPage.waitForTimeout(1500);
+      const cdp = await context.newCDPSession(mangaPage);
+      await cdp.send('DOM.enable');
+      await clickScannerAction(mangaPage, cdp, 'select-all');
+      await mangaPage.waitForTimeout(150);
+      await clickScannerAction(mangaPage, cdp, 'translate');
+      await mangaPage.waitForTimeout(2000);
+
+      expect(capturedBody).toBeTruthy();
+      expect(capturedBody.story_id).toBe('story-1');
+      if (enabled) expect(capturedBody.story_use_reference_images).toBe(true);
+      else expect(capturedBody.story_use_reference_images).toBeUndefined();
+    });
+  }
 });

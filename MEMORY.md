@@ -56,3 +56,18 @@ One test gotcha worth remembering for this popup: the on/off toggles here (`.tog
 - No extension/UI changes — the repo owner only asked for the backend log + a viewing API, not a popup panel.
 
 **Verification:** unit tests for the logger module (no-op when disabled, JSON shape, image-exclusion, rotation, corrupt-line handling) + wiring tests that mock only `_dispatch_llm_call` and assert the real `_call_llm_endpoint`/`test_api_key` paths log the right `call_type` (including a same-thread call_type non-leakage check) + endpoint auth-gating tests. Then verified live: real `uvicorn main:app` process, `MT_LIVE_AI_LOG_ENABLED=true`, a real `POST /test-key` with a missing API key (fails fast, no network needed) actually appears via a real `GET /admin/live-ai-log` call with the correct `call_type: "test_key"` and error text — full real HTTP round trip, no mocks.
+
+
+## Feature: Story DB relationship map + character assets — IMPLEMENTED
+
+- **Relationship map** (`extension/src/popup/relationship-graph.ts`): an SVG *view* over the character/relationship form rows (rows stay the single source of truth; a MutationObserver + input/change delegation redraws). Drag nodes, click to highlight, "Connect" mode (click two characters -> pre-filled relationship row), click an edge label to jump to its row. Pointer capture only starts once a drag begins — capturing on pointerdown retargets the click to the `<svg>` and breaks selection.
+- **Persistence without a migration:** node position `x`/`y`, `avatar` and `reference_images` are optional fields on `StoryCharacter` inside the existing `characters_json`; `ensure_schema()` validates columns so avoid adding columns for small optional data. Row state lives in `row.dataset` (`x`,`y`,`avatar`,`refs`) and `collectStoryCharacters()` reads it.
+- **Assets:** popup downscales via `popup/image-utils.ts` (avatar 96px square, refs 448px, JPEG). Backend validates data URLs/size (`schemas.py`). Reference images are opt-in per request (`story_use_reference_images`, popup toggle in Story DB tab) and are appended after the page images with a labelled note (`translation.py:_format_story_reference_note`); they count against OpenAI-Compatible's media limit.
+- **Bug found & fixed on the way:** the LLM translation cache key ignored the Story DB context entirely (editing a glossary kept serving the old cached translation when temperature was deterministic). It now hashes it.
+- **Gotchas:** Playwright file choosers work with the detached `<input type=file>` the popup creates; the test PNG must be a *valid* PNG (`createImageBitmap` rejects a made-up one).
+- **Not verified:** a real LLM actually using the reference images (only that they are sent and described in the prompt).
+
+
+## Feature: Economy mode (API-cost saver) — IMPLEMENTED
+
+Popup Translate-tab toggle (`TranslateConfig.economyMode`). Non-destructive by design: `extension/src/shared/economy.ts:effectiveConfig()` returns a *copy* with `imageDetail:'low'`, full-page and previous-page context off and Story DB reference images off, applied at request time only (content-script `buildTranslateRequest`, background request builder) — the user's stored values are never rewritten, so turning it off restores them. Context memory is left as-is (it's the cheap consistency option). Request field `economy_mode` also makes the backend (`pipeline/wrapper.py:_build_config`) shrink the full-page context image (768px vs 1536, media resolution medium vs high); bubble crops stay high-res. Playwright `tests/economy-mode.spec.ts` checks both the request and that stored settings are untouched.

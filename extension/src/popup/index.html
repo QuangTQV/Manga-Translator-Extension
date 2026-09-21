@@ -52,6 +52,15 @@
     .tab-pane { display: none; }
     .tab-pane.active { display: flex; flex-direction: column; gap: 12px; }
     .config-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .sc-assets { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+    .sc-thumb { position: relative; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(59,130,246,0.25); background: #0b1120; flex: none; }
+    .sc-thumb.round { border-radius: 50%; }
+    .sc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .sc-thumb button.sc-thumb-x { position: absolute; top: 0; right: 0; width: 16px; height: 16px; padding: 0; border: 0; background: rgba(8,12,24,0.8); color: #f87171; font-size: 12px; line-height: 16px; cursor: pointer; border-radius: 0 0 0 6px; }
+    .sc-add-btn { width: 44px; height: 44px; border-radius: 8px; border: 1px dashed rgba(122,162,255,0.5); background: transparent; color: #9fb0cf; font-size: 15px; cursor: pointer; flex: none; }
+    .sc-add-btn.round { border-radius: 50%; }
+    .sc-add-btn:hover { background: rgba(122,162,255,0.12); }
+    .sc-assets-label { font-size: 10px; color: #6b7a99; }
     .graph-toolbar { display: flex; gap: 6px; margin: 4px 0; }
     .graph-toolbar .btn-add-fallback { flex: 1; }
     .graph-toolbar .btn-add-fallback.active { background: rgba(122,162,255,0.25); border-color: #7aa2ff; }
@@ -313,6 +322,16 @@
               <span id="flux-remote-test-status" class="bk-test-status"></span>
             </div>
           </div>
+        </div>
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelEconomyMode">Economy mode</div>
+            <div class="toggle-hint" data-i18n="hintEconomyMode">Cut API cost: sends low-detail images, skips the full-page and previous-page context and Story DB reference images, and shrinks the context image it still sends. Slightly less context-aware. Your own settings are kept and come back when you turn this off.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-economy-mode" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
         </div>
         <div class="toggle-row">
           <div class="toggle-copy">
@@ -583,6 +602,17 @@
             <div class="field">
               <label class="label" data-i18n="labelStoryName">Story name</label>
               <input id="f-story-name" class="input" type="text" autocomplete="off" />
+            </div>
+
+            <div class="toggle-row" style="margin-bottom:8px">
+              <div class="toggle-copy">
+                <div class="toggle-title" data-i18n="labelStoryRefImages">Send reference images to the AI</div>
+                <div class="toggle-hint" data-i18n="hintStoryRefImages">Attach each character's reference images (up to 6 in total) to every page so the model can tell who is who. Uses more tokens; needs LLM OCR. Avatars are never sent.</div>
+              </div>
+              <label class="toggle">
+                <input id="f-story-ref-images" type="checkbox" />
+                <span class="toggle-slider"></span>
+              </label>
             </div>
 
             <label class="label" data-i18n="labelStoryGraph">Relationship map</label>

@@ -206,3 +206,14 @@ def test_azure_openai_deployment_can_come_from_url():
         model_name=None,
     )
     assert cfg.translation.model_name == "gpt-5-mini"
+
+
+def test_economy_mode_shrinks_only_the_full_page_context_image():
+    normal = _build_minimal_config()
+    eco = _build_minimal_config(economy_mode=True)
+    assert normal.translation.context_image_max_side_pixels == 1536
+    assert normal.translation.media_resolution_context == "high"
+    assert eco.translation.context_image_max_side_pixels == 768
+    assert eco.translation.media_resolution_context == "medium"
+    # Bubble crops carry the text to read — never degraded.
+    assert eco.translation.media_resolution_bubbles == "high"
