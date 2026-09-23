@@ -468,4 +468,8 @@ export interface StoredRegion {
   box: RegionBoxNorm;
   text: string;
   translation: string;
+  // Paste the original (pre-translation) pixels back at `box` instead of
+  // cleaning+drawing — used to delete a wrongly-detected bubble, or as the
+  // "erase the old spot" half of moving one (see region-tool.ts).
+  restoreOnly?: boolean;
 }

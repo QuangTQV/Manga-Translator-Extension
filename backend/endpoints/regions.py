@@ -12,6 +12,7 @@ from core.manual_region import (
     decode_image,
     encode_png,
     render_regions,
+    restore_regions,
 )
 from core.services.translation import (
     _call_llm_endpoint,
@@ -133,12 +134,19 @@ async def region_render(req: RegionRenderRequest, account=Depends(verify_token))
     if len(req.regions) > MAX_REGIONS_PER_RENDER:
         raise HTTPException(status_code=400, detail=f"At most {MAX_REGIONS_PER_RENDER} regions per page")
     _reject_oversized_image(req.image)
+    if req.source_image:
+        _reject_oversized_image(req.source_image)
     config = _config_for_request(req)
 
     def work() -> str:
         base = decode_image(req.image)
-        regions = [(_box_tuple(r.box), r.text) for r in req.regions]
-        return encode_png(render_regions(base, regions, config.rendering.font_dir, config.rendering))
+        restore_boxes = [_box_tuple(r.box) for r in req.regions if r.restore_only]
+        if restore_boxes:
+            if not req.source_image:
+                raise ValueError("source_image is required when a region has restore_only set")
+            base = restore_regions(base, decode_image(req.source_image), restore_boxes)
+        draw_regions = [(_box_tuple(r.box), r.text) for r in req.regions if not r.restore_only]
+        return encode_png(render_regions(base, draw_regions, config.rendering.font_dir, config.rendering))
 
     try:
         async with _pipeline_slot(False):

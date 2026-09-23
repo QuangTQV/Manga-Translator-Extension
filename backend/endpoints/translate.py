@@ -616,6 +616,21 @@ async def health_check():
     }
 
 
+@router.get("/fonts")
+async def list_fonts():
+    """Font packs available under backend/fonts/ (a directory with .ttf/.otf
+    files directly inside it) for the popup's font picker — includes the
+    bundled packs and anything the user drops in themselves (see
+    fonts/place_font_packs_here.txt). Never gated, like /health/providers."""
+    fonts_dir = settings.fonts_base_dir
+    names = []
+    if fonts_dir.is_dir():
+        for entry in sorted(fonts_dir.iterdir()):
+            if entry.is_dir() and (any(entry.glob("*.ttf")) or any(entry.glob("*.otf"))):
+                names.append(entry.name)
+    return {"fonts": names}
+
+
 @router.get("/providers")
 async def list_providers():
     """Return available LLM providers."""

@@ -109,6 +109,9 @@ const storyGraphInfo = qs<HTMLDivElement>('story-graph-info');
 const storyGraphConnectBtn = qs<HTMLButtonElement>('btn-graph-connect');
 const storyGraphResetBtn = qs<HTMLButtonElement>('btn-graph-reset');
 const economyModeToggle = qs<HTMLInputElement>('f-economy-mode');
+const fontPackSelect = qs<HTMLSelectElement>('f-font-pack');
+const minFontSizeInput = qs<HTMLInputElement>('f-min-font-size');
+const maxFontSizeInput = qs<HTMLInputElement>('f-max-font-size');
 const storyRefImagesToggle = qs<HTMLInputElement>('f-story-ref-images');
 const storySaveBtn = qs<HTMLButtonElement>('btn-story-save');
 const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
@@ -293,6 +296,9 @@ async function loadAndBind(): Promise<void> {
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
   contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? false;
+  minFontSizeInput.value = String(settings.config.minFontSize ?? 8);
+  maxFontSizeInput.value = String(settings.config.maxFontSize ?? 16);
+  void loadFontPackOptions(settings.backendUrl, settings.config.fontDir);
 
   renderAccountView();
   if (settings.accountToken) void refreshAccountStatus();
@@ -344,7 +350,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -1016,6 +1022,9 @@ function collectAllSettings(): AppSettings {
       outsideTextEnabled: outsideTextToggle.checked,
       useStoryReferenceImages: storyRefImagesToggle.checked,
       economyMode: economyModeToggle.checked,
+      fontDir: fontPackSelect.value || undefined,
+      minFontSize: Math.max(1, parseInt(minFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.minFontSize),
+      maxFontSize: Math.max(1, parseInt(maxFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.maxFontSize),
       inpaintingMethod: inpaintingMethodSelect.value || 'auto',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
       fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,
@@ -1042,6 +1051,39 @@ async function saveSettings(nextSettings: AppSettings): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Populates the Font select from the backend's own fonts/ directory (see
+// endpoints/translate.py:list_fonts) so a translator who drops a font pack
+// there sees it without editing any config file. Best-effort: a saved
+// fontDir the live list doesn't (yet) include — backend offline, or a pack
+// added on a different machine — is kept as an extra option rather than
+// silently dropped, so the popup never shows a blank/wrong selection.
+async function loadFontPackOptions(backendUrl: string, currentFontDir: string | undefined): Promise<void> {
+  let fonts: string[] = [];
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(`${backendUrl.replace(/\/$/, '')}/fonts`, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (response.ok) {
+      const data = await response.json() as { fonts?: string[] };
+      fonts = Array.isArray(data.fonts) ? data.fonts : [];
+    }
+  } catch {
+    // Backend unreachable — keep whatever the select already has (at least "Auto").
+  }
+  if (currentFontDir && !fonts.includes(currentFontDir)) fonts = [...fonts, currentFontDir];
+
+  const previousValue = fontPackSelect.value || currentFontDir || '';
+  for (const opt of Array.from(fontPackSelect.querySelectorAll('option[value]:not([value=""])'))) opt.remove();
+  for (const name of fonts) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    fontPackSelect.appendChild(opt);
+  }
+  fontPackSelect.value = fonts.includes(previousValue) ? previousValue : '';
 }
 
 async function checkHealth(backendUrl: string): Promise<void> {

@@ -82,3 +82,12 @@ Popup Translate tab button "Select text area" -> content script `region-tool.ts`
   2. Vertical or rotated text is not laid out specially (`render_regions` calls `render_text_skia` without `vertical_stack`/`rotation_deg`).
   3. No screen listing a page's saved regions — to edit one you must re-select the same spot (overlap > 50% opens it in edit mode).
   4. Not tried on a real manga site yet, only on the test fixture pages (and a synthetic bubble against the live backend). Try MangaDex-style `blob:` pages and lazy-loading readers.
+
+## Feature: font settings in the popup, and manual move/delete of a detected bubble — IMPLEMENTED
+
+Two gaps flagged as missing "for a professional translator" and asked to be fixed:
+
+1. **Font settings.** `font_dir`/`max_font_size`/`min_font_size` were already accepted end-to-end by the backend (`pipeline/wrapper.py:_resolve_font_dir`) but had **no popup UI** — the extension could never actually send anything but the hardcoded defaults. Fixed with `GET /fonts` (lists font-pack folders under `backend/fonts/` that contain `.ttf`/`.otf`, never gated) + a Font select / Min / Max font size fields in the popup's Translate tab. `supersampling_factor` is still not exposed in the UI (left as-is, lower priority).
+2. **Move/delete a wrongly-detected bubble's box** (not just its translated text). Reuses the manual region tool (`core/manual_region.py`) instead of inventing a second mechanism: new `restore_regions()` pastes the real pre-translation pixels (from a `source_image` the client sends) back over a box — exact, unlike `clean_region()`'s flat-fill/inpaint guess for an arbitrary user-picked spot with no known-clean source. `RegionItem.restore_only` requests this on a `/region/render` region. The "Fix a translation" popover gained Move/Delete buttons: Delete = one `restoreOnly` region at the bubble's box; Move = the same crosshair drag-a-box picker as the general region tool (factored into `pickBoxOnScreen()`), opens the editor pre-seeded with the bubble's already-known text/translation (skips OCR), and commits **two** regions (draw-new + restore-old). Both immediately drop the bubble from `lastTranslateInfo` so its hit target doesn't linger.
+
+**Not done:** no interactive resize handles (move = drag a brand-new box, not drag the existing outline's edges); no dedicated "add a bubble" distinct from the general region tool (already covers it); real-manga-site verification still pending (see the manual-region-tool TODO above).

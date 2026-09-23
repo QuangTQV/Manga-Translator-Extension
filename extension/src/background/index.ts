@@ -850,6 +850,7 @@ async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined):
     top_k: settings.config.topK,
     translation_mode: settings.config.translationMode,
     ocr_method: settings.config.ocrMethod,
+    font_dir: settings.config.fontDir || undefined,
     max_font_size: settings.config.maxFontSize,
     min_font_size: settings.config.minFontSize,
     supersampling_factor: settings.config.supersamplingFactor,

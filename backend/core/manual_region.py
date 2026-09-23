@@ -97,6 +97,30 @@ def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int]) -> Tu
     return tuple(int(c) for c in np.median(healed.reshape(-1, 3), axis=0))
 
 
+def restore_regions(
+    target: Image.Image,
+    source: Image.Image,
+    boxes: List[Tuple[float, float, float, float]],
+) -> Image.Image:
+    """Pastes `source`'s own pixels back over `target` at each normalised
+    box — used to undo a wrongly-placed/translated bubble exactly, instead
+    of clean_region()'s flat-fill/inpaint guess, since here we actually have
+    the real pre-translation pixels for that spot (see endpoints/regions.py:
+    "delete a bubble" / "move a bubble" reuse this for the bubble's old
+    box). `source` and `target` may differ in resolution (e.g. the page was
+    upscaled); each crop is resized to fit `target`'s pixel box."""
+    out = target.convert("RGB").copy()
+    for box in boxes:
+        src_px = box_to_pixels(source.size, box)
+        tgt_px = box_to_pixels(out.size, box)
+        patch = source.convert("RGB").crop(src_px)
+        target_size = (tgt_px[2] - tgt_px[0], tgt_px[3] - tgt_px[1])
+        if patch.size != target_size:
+            patch = patch.resize(target_size, Image.LANCZOS)
+        out.paste(patch, (tgt_px[0], tgt_px[1]))
+    return out
+
+
 def render_regions(
     base: Image.Image,
     regions: List[Tuple[Tuple[float, float, float, float], str]],
