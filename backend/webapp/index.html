@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MangaTranslator — Local Web App</title>
+<!--
+  Direct-file-upload companion to the browser extension, for raw scans that
+  were never published to a web page (the extension can only translate
+  <img> elements already present in some page's DOM — see MEMORY.md's
+  roadmap item 1). Talks to the SAME local backend the extension uses, over
+  plain fetch() — no chrome.* APIs, so it works in any browser, and can even
+  be opened directly as a file:// page (the backend's CORS is permissive)
+  though it's normally served by the backend itself at /app.
+
+  Deliberately not a port of the whole extension popup: no Story DB, no
+  provider/key rotation, no manual region/eraser tools, no auto-translate.
+  Just the core loop a raw-cleaner/translator actually needs — pick files,
+  translate, review, export — reusing /translate/batch as-is.
+-->
+<style>
+  :root {
+    --bg: #080c18; --panel: #0b1120; --border: rgba(59,130,246,0.18);
+    --accent: #7aa2ff; --text: #dde6f5; --muted: #6b7fa8; --danger: #f87171; --ok: #34d399;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 Inter, system-ui, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 20px; margin: 0; background: linear-gradient(90deg, #7aa2ff, #a78bfa); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  #health { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 999px; }
+  #health.ok { background: rgba(52,211,153,0.15); color: var(--ok); }
+  #health.err { background: rgba(248,113,113,0.15); color: var(--danger); }
+  main { display: grid; grid-template-columns: 300px 1fr; gap: 20px; padding: 20px 24px; max-width: 1400px; margin: 0 auto; align-items: start; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .field .hint { font-size: 11px; color: var(--muted); }
+  input, select { width: 100%; background: #060911; border: 1px solid rgba(122,162,255,0.3); border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .toggle-row label { font-size: 12px; }
+  .drop-zone { border: 2px dashed rgba(122,162,255,0.4); border-radius: 12px; padding: 32px; text-align: center; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop-zone.drag { border-color: var(--accent); background: rgba(122,162,255,0.08); }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+  button { border: 1px solid rgba(122,162,255,0.4); background: transparent; color: var(--text); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { background: rgba(122,162,255,0.12); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: #080c18; font-weight: 700; border-color: var(--accent); }
+  button.danger { border-color: rgba(248,113,113,0.5); color: var(--danger); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .card .thumb-wrap { position: relative; aspect-ratio: 3/4; background: #000; }
+  .card img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .card .meta { padding: 8px 10px; font-size: 12px; }
+  .card .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .card .status.err { color: var(--danger); }
+  .card .status.done { color: var(--ok); }
+  .card .actions { display: flex; gap: 6px; padding: 0 10px 10px; }
+  .card .actions button { flex: 1; padding: 5px 6px; font-size: 11px; }
+  .card .remove { position: absolute; top: 4px; right: 4px; background: rgba(8,12,24,0.75); border: none; color: var(--danger); width: 22px; height: 22px; border-radius: 50%; cursor: pointer; font-size: 13px; line-height: 1; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>MangaTranslator — Web App</h1>
+    <p>Translate raw image files directly — no browser extension needed. Same local backend, same LLM you configure.</p>
+  </div>
+  <span id="health">checking…</span>
+</header>
+
+<main>
+  <section class="panel" id="settings-panel">
+    <h2>Backend &amp; LLM</h2>
+    <div class="field">
+      <label for="f-backend-url">Backend URL</label>
+      <input id="f-backend-url" type="text" value="http://localhost:7677" />
+    </div>
+    <div class="field">
+      <label for="f-provider">Provider</label>
+      <select id="f-provider"></select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-model">Model</label>
+        <input id="f-model" type="text" placeholder="auto" />
+      </div>
+      <div class="field">
+        <label for="f-api-key">API Key</label>
+        <input id="f-api-key" type="password" placeholder="optional if set on backend" />
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-base-url">Base URL <span class="hint">(OpenAI-Compatible / Azure only)</span></label>
+      <input id="f-base-url" type="text" placeholder="optional" />
+    </div>
+
+    <h2 style="margin-top:16px">Translation</h2>
+    <div class="row2">
+      <div class="field">
+        <label for="f-source-lang">Source language</label>
+        <input id="f-source-lang" list="lang-list" value="Japanese" />
+      </div>
+      <div class="field">
+        <label for="f-target-lang">Target language</label>
+        <input id="f-target-lang" list="lang-list" value="English" />
+      </div>
+    </div>
+    <datalist id="lang-list">
+      <option value="Japanese"></option><option value="Korean"></option><option value="Chinese"></option>
+      <option value="English"></option><option value="Vietnamese"></option><option value="Spanish"></option>
+      <option value="French"></option><option value="German"></option><option value="Portuguese"></option>
+      <option value="Thai"></option><option value="Indonesian"></option><option value="Arabic"></option>
+    </datalist>
+    <div class="toggle-row">
+      <label for="f-outside-text">Outside-bubble text (SFX/narration)</label>
+      <input id="f-outside-text" type="checkbox" style="width:auto" />
+    </div>
+    <div class="toggle-row">
+      <label for="f-economy-mode">Economy mode (cut API cost)</label>
+      <input id="f-economy-mode" type="checkbox" style="width:auto" />
+    </div>
+    <p class="hint">Settings are saved in this browser only (localStorage) — separate from the extension's own settings.</p>
+  </section>
+
+  <section>
+    <div id="drop-zone" class="drop-zone">
+      <p><strong>Drag &amp; drop</strong> image files here, or click to choose files.</p>
+      <p class="hint">JPG/PNG/WebP. Nothing is uploaded anywhere except your own configured backend.</p>
+      <input id="f-file-input" type="file" accept="image/*" multiple style="display:none" />
+    </div>
+
+    <div class="toolbar">
+      <button id="btn-translate-all" class="primary">Translate All</button>
+      <button id="btn-export-zip">Export ZIP</button>
+      <button id="btn-export-cbz">Export CBZ</button>
+      <button id="btn-clear" class="danger">Clear All</button>
+      <span id="toolbar-status" class="hint" style="align-self:center"></span>
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty-state" class="empty">No pages yet — add some images to get started.</div>
+  </section>
+</main>
+
+<script src="./vendor/jszip.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const SETTINGS_KEY = 'mt_webapp_settings_v1';
+  const DEFAULT_SETTINGS = {
+    backendUrl: 'http://localhost:7677',
+    provider: 'Google',
+    model: '',
+    apiKey: '',
+    baseUrl: '',
+    sourceLang: 'Japanese',
+    targetLang: 'English',
+    outsideText: false,
+    economyMode: false,
+  };
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
+    } catch {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+  function saveSettings(s) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* best-effort */ }
+  }
+
+  const settings = loadSettings();
+  const $ = (id) => document.getElementById(id);
+
+  const els = {
+    backendUrl: $('f-backend-url'), provider: $('f-provider'), model: $('f-model'),
+    apiKey: $('f-api-key'), baseUrl: $('f-base-url'), sourceLang: $('f-source-lang'),
+    targetLang: $('f-target-lang'), outsideText: $('f-outside-text'), economyMode: $('f-economy-mode'),
+    health: $('health'), dropZone: $('drop-zone'), fileInput: $('f-file-input'), grid: $('grid'),
+    emptyState: $('empty-state'), translateAllBtn: $('btn-translate-all'), exportZipBtn: $('btn-export-zip'),
+    exportCbzBtn: $('btn-export-cbz'), clearBtn: $('btn-clear'), toolbarStatus: $('toolbar-status'),
+  };
+
+  els.backendUrl.value = settings.backendUrl;
+  els.model.value = settings.model;
+  els.apiKey.value = settings.apiKey;
+  els.baseUrl.value = settings.baseUrl;
+  els.sourceLang.value = settings.sourceLang;
+  els.targetLang.value = settings.targetLang;
+  els.outsideText.checked = settings.outsideText;
+  els.economyMode.checked = settings.economyMode;
+
+  function currentBackendUrl() {
+    return (els.backendUrl.value || DEFAULT_SETTINGS.backendUrl).trim().replace(/\/$/, '');
+  }
+
+  function persistFromInputs() {
+    settings.backendUrl = els.backendUrl.value.trim() || DEFAULT_SETTINGS.backendUrl;
+    settings.provider = els.provider.value || DEFAULT_SETTINGS.provider;
+    settings.model = els.model.value.trim();
+    settings.apiKey = els.apiKey.value;
+    settings.baseUrl = els.baseUrl.value.trim();
+    settings.sourceLang = els.sourceLang.value.trim() || DEFAULT_SETTINGS.sourceLang;
+    settings.targetLang = els.targetLang.value.trim() || DEFAULT_SETTINGS.targetLang;
+    settings.outsideText = els.outsideText.checked;
+    settings.economyMode = els.economyMode.checked;
+    saveSettings(settings);
+  }
+  for (const el of [els.backendUrl, els.provider, els.model, els.apiKey, els.baseUrl, els.sourceLang, els.targetLang, els.outsideText, els.economyMode]) {
+    el.addEventListener('change', persistFromInputs);
+  }
+
+  async function loadProviders() {
+    try {
+      const res = await fetch(`${currentBackendUrl()}/providers`);
+      const data = await res.json();
+      const providers = Array.isArray(data.providers) ? data.providers : ['Google'];
+      els.provider.innerHTML = '';
+      for (const p of providers) {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        els.provider.appendChild(opt);
+      }
+      els.provider.value = providers.includes(settings.provider) ? settings.provider : (data.default_provider || providers[0]);
+    } catch {
+      els.provider.innerHTML = '<option value="Google">Google</option>';
+    }
+  }
+
+  async function checkHealth() {
+    els.health.textContent = 'checking…';
+    els.health.className = '';
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${currentBackendUrl()}/health`, { signal: controller.signal });
+      clearTimeout(t);
+      els.health.textContent = res.ok ? 'Backend OK' : `HTTP ${res.status}`;
+      els.health.className = res.ok ? 'ok' : 'err';
+    } catch {
+      els.health.textContent = 'Backend unreachable';
+      els.health.className = 'err';
+    }
+  }
+
+  // ── file list ──────────────────────────────────────────────────────────
+  // pages: Array<{ id, name, sourceDataUrl, translatedB64?, status, error? }>
+  let pages = [];
+  let nextId = 1;
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(file);
+    });
+  }
+
+  function stripDataUrlPrefix(dataUrl) {
+    return dataUrl.replace(/^data:image\/\w+;base64,/, '');
+  }
+
+  async function addFiles(fileList) {
+    for (const file of Array.from(fileList)) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        pages.push({ id: nextId++, name: file.name, sourceDataUrl: dataUrl, translatedB64: null, status: 'pending', error: null });
+      } catch {
+        // unreadable file — skip it silently rather than blocking the rest of the batch
+      }
+    }
+    render();
+  }
+
+  function removePage(id) {
+    pages = pages.filter((p) => p.id !== id);
+    render();
+  }
+
+  function render() {
+    els.emptyState.style.display = pages.length ? 'none' : 'block';
+    els.grid.innerHTML = '';
+    for (const page of pages) {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className = 'thumb-wrap';
+      const img = document.createElement('img');
+      img.src = page.translatedB64 ? `data:image/png;base64,${page.translatedB64}` : page.sourceDataUrl;
+      thumbWrap.appendChild(img);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove';
+      removeBtn.textContent = '×';
+      removeBtn.title = 'Remove';
+      removeBtn.addEventListener('click', () => removePage(page.id));
+      thumbWrap.appendChild(removeBtn);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = page.name;
+      name.title = page.name;
+      const status = document.createElement('div');
+      status.className = `status ${page.status === 'error' ? 'err' : page.status === 'done' ? 'done' : ''}`;
+      status.textContent = page.status === 'pending' ? 'Not translated'
+        : page.status === 'translating' ? 'Translating…'
+        : page.status === 'done' ? 'Translated'
+        : `Error: ${page.error}`;
+      meta.append(name, status);
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      if (page.translatedB64) {
+        const toggleBtn = document.createElement('button');
+        toggleBtn.textContent = 'Original';
+        let showingOriginal = false;
+        toggleBtn.addEventListener('click', () => {
+          showingOriginal = !showingOriginal;
+          img.src = showingOriginal ? page.sourceDataUrl : `data:image/png;base64,${page.translatedB64}`;
+          toggleBtn.textContent = showingOriginal ? 'Translated' : 'Original';
+        });
+        const downloadBtn = document.createElement('button');
+        downloadBtn.textContent = 'Download';
+        downloadBtn.addEventListener('click', () => downloadOne(page));
+        actions.append(toggleBtn, downloadBtn);
+      }
+
+      card.append(thumbWrap, meta, actions);
+      els.grid.appendChild(card);
+    }
+  }
+
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function base64ToBlob(base64, mimeType) {
+    const bytes = atob(base64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return new Blob([arr], { type: mimeType });
+  }
+
+  function downloadOne(page) {
+    if (!page.translatedB64) return;
+    const base = page.name.replace(/\.[a-zA-Z0-9]+$/, '');
+    triggerDownload(base64ToBlob(page.translatedB64, 'image/png'), `${base}-translated.png`);
+  }
+
+  // ── translate ──────────────────────────────────────────────────────────
+
+  function buildOptions() {
+    return {
+      input_language: els.sourceLang.value.trim() || DEFAULT_SETTINGS.sourceLang,
+      output_language: els.targetLang.value.trim() || DEFAULT_SETTINGS.targetLang,
+      provider: els.provider.value || DEFAULT_SETTINGS.provider,
+      model_name: els.model.value.trim() || undefined,
+      api_key: els.apiKey.value || undefined,
+      base_url: els.baseUrl.value.trim() || undefined,
+      outside_text_enabled: els.outsideText.checked,
+      economy_mode: els.economyMode.checked,
+    };
+  }
+
+  async function translateAll() {
+    const pending = pages.filter((p) => p.status !== 'done' && p.status !== 'translating');
+    if (!pending.length) {
+      els.toolbarStatus.textContent = 'Nothing to translate.';
+      return;
+    }
+    els.translateAllBtn.disabled = true;
+    els.toolbarStatus.textContent = `Translating ${pending.length} page(s)…`;
+    for (const p of pending) p.status = 'translating';
+    render();
+
+    const body = {
+      ...buildOptions(),
+      images: pending.map((p) => ({ id: String(p.id), image: stripDataUrlPrefix(p.sourceDataUrl) })),
+    };
+
+    try {
+      const res = await fetch(`${currentBackendUrl()}/translate/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const byId = new Map(pending.map((p) => [String(p.id), p]));
+      for (const item of data.results || []) {
+        const p = byId.get(item.id);
+        if (!p) continue;
+        if (item.translated_image) {
+          p.translatedB64 = item.translated_image;
+          p.status = 'done';
+        } else {
+          p.status = 'error';
+          p.error = item.error || 'Unknown error';
+        }
+      }
+      els.toolbarStatus.textContent = `Done: ${data.success_count} succeeded, ${data.error_count} failed.`;
+    } catch (e) {
+      for (const p of pending) { p.status = 'error'; p.error = e instanceof Error ? e.message : String(e); }
+      els.toolbarStatus.textContent = `Request failed: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      els.translateAllBtn.disabled = false;
+      render();
+    }
+  }
+
+  // ── export ─────────────────────────────────────────────────────────────
+
+  async function exportAs(kind) {
+    const done = pages.filter((p) => p.translatedB64);
+    if (!done.length) {
+      els.toolbarStatus.textContent = 'Nothing translated yet to export.';
+      return;
+    }
+    const zip = new JSZip();
+    if (kind === 'cbz') {
+      // Numbered by page order, not the original filename — a CBZ reader
+      // pages through by filename sort order, and arbitrary source filenames
+      // ("1.jpg", "10.jpg", "2.jpg") don't necessarily sort correctly.
+      const width = Math.max(3, String(done.length).length);
+      done.forEach((p, i) => {
+        zip.file(`page_${String(i + 1).padStart(width, '0')}.png`, p.translatedB64, { base64: true });
+      });
+    } else {
+      done.forEach((p) => {
+        const base = p.name.replace(/\.[a-zA-Z0-9]+$/, '');
+        zip.file(`${base}.png`, p.translatedB64, { base64: true });
+      });
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload(blob, `manga-translated-${stamp}.${kind === 'cbz' ? 'cbz' : 'zip'}`);
+  }
+
+  // ── wiring ─────────────────────────────────────────────────────────────
+
+  els.dropZone.addEventListener('click', () => els.fileInput.click());
+  els.fileInput.addEventListener('change', () => { void addFiles(els.fileInput.files); els.fileInput.value = ''; });
+  ['dragenter', 'dragover'].forEach((evt) => {
+    els.dropZone.addEventListener(evt, (ev) => { ev.preventDefault(); els.dropZone.classList.add('drag'); });
+  });
+  ['dragleave', 'drop'].forEach((evt) => {
+    els.dropZone.addEventListener(evt, (ev) => { ev.preventDefault(); els.dropZone.classList.remove('drag'); });
+  });
+  els.dropZone.addEventListener('drop', (ev) => {
+    if (ev.dataTransfer && ev.dataTransfer.files.length) void addFiles(ev.dataTransfer.files);
+  });
+
+  els.translateAllBtn.addEventListener('click', () => { void translateAll(); });
+  els.exportZipBtn.addEventListener('click', () => { void exportAs('zip'); });
+  els.exportCbzBtn.addEventListener('click', () => { void exportAs('cbz'); });
+  els.clearBtn.addEventListener('click', () => {
+    if (pages.length && !confirm('Remove all pages from this session?')) return;
+    pages = [];
+    render();
+  });
+  els.backendUrl.addEventListener('change', () => { void checkHealth(); void loadProviders(); });
+
+  render();
+  void checkHealth();
+  void loadProviders();
+})();
+</script>
+</body>
+</html>

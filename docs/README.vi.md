@@ -32,6 +32,8 @@
   <a href="#cấu-hình">Cấu Hình</a>
   ·
   <a href="#flux-tùy-chọn">Flux Tùy Chọn</a>
+  ·
+  <a href="#web-app-không-cần-cài-extension">Web App</a>
 </p>
 
 <p align="center">
@@ -90,6 +92,7 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Bút tẩy | Với chữ raw/SFX mà hình chữ nhật không tách gọn được (SFX cong hoặc chéo, chữ dính vào nét vẽ nhân vật): bấm **🩹 Eraser** rồi tô lên bằng bút vẽ; chỗ đó được xóa và vá lại. Được nhớ theo từng trang như công cụ vùng chữ thủ công. |
 | Chế độ tiết kiệm | Một công tắc để giảm chi phí API: ảnh chi tiết thấp, không gửi ngữ cảnh toàn trang/trang trước, không gửi ảnh tham chiếu Story DB, và thu nhỏ ảnh ngữ cảnh. Cài đặt của bạn được giữ nguyên và trở lại khi tắt. |
 | Cài đặt font | Chọn font pack vẽ chữ đã dịch, và khoảng cỡ chữ nhỏ nhất/lớn nhất, ngay trong tab Translate — bỏ font pack của bạn (thư mục chứa file .ttf/.otf) vào `backend/fonts/` để thấy trong danh sách. Có thêm ô chỉnh độ nét chữ (supersampling) trong tab **Pro** mới, cùng các cài đặt nâng cao khác để riêng khỏi các tab chính. |
+| Web app (không cần extension) | Dịch file ảnh có sẵn trên máy — không cần ảnh đó đã có trên trang web nào. Chạy backend rồi mở `http://localhost:7677/app` bằng trình duyệt bất kỳ, kéo file vào, dịch, xuất ZIP/CBZ. Cố tình tối giản (không có Story DB/xoay vòng key/công cụ thủ công) — cần đầy đủ tính năng thì dùng extension. |
 | Xuất file | Tải PNG 1 trang đã dịch ngay trên overlay, hoặc xuất toàn bộ trang đã dịch trong trình quét thành 1 file ZIP chỉ với 1 lần bấm. |
 | Xuất CBZ | Nút "Export CBZ" cạnh nút xuất ZIP — cùng các trang đó, nhưng đánh số theo thứ tự quét để trình đọc CBZ lật đúng thứ tự (tên file của ZIP thường theo URL gốc, không phải lúc nào cũng đúng thứ tự đọc). |
 | Đang dịch | Một dấu hiệu nhỏ động (3 chấm nhấp nhô) hiện ở trang nào đang thật sự được dịch, phân biệt với các trang còn đang chờ trong hàng đợi auto-translate. |
@@ -222,6 +225,12 @@ backend/models/flux/
 Chỉ dùng Flux khi bạn cấu hình outside-text inpainting sang một mode Flux như `flux_klein_4b`. Với đa số người dùng, mặc định `auto` nhẹ hơn và nhanh hơn.
 
 **Không có GPU? Chạy Flux trên GPU từ xa.** Mục *Inpainting quality* trong popup còn có `Flux Klein 4B (remote)` và `Flux Klein 9B (remote)`: chạy `backend/flux_worker.py` trên GPU free của Kaggle (hoặc máy có GPU khác), mở tunnel `cloudflared` rồi dán URL vào popup — máy bạn không phải cài gì nặng. Nên bảo vệ worker bằng `--token` / `FLUX_WORKER_TOKEN` và điền cùng giá trị vào ô Token trong popup. Nếu worker chết hoặc từ chối token, trang vẫn được dịch (chữ ngoài bubble giữ nguyên), có toast cảnh báo lý do, và backend tạm ngừng gọi worker chết khoảng 60 giây. Hướng dẫn từng bước: [HUONG-DAN-CHAY.md](HUONG-DAN-CHAY.md#8-tuỳ-chọn-chạy-flux-từ-xa-trên-gpu-free-của-kaggle).
+
+## Web App (không cần cài extension)
+
+Với file ảnh có sẵn trên máy (ảnh scan chưa từng đăng lên trang web nào — extension chỉ dịch được thẻ `<img>` đã có sẵn trên một trang đang mở): chạy backend như bình thường, rồi mở **`http://localhost:7677/app`** bằng trình duyệt bất kỳ. Kéo file vào (hoặc chọn file), điền provider/key/ngôn ngữ ở sidebar (lưu ngay trong trình duyệt đó), bấm **Translate All**, rồi **Export ZIP** hoặc **Export CBZ**.
+
+Trang này cố tình tối giản — không có Story DB, không xoay vòng key, không có công cụ khoanh vùng/bút tẩy/font — cần đầy đủ thì dùng extension. Nó gọi thẳng vào cùng backend local qua `fetch()`, không cần chạy gì thêm ngoài backend.
 
 ## Quy Trình Sử Dụng
 

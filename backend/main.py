@@ -9,6 +9,7 @@ if str(_backend_dir) not in sys.path:
 
 import torch
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -79,6 +80,14 @@ app.include_router(admin_router)
 app.include_router(stories_router)
 app.include_router(regions_router)
 
+# A plain HTML/JS companion web app for translating raw image files directly
+# (no browser extension needed) — talks to this same backend over fetch().
+# See backend/webapp/index.html's own header comment for why it exists and
+# what it deliberately doesn't do.
+_webapp_dir = _backend_dir / "webapp"
+if _webapp_dir.is_dir():
+    app.mount("/app", StaticFiles(directory=str(_webapp_dir), html=True), name="webapp")
+
 
 @app.get("/")
 async def root():
@@ -87,6 +96,7 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
         "health": "/health",
+        "webapp": "/app",
     }
 
 
