@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 import main
-from core.manual_region import box_to_pixels, decode_image, encode_png, render_regions, restore_regions
+from core.manual_region import box_to_pixels, decode_image, encode_png, erase_mask, render_regions, restore_regions
 
 client = TestClient(main.app, raise_server_exceptions=False)
 FONT_DIR = "fonts/Roboto"
@@ -200,3 +200,58 @@ def test_restore_only_region_ignores_its_text_field():
     px_box = box_to_pixels(out.size, (0.3, 0.25, 0.7, 0.5))
     region = np.array(out)[px_box[1]:px_box[3], px_box[0]:px_box[2]]
     assert (region == 255).all()
+
+
+# ---------------------------------------------------------------------------
+# erase_mask / POST /region/erase — the freehand "eraser" tool: removes
+# whatever is under an arbitrary hand-drawn mask (not a rectangle), for raw
+# text/SFX a box can't isolate without also grabbing nearby art.
+# ---------------------------------------------------------------------------
+def _mask(size=(400, 300), stroke_box=None):
+    """A black mask with a white 'stroke' rectangle — stands in for what a
+    freehand brush stroke composited to black would produce."""
+    m = Image.new("RGB", size, (0, 0, 0))
+    if stroke_box:
+        d = ImageDraw.Draw(m)
+        d.rectangle(stroke_box, fill=(255, 255, 255))
+    return m
+
+
+def test_erase_mask_only_touches_the_masked_pixels():
+    page = _page()  # has "HELLO JP" text drawn near (150, 100)
+    mask = _mask(stroke_box=(140, 90, 260, 115))  # covers the text, not the whole page
+    out = erase_mask(page, mask)
+    before, after = np.array(page), np.array(out)
+    outside = np.ones(before.shape[:2], bool)
+    outside[90:115, 140:260] = False
+    assert (before[outside] == after[outside]).all()  # untouched elsewhere
+    assert (before[85:120, 135:265] != after[85:120, 135:265]).any()  # ink is gone in/around the stroke
+
+
+def test_erase_mask_is_a_no_op_for_an_all_black_mask():
+    page = _page()
+    out = erase_mask(page, _mask())
+    assert np.array(out).tobytes() == np.array(page.convert("RGB")).tobytes()
+
+
+def test_erase_mask_resizes_a_differently_sized_mask():
+    page = _solid((255, 255, 255))
+    small_mask = _mask(size=(40, 30), stroke_box=(14, 9, 26, 11))  # 1/10th resolution
+    out = erase_mask(page, small_mask)
+    assert out.size == page.size  # didn't crash / didn't shrink the output
+
+
+def test_erase_route_returns_a_cleaned_image():
+    page = _page()
+    mask = _mask(stroke_box=(140, 90, 260, 115))
+    resp = client.post("/region/erase", json={"image": _b64(page), "mask": _b64(mask)})
+    assert resp.status_code == 200
+    out = Image.open(io.BytesIO(base64.b64decode(resp.json()["image"])))
+    assert out.size == page.size
+    assert np.array(out).tobytes() != np.array(page.convert("RGB")).tobytes()
+
+
+def test_erase_route_rejects_an_oversized_image():
+    huge = base64.b64encode(b"x" * (60 * 1024 * 1024)).decode()  # base64-inflated, comfortably over the 50MB limit
+    resp = client.post("/region/erase", json={"image": huge, "mask": _b64(_mask())})
+    assert resp.status_code in (400, 413)

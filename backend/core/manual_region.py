@@ -97,6 +97,32 @@ def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int]) -> Tu
     return tuple(int(c) for c in np.median(healed.reshape(-1, 3), axis=0))
 
 
+def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2) -> Image.Image:
+    """The "eraser" tool: removes whatever is under an arbitrary hand-drawn
+    mask instead of a rectangle — for raw text/SFX baked into complex art
+    that a box can't isolate cleanly without also grabbing nearby artwork
+    (curved/diagonal SFX, text hugging a character's outline, ...).
+
+    `mask` is a same-resolution-or-scaled image where any non-black pixel
+    marks "erase here" (what a freehand brush stroke on a transparent canvas,
+    composited to black, naturally produces). Inpainted with cv2.inpaint
+    (OpenCV's TELEA), which handles arbitrary mask shapes natively — unlike
+    clean_region()'s box-shaped flat-fill/inpaint heuristic used elsewhere in
+    this module, which assumes a rectangular region with a clean border to
+    sample a background color/texture from."""
+    if mask.size != image.size:
+        mask = mask.resize(image.size, Image.NEAREST)
+    mask_arr = np.array(mask.convert("L"))
+    binary_mask = (mask_arr > 32).astype(np.uint8) * 255
+    if not binary_mask.any():
+        return image.convert("RGB")
+    if dilate_px > 0:
+        binary_mask = cv2.dilate(binary_mask, np.ones((3, 3), np.uint8), iterations=dilate_px)
+    bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    healed = cv2.inpaint(bgr, binary_mask, 3, cv2.INPAINT_TELEA)
+    return Image.fromarray(cv2.cvtColor(healed, cv2.COLOR_BGR2RGB))
+
+
 def restore_regions(
     target: Image.Image,
     source: Image.Image,

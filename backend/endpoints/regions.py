@@ -11,6 +11,7 @@ from core.manual_region import (
     crop_for_ocr,
     decode_image,
     encode_png,
+    erase_mask,
     render_regions,
     restore_regions,
 )
@@ -29,6 +30,8 @@ from endpoints.translate import (
     _resolve_story_context,
 )
 from schemas import (
+    EraseRequest,
+    EraseResponse,
     RegionBox,
     RegionOcrRequest,
     RegionOcrResponse,
@@ -156,3 +159,22 @@ async def region_render(req: RegionRenderRequest, account=Depends(verify_token))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Render failed: {e}")
     return RegionRenderResponse(image=image_b64)
+
+
+@router.post("/erase", response_model=EraseResponse)
+async def region_erase(req: EraseRequest, account=Depends(verify_token)) -> EraseResponse:
+    """Freehand "eraser" tool — see core/manual_region.py:erase_mask. No LLM
+    call, no TranslateOptions needed, just an image op behind the login/quota
+    gate the other /region/* routes already sit behind."""
+    _reject_oversized_image(req.image)
+    _reject_oversized_image(req.mask)
+
+    def work() -> str:
+        return encode_png(erase_mask(decode_image(req.image), decode_image(req.mask)))
+
+    try:
+        async with _pipeline_slot(False):
+            image_b64 = await asyncio.to_thread(work)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erase failed: {e}")
+    return EraseResponse(image=image_b64)

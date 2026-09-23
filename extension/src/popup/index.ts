@@ -38,6 +38,7 @@ const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
 const contextMemorySequentialToggle = qs<HTMLInputElement>('f-context-memory-sequential');
 const scanBtn = qs<HTMLButtonElement>('btn-scan');
 const regionBtn = qs<HTMLButtonElement>('btn-region');
+const eraserBtn = qs<HTMLButtonElement>('btn-eraser');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
 const saveConfigBtn = qs<HTMLButtonElement>('btn-save-config');
@@ -115,6 +116,10 @@ const maxFontSizeInput = qs<HTMLInputElement>('f-max-font-size');
 const storyRefImagesToggle = qs<HTMLInputElement>('f-story-ref-images');
 const storySaveBtn = qs<HTMLButtonElement>('btn-story-save');
 const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
+const storyExportBtn = qs<HTMLButtonElement>('btn-story-export');
+const storyImportBtn = qs<HTMLButtonElement>('btn-story-import');
+const storyImportFileInput = qs<HTMLInputElement>('f-story-import-file');
+const supersamplingSelect = qs<HTMLSelectElement>('f-supersampling');
 
 const healthBadge = qs<HTMLSpanElement>('health-badge');
 const statusEl = qs<HTMLDivElement>('popup-status');
@@ -298,6 +303,7 @@ async function loadAndBind(): Promise<void> {
   contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? false;
   minFontSizeInput.value = String(settings.config.minFontSize ?? 8);
   maxFontSizeInput.value = String(settings.config.maxFontSize ?? 16);
+  supersamplingSelect.value = String(settings.config.supersamplingFactor ?? 4);
   void loadFontPackOptions(settings.backendUrl, settings.config.fontDir);
 
   renderAccountView();
@@ -350,7 +356,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -417,6 +423,22 @@ function bind(): void {
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err), 'err');
       regionBtn.disabled = false;
+    }
+  });
+
+  eraserBtn.addEventListener('click', async () => {
+    eraserBtn.disabled = true;
+    try {
+      await autoSave();
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) throw new Error(t(uiLanguage, 'errorNoActiveTab'));
+      const injected = await ensureContentScript(tab.id);
+      if (!injected) throw new Error(t(uiLanguage, 'errorInjectContent'));
+      await chrome.tabs.sendMessage(tab.id, { type: 'START_ERASER_SELECT' });
+      window.close();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err), 'err');
+      eraserBtn.disabled = false;
     }
   });
 
@@ -515,6 +537,13 @@ function bind(): void {
   addStoryContinuityNoteBtn.addEventListener('click', () => { addStoryContinuityNoteRow(); });
   storySaveBtn.addEventListener('click', () => { void handleStorySave(); });
   storyDeleteBtn.addEventListener('click', () => { void handleStoryDelete(); });
+  storyExportBtn.addEventListener('click', () => { handleStoryExport(); });
+  storyImportBtn.addEventListener('click', () => { storyImportFileInput.click(); });
+  storyImportFileInput.addEventListener('change', () => {
+    const file = storyImportFileInput.files?.[0];
+    storyImportFileInput.value = '';
+    if (file) void handleStoryImportFile(file);
+  });
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -1025,6 +1054,7 @@ function collectAllSettings(): AppSettings {
       fontDir: fontPackSelect.value || undefined,
       minFontSize: Math.max(1, parseInt(minFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.minFontSize),
       maxFontSize: Math.max(1, parseInt(maxFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.maxFontSize),
+      supersamplingFactor: parseInt(supersamplingSelect.value, 10) || DEFAULT_SETTINGS.config.supersamplingFactor,
       inpaintingMethod: inpaintingMethodSelect.value || 'auto',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
       fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,
@@ -1560,6 +1590,57 @@ async function handleStoryDelete(): Promise<void> {
     setStatus(t(uiLanguage, 'statusStoryDeleted'), 'ok');
   } finally {
     storyDeleteBtn.disabled = false;
+  }
+}
+
+// Export/import a Story DB as a plain JSON file — to back it up or hand it to
+// a co-translator/editor, since a Story DB otherwise only lives on one
+// account. Exports whatever is currently in the form (including unsaved
+// edits); import fills the form for review, it does not save by itself —
+// the user still clicks "Save story" to commit it.
+function handleStoryExport(): void {
+  const id = storySelect.value;
+  if (!id) return;
+  const payload = {
+    name: storyNameInput.value.trim(),
+    characters: collectStoryCharacters(),
+    relationships: collectStoryRelationships(),
+    glossary: collectStoryGlossary(),
+    continuity_notes: collectStoryContinuityNotes(),
+    continuity_notes_enabled: storyContinuityEnabledToggle.checked,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeName = (payload.name || 'story').replace(/[^\w.-]+/g, '_');
+  a.download = `${safeName}.mtstory.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function handleStoryImportFile(file: File): Promise<void> {
+  if (!storySelect.value) {
+    setStatus(t(uiLanguage, 'errorStoryImportNoStory'), 'err');
+    return;
+  }
+  try {
+    const data = JSON.parse(await file.text()) as Partial<StoryDetail>;
+    if (!Array.isArray(data.characters) || !Array.isArray(data.relationships) || !Array.isArray(data.glossary)) {
+      throw new Error('unrecognized file shape');
+    }
+    if (typeof data.name === 'string' && data.name.trim()) storyNameInput.value = data.name.trim();
+    renderStoryCharacters(data.characters);
+    renderStoryRelationships(data.relationships);
+    renderStoryGlossary(data.glossary);
+    storyContinuityEnabledToggle.checked = !!data.continuity_notes_enabled;
+    renderStoryContinuityNotes(Array.isArray(data.continuity_notes) ? data.continuity_notes : []);
+    storyContentFields.style.display = '';
+    setStatus(t(uiLanguage, 'statusStoryImported'), 'ok');
+  } catch {
+    setStatus(t(uiLanguage, 'errorStoryImportFailed'), 'err');
   }
 }
 
