@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
-import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary } from '../shared/types.js';
+import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
 import { effectiveConfig } from '../shared/economy.js';
 import { normalizeUiLanguage } from '../shared/i18n.js';
 
@@ -262,6 +262,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'STORY_DELETE') {
       const { id } = message as { type: string; id: string };
       sendResponse(await storyDelete(id));
+      return;
+    }
+
+    if (message.type === 'STORY_UPDATE_FROM_DESCRIPTION') {
+      const { body } = message as { type: string; body: Record<string, unknown> };
+      sendResponse(await storyUpdateFromDescription(body));
       return;
     }
   })();
@@ -751,6 +757,34 @@ async function storySave(id: string, payload: StoryContextPayload): Promise<Stor
 async function storyDelete(id: string): Promise<StoryOkResult> {
   const result = await storiesApiCall<{ ok: boolean }>(`/stories/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return { ok: result.ok, error: result.error };
+}
+
+interface StoryUpdateResult {
+  ok: boolean;
+  characters?: StoryCharacter[];
+  relationships?: StoryRelationship[];
+  continuityNote?: StoryContinuityNote | null;
+  error?: string;
+}
+
+// "Update Story DB from a description" (popup Story DB tab) — a stateless
+// LLM helper, not part of the story_id CRUD family above; see
+// backend/endpoints/stories.py:update_story_from_description.
+async function storyUpdateFromDescription(body: Record<string, unknown>): Promise<StoryUpdateResult> {
+  const result = await storiesApiCall<{
+    characters: StoryCharacter[]; relationships: StoryRelationship[]; continuity_note: StoryContinuityNote | null;
+  }>('/stories/update-from-description', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return {
+    ok: result.ok,
+    characters: result.data?.characters,
+    relationships: result.data?.relationships,
+    continuityNote: result.data?.continuity_note,
+    error: result.error,
+  };
 }
 
 // "Sign in with Google" — chrome.identity.getAuthToken() needs manifest.json's

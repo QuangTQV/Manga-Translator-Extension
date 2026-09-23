@@ -200,6 +200,28 @@ class TranslateOptions(BaseModel):
     story_continuity_notes: List[StoryContinuityNote] = []  # only populated when the story's continuity_notes_enabled is on
 
 
+class StoryUpdateRequest(TranslateOptions):
+    """"Update the Story DB from a free-text description" — see
+    core/services/translation.py:generate_story_update and
+    core/story_context.py:merge_story_update. Stateless: takes the
+    caller's current characters/relationships (whatever's in the popup
+    form, saved or not) and a description, returns the merged result for
+    the user to review — never reads or writes the database itself, so
+    there's no story_id here."""
+
+    description: str
+    characters: List[StoryCharacter] = []
+    relationships: List[StoryRelationship] = []
+    enable_web_search: bool = False  # let the model search the web for the story (see generate_story_update) — unlike suggest-instructions, this deliberately allows spoilers, since tracking plot developments is the point
+    story_title: Optional[str] = None  # searched for when enable_web_search is set; falls back to guessing from context if omitted
+
+
+class StoryUpdateResponse(BaseModel):
+    characters: List[StoryCharacter]
+    relationships: List[StoryRelationship]
+    continuity_note: Optional[StoryContinuityNote] = None  # a suggested note to add — null if the description wasn't a plot development worth logging
+
+
 class TranslateRequest(TranslateOptions):
     image: str  # raw base64 (no data: prefix)
 

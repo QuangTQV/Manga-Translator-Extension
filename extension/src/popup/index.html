@@ -625,6 +625,21 @@
               <input id="f-story-name" class="input" type="text" autocomplete="off" />
             </div>
 
+            <div class="field">
+              <label class="label" data-i18n="labelStoryUpdateFromDescription">Update from a new development</label>
+              <div class="toggle-hint" data-i18n="hintStoryUpdateFromDescription">Describe what just happened (a new character, a relationship reveal, a pronoun/register change, ...) and let AI draft the character/relationship changes below for you to review. Nothing is saved until you click Save story.</div>
+              <textarea id="f-story-update-description" class="textarea" rows="3" data-i18n-placeholder="placeholderStoryUpdateDescription" placeholder="e.g. Chapter 39: the villain turns out to be Akira's childhood friend Hina, so they switch from casual to hostile pronouns"></textarea>
+              <div class="suggest-web-search-row">
+                <input id="f-story-update-web-search" type="checkbox" />
+                <label for="f-story-update-web-search" data-i18n="labelStoryUpdateWebSearch">Search the internet for this story</label>
+              </div>
+              <div class="suggest-web-search-hint" data-i18n="hintStoryUpdateWebSearch">Uses the story name above to search for the story and pull in developments up to whatever point your description mentions. Unlike Suggest Notes, this is allowed to include spoilers/reveals — tracking them is the whole point.</div>
+              <div class="actions-row" style="margin-top:6px">
+                <button id="btn-story-update-from-description" class="btn-add-fallback" type="button" data-i18n="btnStoryUpdateFromDescription">✨ Update from description</button>
+              </div>
+              <div id="story-update-status" class="toggle-hint"></div>
+            </div>
+
             <div class="toggle-row" style="margin-bottom:8px">
               <div class="toggle-copy">
                 <div class="toggle-title" data-i18n="labelStoryRefImages">Send reference images to the AI</div>
