@@ -97,6 +97,9 @@ Tab **Translate** còn có các tuỳ chọn:
 - **Context Memory** (mặc định tắt): model tự viết 1 câu tóm tắt mỗi trang và dùng lại ở các trang sau trong cùng truyện để nhân vật/sự kiện nhất quán — rẻ hơn Previous-page context vì không gửi kèm ảnh/toàn bộ chữ trang trước, chỉ vài câu tóm tắt ngắn.
 - **Story Notes** (tuỳ chọn): ghi chú riêng cho truyện đang dịch — glossary tên riêng, văn phong mong muốn, quan hệ nhân vật cố định. Bấm nút **Suggest** để model tự soạn nháp dựa trên các trang đã quét trong Scanner, rồi bạn chỉnh sửa lại cho đúng.
 
+- **Economy mode / Chế độ tiết kiệm** (mặc định tắt): giảm chi phí API bằng một công tắc — gửi ảnh chi tiết thấp, không gửi ngữ cảnh toàn trang và trang trước, không gửi ảnh tham chiếu Story DB, và thu nhỏ ảnh ngữ cảnh. Cài đặt riêng của bạn không bị ghi đè, tắt đi là trở lại như cũ. Context Memory vẫn giữ nguyên nếu bạn đang bật.
+- **✂ Chọn vùng chữ**: nút ở tab Translate để tự khoanh một chỗ chữ. Bấm nút → popup đóng lại → kéo khung quanh chữ trên trang (Esc để huỷ) → chữ được đọc tự động → gõ bản dịch, hoặc bấm **Dịch bằng AI** → **Áp dụng**. Muốn sửa/xoá thì kéo khung lại đúng chỗ đó. Các vùng được nhớ theo từng trang và vẽ lại khi bạn dùng extension trên trang đó lần nữa (trang có địa chỉ ảnh dạng `blob:` chỉ nhớ trong phiên). Cần chạy backend bản mới nhất (có `/region/*`) — nhớ khởi động lại backend sau khi cập nhật.
+
 Tab **LLM Config** còn có:
 
 - **Image Detail**: `Auto` để provider tự quyết, `Low` nhanh/rẻ hơn nhưng dễ bỏ sót chữ nhỏ, `High` chính xác nhất nhưng chậm/tốn nhất.
@@ -181,6 +184,7 @@ export MT_DATABASE_URL="postgresql+psycopg2://manga_translator:manga_translator@
 3. Chạy lại backend (`./.venv/bin/python main.py`) như bình thường. **Không cần bật `MT_REQUIRE_AUTH`** — đăng nhập ở đây chỉ để dùng CSDL truyện, không bắt buộc cả backend phải yêu cầu tài khoản cho mọi yêu cầu dịch.
 4. Mở popup → tab **Account** → đăng nhập bằng email (nút Register) hoặc Google.
 5. Sang tab **Story DB** → bấm **+ Create** để tạo 1 truyện → nhập nhân vật/mối quan hệ/thuật ngữ/ghi chú diễn biến → bấm **Save story**. Truyện đang chọn sẽ tự động được dùng khi bạn dịch trang.
+6. Phía trên danh sách nhân vật có **Sơ đồ quan hệ**: kéo nhân vật để sắp xếp (vị trí được lưu khi bấm **Save story**), bấm một nhân vật để làm nổi bật quan hệ của họ, bấm **🔗 Connect** rồi bấm hai nhân vật để tạo quan hệ, bấm nhãn trên đường nối để sửa. Mỗi nhân vật có thể có **ảnh đại diện** (👤, chỉ để nhìn) và tối đa 2 **ảnh tham chiếu** (🖼, character sheet). Ảnh tham chiếu chỉ được gửi cho AI khi bạn bật công tắc **Gửi ảnh tham chiếu cho AI** (tốn thêm token, cần OCR bằng LLM).
 
 ## 10. (Tuỳ chọn) Live AI — log input/output của mọi lệnh gọi AI
 
