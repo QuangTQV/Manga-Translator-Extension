@@ -278,6 +278,7 @@
       <button class="tab-btn" data-tab="config" data-i18n="tabConfig">Config</button>
       <button class="tab-btn" data-tab="account" data-i18n="tabAccount">Account</button>
       <button class="tab-btn" data-tab="storydb" data-i18n="tabStoryDb">Story DB</button>
+      <button class="tab-btn" data-tab="pro" data-i18n="tabPro">Pro</button>
     </div>
 
     <div id="tab-translate" class="tab-pane active">
@@ -414,6 +415,7 @@
       <div class="actions">
         <button id="btn-scan" class="btn btn-primary" data-i18n="btnScan">Scan &amp; Translate Page</button>
         <button id="btn-region" class="btn btn-secondary" data-i18n="btnRegion" title="">✂ Select text area</button>
+        <button id="btn-eraser" class="btn btn-secondary" data-i18n="btnEraser" title="">🩹 Eraser</button>
         <div class="actions-row">
           <button id="btn-auto" class="btn btn-auto" data-i18n="btnAuto">Auto-translate</button>
           <button id="btn-save" class="btn btn-secondary" data-i18n="btnSave">Save</button>
@@ -674,8 +676,28 @@
               <button id="btn-story-save" class="btn btn-primary" type="button" data-i18n="btnStorySave">Save story</button>
               <button id="btn-story-delete" class="btn btn-clear-cache" type="button" data-i18n="btnStoryDelete">Delete story</button>
             </div>
+            <div class="actions-row" style="margin-top:8px">
+              <button id="btn-story-export" class="btn-add-fallback" type="button" data-i18n="btnStoryExport">⬇ Export JSON</button>
+              <button id="btn-story-import" class="btn-add-fallback" type="button" data-i18n="btnStoryImport">⬆ Import JSON</button>
+              <input id="f-story-import-file" type="file" accept="application/json" style="display:none" />
+            </div>
+            <div class="toggle-hint" data-i18n="hintStoryImportExport">Export this story (characters, relationships, glossary, continuity notes) as a JSON file to back it up or share it with a co-translator/editor; Import overwrites the currently selected story with a previously exported file.</div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div id="tab-pro" class="tab-pane">
+      <div class="config-section">
+        <div class="toggle-hint" data-i18n="hintProTab">Advanced controls for people doing this as a job — kept out of the main tabs so they don't clutter the everyday settings.</div>
+
+        <label class="label" style="margin-top:10px" data-i18n="labelSupersampling">Text sharpness (supersampling)</label>
+        <select id="f-supersampling" class="select">
+          <option value="1">1× — fastest, softest edges</option>
+          <option value="2">2×</option>
+          <option value="4">4× — sharpest (default)</option>
+        </select>
+        <div class="toggle-hint" data-i18n="hintSupersampling">Each bubble's text is rendered at this multiple of its final size, then downscaled — higher looks sharper (especially on the hover-to-magnify crop) but renders slower.</div>
       </div>
     </div>
 

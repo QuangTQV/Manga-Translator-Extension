@@ -91,3 +91,84 @@ Two gaps flagged as missing "for a professional translator" and asked to be fixe
 2. **Move/delete a wrongly-detected bubble's box** (not just its translated text). Reuses the manual region tool (`core/manual_region.py`) instead of inventing a second mechanism: new `restore_regions()` pastes the real pre-translation pixels (from a `source_image` the client sends) back over a box — exact, unlike `clean_region()`'s flat-fill/inpaint guess for an arbitrary user-picked spot with no known-clean source. `RegionItem.restore_only` requests this on a `/region/render` region. The "Fix a translation" popover gained Move/Delete buttons: Delete = one `restoreOnly` region at the bubble's box; Move = the same crosshair drag-a-box picker as the general region tool (factored into `pickBoxOnScreen()`), opens the editor pre-seeded with the bubble's already-known text/translation (skips OCR), and commits **two** regions (draw-new + restore-old). Both immediately drop the bubble from `lastTranslateInfo` so its hit target doesn't linger.
 
 **Not done:** no interactive resize handles (move = drag a brand-new box, not drag the existing outline's edges); no dedicated "add a bubble" distinct from the general region tool (already covers it); real-manga-site verification still pending (see the manual-region-tool TODO above).
+
+## Roadmap: remaining gaps for a professional translator/scanlator — PLANNED (not started)
+
+Assessed across several sessions (2026-09-23) after shipping Story DB, manual region tool, economy mode, font settings, and bubble move/delete. Ordered by priority; pick up any item independently — none depend on another.
+
+**UI placement decision (2026-09-23, repo owner):** these are advanced/pro-user features and must **not** be scattered directly onto the main popup screens (Translate/LLM Config tabs) — that clutters the UI for the average reader who never touches any of this. They belong inside one dedicated "Professional Translation" section (a tab, or a master toggle that reveals a sub-panel — exact shape still undecided) that a casual user never has to see. When building any item below, add its control(s) there, not to the existing Translate/LLM Config tabs directly.
+Note: this only governs *new* work — restructuring what's *already* shipped directly on the main screen (Story DB tab, font settings, Outside text/Flux, economy mode, the "✂ Select text area" button, etc.) into that same section was discussed earlier and explicitly deferred by the repo owner ("để nguyên đi, tạm thời chưa cần") — don't do that migration unless asked again.
+
+### 1. Ingest raw image files directly (no web page required) — highest priority
+**Problem:** the extension only translates `<img>` elements already present in some webpage's DOM (`content-script/index.ts`'s scanner). There is no file-upload path anywhere (checked: no `<input type="file">`/drag-drop for source images, only for Story DB avatars/reference images). A translator working from raw scans that were never published to a web page cannot use this tool at all.
+**Plan:** build a small local web app (plain HTML/JS, no `chrome.*` APIs) served either by the backend itself (a new static route) or a separate `extension/webapp/` build, that talks to the **same local backend** (`http://localhost:7677`) the extension already uses. Drag-and-drop / file-picker for one or many images, reusing `/translate` and `/translate/batch` as-is — zero backend changes needed. Port over (not literally reuse, since `chrome.storage`/`chrome.runtime` don't exist outside the extension) the popup's settings UI and the manual region/bubble-edit interaction ideas.
+**Difficulty:** moderate. No ML/hosting changes; the work is a new frontend. Does **not** imply centrally hosting anything — same self-hosted trust model as today, just reachable without installing a browser extension.
+**Explicitly avoid:** a centrally-hosted multi-user SaaS version (anyone uploads manga, you host the GPU compute) was considered and rejected for now — real ongoing compute cost, and meaningfully more legal exposure processing/storing third-party copyrighted pages on a server you operate, versus a user processing their own copy locally. The account/quota system (`MT_REQUIRE_AUTH`, `core/accounts.py`) already exists for this *if* ever wanted, but don't build toward it unprompted.
+
+### 2. CBZ/PDF export — CBZ part DONE (2026-09-23)
+**CBZ shipped:** scanner toolbar's "Export CBZ" button (`content-script/index.ts:exportTranslatedPagesAsCbz`) — same ZIP mechanism, but always numbers entries `page_NNN.png` by scan index (zero-padded) rather than the source-URL-derived names the plain ZIP export uses, since a CBZ reader pages through by filename sort order and those names don't necessarily sort correctly (e.g. "1.jpg", "10.jpg", "2.jpg"). PDF still not done.
+**Problem:** `content-script/index.ts:exportTranslatedPagesAsZip` (JSZip) only produces a ZIP of loose PNGs. No format a manga reader app opens directly.
+**Plan:** CBZ is trivial — a CBZ *is* a ZIP with a `.cbz` extension and page files in reading order (already have both); likely just an added "Export as CBZ" option that reuses the exact same ZIP-building code with a renamed extension, possibly sorted/zero-padded filenames if not already. PDF needs an image-to-PDF step (e.g. a small PDF-writing library) since it's a different container format.
+**Difficulty:** easy for CBZ, easy-medium for PDF.
+
+### 3. Manual per-bubble text styling in the UI — partially DONE (2026-09-23)
+**Shipped:** Bold/Italic buttons on the manual region tool's Translation field (`extension/src/shared/text-style.ts:toggleStyleMarker`, wraps/unwraps the selection in `**`/`*`) — covers the manual-region-tool path. **Not done:** the Fix-hint popover's textarea is an instruction to the LLM (not literal rendered text), so a style toolbar doesn't apply there; true manual color/vertical-stack override (plumbed through the request/schema, not just markdown markers) is still open.
+**Problem:** bold/italic/color/vertical-stack are only ever set by the LLM via markdown markers (`core/text/text_processing.py:parse_styled_segments`); a user manually typing a translation (Fix a translation, or the manual region tool) has no UI affordance to apply style, even though typing `**text**` would technically work today since rendering goes through the same markdown parser regardless of source — just totally undiscoverable.
+**Plan:** small toolbar (B / I / color swatch / vertical toggle) above the Fix-hint and manual-region translation textareas that wraps the selected text in the right markdown markers, or a boolean+color field threaded through to `render_text_skia` for the manual region path specifically (`core/manual_region.py` currently never sets `text_color_rgb`/`text_background_color`/`vertical_stack` on `RenderingConfig`/its `render_text_skia` call).
+**Difficulty:** easy (markdown-wrapping toolbar) to medium (true manual color override plumbed through the request/schema).
+
+### 4. Resize handles for a moved bubble
+**Problem:** `region-tool.ts:startMoveBubbleSelect` only supports dragging a brand-new box for the new position — no drag-the-existing-outline's-corner interaction.
+**Plan:** add corner/edge handles to the selection outline in the editor before Apply, adjusting `region.box` live (see the relationship-map's drag interaction in `popup/relationship-graph.ts` for a similar already-solved pointer-drag pattern to crib from).
+**Difficulty:** medium — new interaction code, no backend change.
+
+### 5. Expose `supersampling_factor` in the popup — DONE (2026-09-23)
+Shipped in the new Pro tab (see below) as a 1/2/4 select.
+**Problem:** already sent end-to-end (`buildTranslateRequest`), just no UI control, same shape as the font-settings gap that was just fixed.
+**Plan:** one numeric field (1-4) — per the UI placement decision above, put it in the Professional Translation section rather than next to the Font/Min/Max-font-size fields (those already shipped on the main Translate tab before that decision was made).
+**Difficulty:** trivial (near-identical to the font-size fields just added).
+
+### 6. Lightweight project/chapter tracker
+**Problem:** no way to see "Story X: chapters 1-10 done, 11 in progress, 12+ not started" — every chapter is just whatever web page happens to be open.
+**Plan (scoped-down, not the automatic multi-tab crawler version — that was explicitly rejected as too fragile, since there's no generic way to know a chapter's URL structure across arbitrary manga sites):** when exporting, ask which Story DB story + chapter number a page belongs to; keep a local ledger (story -> chapter -> export timestamp, maybe the last exported ZIP re-downloadable from the content-hash cache already in `chrome.storage.local`); a small dashboard listing it. No tab automation, no site-specific scraping.
+**Difficulty:** moderate — mostly UI + a new storage index, reuses the existing content-cache.
+
+### 7. Batch QA/proofread view
+**Problem:** no single screen to review every translated page of a run before exporting; the scanner grid shows thumbnails but not full readable text for proofreading.
+**Plan:** a review mode in the scanner (or a new popup-launched tab) listing every translated page full-size/scrollable, each with its OCR'd original + translation visible for spot-checking, before the batch export step.
+**Difficulty:** medium — new UI, no backend change; can reuse `BubbleInfo`/`lastTranslateInfo` already collected per page.
+
+### 8. Story DB import/export — DONE (2026-09-23, JSON not CSV)
+**Shipped:** Export/Import JSON buttons directly in the existing Story DB tab (`popup/index.ts:handleStoryExport`/`handleStoryImportFile`) — Export downloads the current form state (including unsaved edits) as a `.mtstory.json` file; Import reads one back into the form for review (does not auto-save — the user still clicks Save story). CSV specifically (e.g. just the glossary) was not built, only whole-story JSON.
+**Problem:** a Story DB (character DB, glossary, relationships) can't be moved between machines or shared with a co-translator/editor except by re-typing it.
+**Plan:** `GET`/`POST` on `endpoints/stories.py` for a JSON (or CSV for just the glossary) dump/restore of one story's `StoryDetail`; a popup Import/Export button pair in the Story DB tab.
+**Difficulty:** easy — the shape (`StoryDetail`) already exists as a schema; this is mostly serialization + a file picker.
+
+### 9. Team collaboration (shared Story DB, translator/editor/QA roles)
+**Problem:** a Story DB is scoped to one account (`account_email` column); no sharing/role model.
+**Plan:** would need a new `story_collaborators` table (or similar) and role checks throughout `endpoints/stories.py`/`core/story_context.py`, plus an invite flow. This is the biggest item here — real multi-user product surface, not a small addition.
+**Difficulty:** hard. Don't start this without the user explicitly deciding the product wants real multi-user accounts, since it's a meaningfully larger commitment than everything else on this list.
+
+### 10. Verify the whole manual-editing toolchain on a real manga site
+Everything shipped so far (manual region tool, bubble move/delete, font settings) has only been verified against the Playwright test fixtures and one synthetic bubble image — never against a real manga reading site (MangaDex-style `blob:` pages, lazy-loading readers, etc.). Worth a real end-to-end pass before relying on any of it for actual work.
+
+
+## Feature: "Pro" tab + CBZ export + Story DB import/export + manual style toolbar — IMPLEMENTED
+
+First batch off the roadmap above (2026-09-23), picked for being well-scoped ("easy"/"trivial" in the roadmap). Per the UI-placement decision, only the supersampling field actually needed a new home (the new Pro tab, `data-tab="pro"`) — CBZ export, Story DB import/export, and the style toolbar were each added directly at their existing point of use (scanner export toolbar, Story DB tab, manual region editor) since those are already specialized/contextual surfaces, not the main-screen clutter the decision was about.
+
+- **Pro tab:** new 6th popup tab. Currently just the supersampling-factor select — a settings field that was already sent end-to-end (`buildTranslateRequest`) but had no UI anywhere until now, same shape as the font-settings gap fixed the session before.
+- **CBZ export:** see item 2 above. `extension/tests/pro-mode.spec.ts` verifies it via `jszip` (a real dependency, not mocked) reading the downloaded file's entry names.
+- **Story DB import/export:** see item 8 above.
+- **Style toolbar:** see item 3 above.
+- **Gotcha hit while testing:** the scanner's "Export CBZ"/"Export ZIP" buttons are always present in the toolbar (clicking before anything finished translating just toasts "nothing translated yet" and does nothing) — a Playwright test that polls for the button's mere *existence* as a "ready" signal is wrong, since it exists immediately and clicking early silently no-ops instead of erroring, hanging `waitForEvent('download')` forever. Wait for the actual completion toast (`#mt-toast`, a light-DOM element, no CDP piercing needed) instead.
+
+## Feature: Eraser tool (freehand brush cleanup) — IMPLEMENTED
+
+Requested directly by the repo owner ("dùng bút tẩy để xoá thì sao — thợ dịch chuyên nghiệp thường xoá chữ raw"): professional cleaners commonly erase raw text/SFX with a brush, not a rectangle, since curved/diagonal SFX or text hugging a character's outline doesn't fit a box without also grabbing nearby art. Not on the earlier roadmap list — added as its own well-scoped feature, same "contextual on-page tool, not the Pro tab" placement as the manual region tool (popup button "🩹 Eraser" next to "✂ Select text area").
+
+- **Backend:** `core/manual_region.py:erase_mask()` — `cv2.inpaint` restricted to an arbitrary hand-drawn mask (dilated slightly), no rectangle/border-sampling involved. `POST /region/erase` (`{image, mask}` -> `{image}`) is a plain image op — no LLM, doesn't even inherit `TranslateOptions`, just sits behind the same login/quota gate as the other `/region/*` routes.
+- **Frontend:** new `content-script/eraser-tool.ts` — paints strokes on a full-viewport canvas (screen space, S/M/L brush, Undo/Clear/Apply/Cancel toolbar), then on Apply maps the strokes into the target `<img>`'s natural-resolution coordinate space and rasterises them into a mask PNG.
+- **Persistence:** reuses `region-tool.ts`'s existing `mtManualRegions` store — added an `eraseMask` field (one cumulative mask per page, not a list of strokes) alongside the existing `regions` array. A new stroke is client-side OR-merged into the saved mask (`mergeMasks`, canvas `lighter` composite) so `renderPage()` only ever does one inpaint pass against the untouched base per render, never stacking repeated inpainting. Applied before box regions when composing a page.
+- **Verified for real** (not just mocks): a synthetic "raw" page with hatched-background art and a diagonal multi-letter SFX ("BOOM") baked in — a curved/angled mask erased it cleanly. **Known limitation, same as `clean_region()`'s existing inpaint path:** `cv2.inpaint` doesn't reconstruct a fine repeating pattern (dense hatching/screentone) through the erased area — it smooths it over instead of continuing the pattern. Fine for flat/gradient backgrounds, visibly soft on a busy screentone.
+- **Gotcha found while building:** painting listeners must attach to the canvas, not the full-viewport overlay layer that also contains the toolbar — a click on a toolbar button (Apply/Undo/...) bubbles up through the layer and was getting recorded as a phantom one-point stroke, silently breaking the "no strokes yet" guard. Cost a debugging round; fixed by scoping pointer listeners to the canvas element only.

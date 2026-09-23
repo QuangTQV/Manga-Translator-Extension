@@ -694,7 +694,7 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
 
 // Manual region tools (backend /region/*): OCR a boxed area, translate its
 // text, render text over it. Only these three paths are proxied.
-const REGION_PATHS = new Set(['/region/ocr', '/region/translate', '/region/render']);
+const REGION_PATHS = new Set(['/region/ocr', '/region/translate', '/region/render', '/region/erase']);
 
 async function regionApiCall(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   if (!REGION_PATHS.has(path)) return { ok: false, error: 'Unsupported region endpoint' };

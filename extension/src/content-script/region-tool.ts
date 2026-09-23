@@ -7,6 +7,7 @@
 // manual result, so editing/deleting a region is exact and repeatable. They are
 // persisted per page URL and re-applied after an (auto-)translation lands.
 
+import { toggleStyleMarker } from '../shared/text-style.js';
 import type { RegionBoxNorm, StoredRegion } from '../shared/types.js';
 
 export interface RegionToolDeps {
@@ -31,6 +32,7 @@ const Z = '2147483647';
 
 let deps: RegionToolDeps;
 const sessionRegions = new Map<string, StoredRegion[]>(); // rawUrl -> regions
+const sessionEraseMasks = new Map<string, string | undefined>(); // rawUrl -> cumulative eraser mask (base64 PNG)
 let selecting = false;
 let closeEditor: (() => void) | null = null;
 
@@ -40,7 +42,12 @@ export function initRegionTool(d: RegionToolDeps): void {
 
 // ── persistence ──────────────────────────────────────────────────────────────
 
-type Store = Record<string, { regions: StoredRegion[]; updatedAt: number }>;
+// eraseMask is one cumulative mask per page (every stroke ever applied,
+// merged) rather than a list — re-rendering always starts from the
+// untouched base and applies the whole mask in one inpaint pass, so strokes
+// from different sessions never compound into repeated inpainting over
+// already-inpainted pixels.
+type Store = Record<string, { regions: StoredRegion[]; eraseMask?: string; updatedAt: number }>;
 
 /** blob:/data: URLs change every load, so only stable http(s)/file pages persist. */
 function pageKey(rawUrl: string): string | null {
@@ -71,13 +78,22 @@ async function regionsFor(rawUrl: string): Promise<StoredRegion[]> {
   return stored;
 }
 
-async function saveRegions(rawUrl: string, regions: StoredRegion[]): Promise<void> {
+async function eraseMaskFor(rawUrl: string): Promise<string | undefined> {
+  if (sessionEraseMasks.has(rawUrl)) return sessionEraseMasks.get(rawUrl);
+  const key = pageKey(rawUrl);
+  const stored = key ? (await readStore())[key]?.eraseMask : undefined;
+  sessionEraseMasks.set(rawUrl, stored);
+  return stored;
+}
+
+async function persistPage(rawUrl: string, regions: StoredRegion[], eraseMask: string | undefined): Promise<void> {
   sessionRegions.set(rawUrl, regions);
+  sessionEraseMasks.set(rawUrl, eraseMask);
   const key = pageKey(rawUrl);
   if (!key) return;
   try {
     const store = await readStore();
-    if (regions.length) store[key] = { regions, updatedAt: Date.now() };
+    if (regions.length || eraseMask) store[key] = { regions, eraseMask, updatedAt: Date.now() };
     else delete store[key];
     const keys = Object.keys(store);
     if (keys.length > MAX_STORED_PAGES) {
@@ -85,7 +101,15 @@ async function saveRegions(rawUrl: string, regions: StoredRegion[]): Promise<voi
       for (const k of keys.slice(0, keys.length - MAX_STORED_PAGES)) delete store[k];
     }
     await chrome.storage.local.set({ [STORAGE_KEY]: store });
-  } catch { /* storage is best-effort — the region still applied this session */ }
+  } catch { /* storage is best-effort — the edit still applied this session */ }
+}
+
+async function saveRegions(rawUrl: string, regions: StoredRegion[]): Promise<void> {
+  await persistPage(rawUrl, regions, await eraseMaskFor(rawUrl));
+}
+
+async function saveEraseMask(rawUrl: string, eraseMask: string | undefined): Promise<void> {
+  await persistPage(rawUrl, await regionsFor(rawUrl), eraseMask);
 }
 
 // ── backend calls ────────────────────────────────────────────────────────────
@@ -99,44 +123,53 @@ async function api<T>(path: string, body: Record<string, unknown>): Promise<T> {
   return resp.data;
 }
 
-/** Draws `regions` onto the page's base image and shows the result. */
+/** Draws the page's saved eraser mask (if any) and `regions` onto the page's
+ * base image and shows the result. The eraser mask is always applied first —
+ * it's the "clean the raw" layer everything else sits on top of. */
 async function renderPage(img: HTMLImageElement, rawUrl: string, regions: StoredRegion[]): Promise<void> {
   const translated = deps.translatedBase(rawUrl);
-  if (!regions.length) {
+  const eraseMask = await eraseMaskFor(rawUrl);
+  if (!regions.length && !eraseMask) {
     if (translated) deps.applyImage(rawUrl, `data:image/png;base64,${translated}`);
     else deps.restoreOriginal(img);
     return;
   }
-  const base = translated ?? (await deps.fetchSource(rawUrl));
+  let base = translated ?? (await deps.fetchSource(rawUrl));
   if (!base) throw new Error(deps.tr('regionNoImage'));
-  // A restoreOnly region (deleting/moving a detected bubble) needs the real
-  // pre-translation pixels for its box, which `base` alone doesn't have once
-  // it's the already-translated page — fetch the untouched source too, only
-  // when something actually needs it.
-  let sourceImage: string | undefined;
-  if (regions.some((r) => r.restoreOnly)) {
-    sourceImage = translated ? (await deps.fetchSource(rawUrl)) ?? undefined : base;
-    if (!sourceImage) throw new Error(deps.tr('regionNoImage'));
+  if (eraseMask) {
+    base = (await api<{ image: string }>('/region/erase', { image: base, mask: eraseMask })).image;
   }
-  const out = await api<{ image: string }>('/region/render', {
-    image: base,
-    source_image: sourceImage,
-    regions: regions.map((r) => ({ box: r.box, text: r.translation, restore_only: !!r.restoreOnly })),
-  });
-  deps.applyImage(rawUrl, `data:image/png;base64,${out.image}`);
+  if (regions.length) {
+    // A restoreOnly region (deleting/moving a detected bubble) needs the real
+    // pre-translation pixels for its box, which `base` alone doesn't have once
+    // it's the already-translated page — fetch the untouched source too, only
+    // when something actually needs it.
+    let sourceImage: string | undefined;
+    if (regions.some((r) => r.restoreOnly)) {
+      sourceImage = translated ? (await deps.fetchSource(rawUrl)) ?? undefined : base;
+      if (!sourceImage) throw new Error(deps.tr('regionNoImage'));
+    }
+    base = (await api<{ image: string }>('/region/render', {
+      image: base,
+      source_image: sourceImage,
+      regions: regions.map((r) => ({ box: r.box, text: r.translation, restore_only: !!r.restoreOnly })),
+    })).image;
+  }
+  deps.applyImage(rawUrl, `data:image/png;base64,${base}`);
 }
 
-/** Re-applies a page's saved regions (after an auto-translation replaced the overlay, or on load). */
+/** Re-applies a page's saved regions/eraser mask (after an auto-translation replaced the overlay, or on load). */
 export async function reapplyManualRegions(img: HTMLImageElement, rawUrl: string): Promise<void> {
   try {
     const regions = await regionsFor(rawUrl);
-    if (regions.length) await renderPage(img, rawUrl, regions);
+    const eraseMask = await eraseMaskFor(rawUrl);
+    if (regions.length || eraseMask) await renderPage(img, rawUrl, regions);
   } catch (e) {
     console.log('[MT] reapplyManualRegions failed:', e);
   }
 }
 
-/** On page load: draw saved regions on images that aren't being auto-translated. */
+/** On page load: draw saved regions/eraser mask on images that aren't being auto-translated. */
 export async function restoreManualRegionsOnLoad(): Promise<void> {
   const store = await readStore();
   if (!Object.keys(store).length) return;
@@ -146,6 +179,7 @@ export async function restoreManualRegionsOnLoad(): Promise<void> {
     const key = rawUrl ? pageKey(rawUrl) : null;
     if (!rawUrl || !key || !store[key]) continue;
     sessionRegions.set(rawUrl, store[key].regions);
+    sessionEraseMasks.set(rawUrl, store[key].eraseMask);
     await reapplyManualRegions(img, rawUrl);
   }
 }
@@ -160,7 +194,7 @@ function intersection(a: Rect, b: Rect): number {
   return w > 0 && h > 0 ? w * h : 0;
 }
 
-function findTargetImage(sel: Rect): HTMLImageElement | null {
+export function findTargetImageForRect(sel: Rect): HTMLImageElement | null {
   const selArea = (sel.right - sel.left) * (sel.bottom - sel.top);
   let best: HTMLImageElement | null = null;
   let bestArea = 0;
@@ -264,7 +298,7 @@ function pickBoxOnScreen(hintKey: string): Promise<Rect | null> {
 export function startRegionSelect(): void {
   void pickBoxOnScreen('regionPickHint').then((sel) => {
     if (!sel) return;
-    const img = findTargetImage(sel);
+    const img = findTargetImageForRect(sel);
     const rawUrl = img ? deps.resolveUrl(img) : null;
     if (!img || !rawUrl) { deps.toast(deps.tr('regionNoImage'), true); return; }
     void openEditor(img, rawUrl, sel);
@@ -302,6 +336,48 @@ export async function deleteBubbleRegion(img: HTMLImageElement, rawUrl: string, 
   const next = [...regions, { id: crypto.randomUUID(), box, text: '', translation: '', restoreOnly: true }];
   await renderPage(img, rawUrl, next);
   await saveRegions(rawUrl, next);
+}
+
+async function loadImageBitmap(base64Png: string): Promise<ImageBitmap> {
+  const bytes = Uint8Array.from(atob(base64Png), (c) => c.charCodeAt(0));
+  return createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+}
+
+/** OR-composites two black/white masks (white = erase here) into one, at the
+ * first mask's resolution. Used to fold a new eraser stroke into a page's
+ * existing cumulative mask, so re-rendering only ever needs one inpaint pass
+ * over one merged mask (see the `Store` type's eraseMask comment above). */
+async function mergeMasks(a: string, b: string): Promise<string> {
+  const [bitmapA, bitmapB] = await Promise.all([loadImageBitmap(a), loadImageBitmap(b)]);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmapA.width;
+    canvas.height = bitmapA.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas unavailable');
+    ctx.drawImage(bitmapA, 0, 0);
+    ctx.globalCompositeOperation = 'lighter'; // additive blend == OR for a black/white mask
+    ctx.drawImage(bitmapB, 0, 0, bitmapA.width, bitmapA.height);
+    return canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+  } finally {
+    bitmapA.close();
+    bitmapB.close();
+  }
+}
+
+/**
+ * The eraser tool: folds one freehand-brush stroke mask (a black/white PNG,
+ * white = erase, at the target image's natural resolution — see
+ * eraser-tool.ts) into the page's cumulative eraser mask and re-renders.
+ * Idempotent-safe to retry with the same `strokeMask` if it throws (the
+ * caller keeps the pending canvas until this resolves), since OR-merging the
+ * same stroke twice into an already-saved mask is still correct.
+ */
+export async function applyEraseStroke(img: HTMLImageElement, rawUrl: string, strokeMask: string): Promise<void> {
+  const existing = await eraseMaskFor(rawUrl);
+  const merged = existing ? await mergeMasks(existing, strokeMask) : strokeMask;
+  await saveEraseMask(rawUrl, merged);
+  await renderPage(img, rawUrl, await regionsFor(rawUrl));
 }
 
 // ── editor ───────────────────────────────────────────────────────────────────
@@ -347,6 +423,9 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
       button:disabled{opacity:.5;cursor:default}
       button.primary{background:#7aa2ff;color:#080c18;border-color:#7aa2ff;font-weight:600}
       button.danger{color:#f87171;border-color:rgba(248,113,113,.5)}
+      button.style-btn{padding:4px 10px;font-weight:700}
+      button.style-btn.bold{font-weight:900}
+      button.style-btn.italic{font-style:italic}
       .spacer{flex:1}
       .status{font-size:11px;color:#9fb0cf;min-height:14px}
       .status.err{color:#f87171}
@@ -356,7 +435,13 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
       <label>${tr('regionOriginalLabel')}</label>
       <textarea id="orig"></textarea>
       <div class="row"><button id="ai" type="button">${tr('regionTranslateAi')}</button></div>
-      <label>${tr('regionTranslationLabel')}</label>
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <label style="margin:0">${tr('regionTranslationLabel')}</label>
+        <div class="row" style="gap:4px">
+          <button id="style-bold" class="style-btn bold" type="button" title="${tr('regionBoldTitle')}">B</button>
+          <button id="style-italic" class="style-btn italic" type="button" title="${tr('regionItalicTitle')}">I</button>
+        </div>
+      </div>
       <textarea id="trans"></textarea>
       <div class="status" id="status"></div>
       <div class="row">
@@ -371,8 +456,12 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   const trans = $<HTMLTextAreaElement>('trans');
   const status = $<HTMLDivElement>('status');
   const aiBtn = $<HTMLButtonElement>('ai');
+  const boldBtn = $<HTMLButtonElement>('style-bold');
+  const italicBtn = $<HTMLButtonElement>('style-italic');
   const applyBtn = $<HTMLButtonElement>('apply');
   const delBtn = $<HTMLButtonElement>('del');
+  boldBtn.addEventListener('click', () => toggleStyleMarker(trans, '**'));
+  italicBtn.addEventListener('click', () => toggleStyleMarker(trans, '*'));
   delBtn.style.display = existing ? '' : 'none';
   orig.value = region.text;
   trans.value = region.translation;

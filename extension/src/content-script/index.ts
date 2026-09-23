@@ -1,6 +1,7 @@
 import type { AppSettings, BubbleInfo, RegionBoxNorm, TranslateRequest } from '../shared/types.js';
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
 import { withEffectiveConfig } from '../shared/economy.js';
+import { initEraserTool, startEraserSelect } from './eraser-tool.js';
 import { deleteBubbleRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect } from './region-tool.js';
 import JSZip from 'jszip';
 
@@ -48,11 +49,23 @@ const EN_MESSAGES = {
   doneWithTime: 'Done - {time}s',
   regionPickHint: 'Drag over the text you want to change · Esc to cancel',
   regionMovePickHint: 'Drag over where this bubble should go · Esc to cancel',
+  eraserHint: 'Paint over the raw text you want erased · Esc to cancel',
+  eraserBrushSmall: 'S',
+  eraserBrushMedium: 'M',
+  eraserBrushLarge: 'L',
+  eraserUndo: 'Undo',
+  eraserClear: 'Clear',
+  eraserCancel: 'Cancel',
+  eraserApply: 'Apply',
+  eraserApplying: 'Erasing…',
+  eraserNoStrokes: 'Paint over something first.',
   regionTooSmall: 'That area is too small.',
   regionNoImage: 'Could not find a page image under that selection.',
   regionTitle: 'Text area',
   regionOriginalLabel: 'Original text',
   regionTranslationLabel: 'Translation',
+  regionBoldTitle: 'Bold (**text**)',
+  regionItalicTitle: 'Italic (*text*)',
   regionTranslateAi: 'Translate with AI',
   regionApply: 'Apply',
   regionCancel: 'Cancel',
@@ -85,6 +98,7 @@ const EN_MESSAGES = {
   fixHintError: 'Fix failed — try again',
   exportPageTitle: 'Download this translated page',
   btnExportAll: 'Export',
+  btnExportCbz: 'Export CBZ',
   exportingStatus: 'Exporting...',
   exportNoneTranslated: 'No translated pages to export yet',
   exportDone: 'Exported {count} page(s)',
@@ -136,11 +150,23 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: 'Xong - {time}s',
     regionPickHint: 'Keo chon vung chu can sua · Esc de huy',
     regionMovePickHint: 'Keo den vi tri moi cho bong bong nay · Esc de huy',
+    eraserHint: 'To len chu raw can xoa · Esc de huy',
+    eraserBrushSmall: 'S',
+    eraserBrushMedium: 'M',
+    eraserBrushLarge: 'L',
+    eraserUndo: 'Hoan tac',
+    eraserClear: 'Xoa het',
+    eraserCancel: 'Huy',
+    eraserApply: 'Ap dung',
+    eraserApplying: 'Dang xoa…',
+    eraserNoStrokes: 'Hay to len 1 cho truoc.',
     regionTooSmall: 'Vung chon qua nho.',
     regionNoImage: 'Khong tim thay anh trang o vung da chon.',
     regionTitle: 'Vung chu',
     regionOriginalLabel: 'Chu goc',
     regionTranslationLabel: 'Ban dich',
+    regionBoldTitle: 'In dam (**text**)',
+    regionItalicTitle: 'In nghieng (*text*)',
     regionTranslateAi: 'Dich bang AI',
     regionApply: 'Ap dung',
     regionCancel: 'Huy',
@@ -173,6 +199,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintError: 'Sua that bai - thu lai',
     exportPageTitle: 'Tai anh da dich cua trang nay',
     btnExportAll: 'Xuat',
+    btnExportCbz: 'Xuat CBZ',
     exportingStatus: 'Dang xuat...',
     exportNoneTranslated: 'Chua co trang nao da dich de xuat',
     exportDone: 'Da xuat {count} trang',
@@ -219,11 +246,23 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: '完成 - {time}s',
     regionPickHint: '拖动框选要修改的文字 · Esc 取消',
     regionMovePickHint: '拖动到该气泡应放置的位置 · Esc 取消',
+    eraserHint: '涂抹要清除的原文 · Esc 取消',
+    eraserBrushSmall: 'S',
+    eraserBrushMedium: 'M',
+    eraserBrushLarge: 'L',
+    eraserUndo: '撤销',
+    eraserClear: '清空',
+    eraserCancel: '取消',
+    eraserApply: '应用',
+    eraserApplying: '正在清除…',
+    eraserNoStrokes: '请先涂抹一处。',
     regionTooSmall: '选区太小。',
     regionNoImage: '在选区下未找到页面图片。',
     regionTitle: '文字区域',
     regionOriginalLabel: '原文',
     regionTranslationLabel: '译文',
+    regionBoldTitle: '粗体 (**文字**)',
+    regionItalicTitle: '斜体 (*文字*)',
     regionTranslateAi: '用 AI 翻译',
     regionApply: '应用',
     regionCancel: '取消',
@@ -256,6 +295,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintError: '修正失败 - 请重试',
     exportPageTitle: '下载这一页的翻译图片',
     btnExportAll: '导出',
+    btnExportCbz: '导出 CBZ',
     exportingStatus: '正在导出...',
     exportNoneTranslated: '还没有已翻译的页面可导出',
     exportDone: '已导出 {count} 页',
@@ -302,11 +342,23 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: '完了 - {time}s',
     regionPickHint: '変更したい文字をドラッグで囲む · Esc でキャンセル',
     regionMovePickHint: 'この吹き出しの移動先をドラッグ · Esc でキャンセル',
+    eraserHint: '消したい原文の上をなぞる · Esc でキャンセル',
+    eraserBrushSmall: 'S',
+    eraserBrushMedium: 'M',
+    eraserBrushLarge: 'L',
+    eraserUndo: '元に戻す',
+    eraserClear: 'クリア',
+    eraserCancel: 'キャンセル',
+    eraserApply: '適用',
+    eraserApplying: '消去中…',
+    eraserNoStrokes: '先にどこかをなぞってください。',
     regionTooSmall: '選択範囲が小さすぎます。',
     regionNoImage: '選択範囲の下にページ画像が見つかりません。',
     regionTitle: '文字エリア',
     regionOriginalLabel: '原文',
     regionTranslationLabel: '翻訳',
+    regionBoldTitle: '太字 (**文字**)',
+    regionItalicTitle: '斜体 (*文字*)',
     regionTranslateAi: 'AI で翻訳',
     regionApply: '適用',
     regionCancel: 'キャンセル',
@@ -339,6 +391,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintError: '修正に失敗しました - 再試行してください',
     exportPageTitle: 'このページの翻訳画像をダウンロード',
     btnExportAll: 'エクスポート',
+    btnExportCbz: 'CBZをエクスポート',
     exportingStatus: 'エクスポート中...',
     exportNoneTranslated: 'まだエクスポートできる翻訳済みページがありません',
     exportDone: '{count} ページをエクスポートしました',
@@ -385,11 +438,23 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     doneWithTime: '완료 - {time}s',
     regionPickHint: '바꿀 글자를 드래그로 선택 · Esc로 취소',
     regionMovePickHint: '이 말풍선을 옮길 위치로 드래그 · Esc로 취소',
+    eraserHint: '지울 원문 위를 칠하세요 · Esc로 취소',
+    eraserBrushSmall: 'S',
+    eraserBrushMedium: 'M',
+    eraserBrushLarge: 'L',
+    eraserUndo: '실행 취소',
+    eraserClear: '모두 지우기',
+    eraserCancel: '취소',
+    eraserApply: '적용',
+    eraserApplying: '지우는 중…',
+    eraserNoStrokes: '먼저 한 곳을 칠하세요.',
     regionTooSmall: '선택 영역이 너무 작습니다.',
     regionNoImage: '선택 영역 아래에서 페이지 이미지를 찾을 수 없습니다.',
     regionTitle: '글자 영역',
     regionOriginalLabel: '원문',
     regionTranslationLabel: '번역',
+    regionBoldTitle: '굵게 (**텍스트**)',
+    regionItalicTitle: '기울임 (*텍스트*)',
     regionTranslateAi: 'AI로 번역',
     regionApply: '적용',
     regionCancel: '취소',
@@ -422,6 +487,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintError: '수정 실패 - 다시 시도하세요',
     exportPageTitle: '이 페이지의 번역 이미지 다운로드',
     btnExportAll: '내보내기',
+    btnExportCbz: 'CBZ 내보내기',
     exportingStatus: '내보내는 중...',
     exportNoneTranslated: '아직 내보낼 번역된 페이지가 없습니다',
     exportDone: '{count}개 페이지를 내보냈습니다',
@@ -451,6 +517,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   }
   if (msg.type === 'START_REGION_SELECT') {
     startRegionSelect();
+    send({ ok: true });
+    return false;
+  }
+  if (msg.type === 'START_ERASER_SELECT') {
+    startEraserSelect();
     send({ ok: true });
     return false;
   }
@@ -664,6 +735,27 @@ async function exportTranslatedPagesAsZip(
   const blob = await zip.generateAsync({ type: 'blob' });
   const stamp = new Date().toISOString().slice(0, 10);
   triggerDownload(blob, `manga-translated-${stamp}.zip`);
+}
+
+// CBZ is the same ZIP container as exportTranslatedPagesAsZip, but a CBZ
+// reader pages through it in filename-sort order — the source-URL-derived
+// names used for the plain ZIP export (e.g. "cover.jpg", "1.jpg", "10.jpg",
+// "2.jpg") don't sort into reading order, so this always numbers entries
+// zero-padded by their scan index instead, regardless of the source URLs.
+async function exportTranslatedPagesAsCbz(
+  entries: Array<{ url: string; base64: string; index: number }>,
+  onStatus?: (text: string) => void,
+): Promise<void> {
+  const zip = new JSZip();
+  const sorted = [...entries].sort((a, b) => a.index - b.index);
+  const width = Math.max(3, String(sorted.length).length);
+  sorted.forEach(({ base64 }, i) => {
+    zip.file(`page_${String(i + 1).padStart(width, '0')}.png`, base64, { base64: true });
+  });
+  onStatus?.(tr('exportingStatus'));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  triggerDownload(blob, `manga-translated-${stamp}.cbz`);
 }
 
 const AUTO_VIEWPORT_MARGIN_PX = 250;
@@ -3708,6 +3800,7 @@ function buildScannerHTML(): string {
         <button class="mts-btn-toolbar" data-action="suggest-instructions" disabled title="${tr('suggestInstructionsHint')}">${tr('suggestInstructions')}</button>
         <button class="mts-btn-toolbar" data-action="fix-selected" disabled>${tr('btnFixSelected')}</button>
         <button class="mts-btn-toolbar" data-action="export-all">${tr('btnExportAll')}</button>
+        <button class="mts-btn-toolbar" data-action="export-cbz">${tr('btnExportCbz')}</button>
         <button class="mts-btn-primary mts-btn-translate" data-action="translate" disabled>${tr('translate')}</button>
       </div>
       <div class="mts-grid">${cards}</div>
@@ -3955,6 +4048,28 @@ function bindScanner(shadow: ShadowRoot): void {
     } finally {
       exportAllBtn.textContent = originalLabel;
       exportAllBtn.disabled = false;
+    }
+  });
+
+  const exportCbzBtn = shadow.querySelector<HTMLButtonElement>('[data-action="export-cbz"]')!;
+  exportCbzBtn.addEventListener('click', async () => {
+    const entries = currentPages
+      .filter((p) => translatedCache.has(p.rawUrl))
+      .map((p) => ({ url: p.rawUrl, base64: translatedCache.get(p.rawUrl)!, index: p.index }));
+
+    if (entries.length === 0) {
+      toast(tr('exportNoneTranslated'), true);
+      return;
+    }
+
+    exportCbzBtn.disabled = true;
+    const originalLabel = exportCbzBtn.textContent;
+    try {
+      await exportTranslatedPagesAsCbz(entries, (status) => { exportCbzBtn.textContent = status; });
+      toast(tr('exportDone', { count: entries.length }));
+    } finally {
+      exportCbzBtn.textContent = originalLabel;
+      exportCbzBtn.disabled = false;
     }
   });
 
@@ -4789,6 +4904,12 @@ initRegionTool({
   tr: (key) => tr(key as ContentMessageKey),
   toast,
 });
+initEraserTool({
+  resolveUrl: resolveMangaUrl,
+  tr: (key) => tr(key as ContentMessageKey),
+  toast,
+});
+
 // Saved regions come back on reload; lazy-loaded pages get a second chance.
 setTimeout(() => { void restoreManualRegionsOnLoad(); }, 1500);
 setTimeout(() => { void restoreManualRegionsOnLoad(); }, 5000);

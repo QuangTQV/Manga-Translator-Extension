@@ -416,3 +416,16 @@ class RegionRenderRequest(TranslateOptions):
 
 class RegionRenderResponse(BaseModel):
     image: str  # raw base64 PNG
+
+
+class EraseRequest(BaseModel):
+    """The "eraser" tool (see core/manual_region.py:erase_mask) — a plain
+    image op, no LLM/provider involved, so unlike the other /region/* routes
+    this doesn't need TranslateOptions at all."""
+
+    image: str  # raw base64 of the image to erase from
+    mask: str  # raw base64 PNG; any non-black pixel marks "erase here" — what a freehand brush stroke composited to black naturally produces
+
+
+class EraseResponse(BaseModel):
+    image: str  # raw base64 PNG
