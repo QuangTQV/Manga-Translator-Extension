@@ -202,6 +202,19 @@ curl http://localhost:7677/admin/live-ai-log
 
 Log cũng được ghi ra file `backend/logs/live_ai.jsonl` — không lưu ảnh (chỉ ghi số lượng ảnh + KB ước tính), chỉ lưu phần text.
 
+## 11. (Tuỳ chọn) Web App — dịch file ảnh có sẵn trên máy, không cần extension
+
+Dùng khi bạn có sẵn file ảnh (raw scan chưa từng đăng lên trang web nào) và muốn dịch trực tiếp, không cần mở trang web nào chứa ảnh đó cả — extension chỉ dịch được ảnh đã có sẵn trong 1 trang web đang mở.
+
+1. Chạy backend như bình thường (`./.venv/bin/python main.py`).
+2. Mở trình duyệt bất kỳ, vào `http://localhost:7677/app`.
+3. Điền Provider / Model / API Key / ngôn ngữ nguồn-đích ở cột bên trái (lưu ngay trong trình duyệt đó, tách biệt với settings của extension).
+4. Kéo-thả file ảnh vào khung, hoặc bấm vào khung để chọn file.
+5. Bấm **Translate All**.
+6. Bấm **Export ZIP** hoặc **Export CBZ** để tải kết quả về.
+
+Trang này cố tình tối giản — không có Story DB, không xoay vòng nhiều key, không có công cụ khoanh vùng/bút tẩy/chỉnh font. Cần đầy đủ tính năng thì dùng extension như hướng dẫn ở trên.
+
 ## Xử lý sự cố thường gặp
 
 | Vấn đề | Cách xử lý |

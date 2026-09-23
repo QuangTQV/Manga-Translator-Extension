@@ -31,6 +31,8 @@
   ·
   <a href="#optional-flux">Optional Flux</a>
   ·
+  <a href="#web-app-no-extension-needed">Web App</a>
+  ·
   <a href="#development">Development</a>
 </p>
 
@@ -90,6 +92,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Eraser tool | For raw text/SFX a rectangle can't isolate cleanly (curved or diagonal SFX, text hugging a character's outline): click **🩹 Eraser** and paint over it with a brush; it's inpainted away. Persisted per page like the manual text area tool. |
 | Economy mode | One switch to cut API cost: low-detail images, no full-page or previous-page context, no Story DB reference images, and a smaller context image. Your own settings are kept and come back when you turn it off. |
 | Font settings | Pick which font pack renders translated text, and the min/max font size range, from the Translate tab — drop your own font pack (a folder of .ttf/.otf files) into `backend/fonts/` to see it in the list. A text-sharpness (supersampling) control sits in the new **Pro** tab, alongside other advanced/translator-focused controls kept out of the main tabs. |
+| Web app (no extension) | Translate raw image files you have on disk — nothing needs to already be on a web page. Start the backend, open `http://localhost:7677/app` in any browser, drag files in, translate, export ZIP/CBZ. Deliberately minimal (no Story DB/rotation/manual tools) — for the full toolkit, use the extension. |
 | Export | Download a single translated page as a PNG from its overlay, or export every translated page in the scanner as a ZIP in one click. |
 | CBZ export | "Export CBZ" next to the ZIP export button — same pages, but numbered by scan order so a CBZ reader pages through them correctly (a plain ZIP export's filenames come from the source URLs, which don't always sort into reading order). |
 | Translation progress | A small animated marker shows which page(s) are actively being translated right now, distinct from ones still waiting in the auto-translate queue. |
@@ -222,6 +225,12 @@ backend/models/flux/
 Use Flux only when you explicitly configure outside-text inpainting to a Flux mode such as `flux_klein_4b`. For most users, the default `auto` behavior is lighter and faster.
 
 **No GPU? Run Flux on a remote GPU.** The popup's *Inpainting quality* setting also offers `Flux Klein 4B (remote)` and `Flux Klein 9B (remote)`: run `backend/flux_worker.py` on a free Kaggle GPU (or any GPU box), expose it with a `cloudflared` tunnel, and paste the URL into the popup — nothing heavy is installed locally. Protect the worker with `--token` / `FLUX_WORKER_TOKEN` and put the same value in the popup's Token field. If the worker is down or rejects the token, the page still translates (outside-bubble text is left as-is), a warning toast explains why, and the backend stops retrying the dead worker for ~60 seconds. Step-by-step guide (Vietnamese): [docs/HUONG-DAN-CHAY.md](docs/HUONG-DAN-CHAY.md#8-tuỳ-chọn-chạy-flux-từ-xa-trên-gpu-free-của-kaggle).
+
+## Web App (no extension needed)
+
+For raw image files you already have on disk (scans that were never published to any web page — the extension can only translate `<img>` elements it finds on a page you're browsing) run the backend as usual, then open **`http://localhost:7677/app`** in any browser. Drag files in (or use the file picker), configure the provider/key/languages in the sidebar (saved in that browser's own storage), click **Translate All**, then **Export ZIP** or **Export CBZ**.
+
+It is deliberately minimal — no Story DB, no provider/key rotation, no manual region/eraser/font tools, no auto-translate — for that, use the extension. It talks to the same local backend over a plain `fetch()`, so nothing beyond the backend needs to be running.
 
 ## Usage Workflow
 
