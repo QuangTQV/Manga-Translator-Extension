@@ -3031,6 +3031,139 @@ guessing.
     return result.strip()
 
 
+def generate_story_update(
+    config: TranslationConfig,
+    description: str,
+    characters: List[Dict[str, Any]],
+    relationships: List[Dict[str, Any]],
+    output_language: str,
+    debug: bool = False,
+    story_title: Optional[str] = None,
+) -> str:
+    """One-off LLM call: turn a free-text note about a story development
+    (e.g. "chapter 39 — the villain turns out to be Akira's childhood
+    friend Hina, so they switch from casual to hostile pronouns") into a
+    structured JSON update for the Story DB's characters/relationships —
+    see core/story_context.py:merge_story_update, which parses and applies
+    this function's return value.
+
+    A single explicit, user-triggered call, like generate_character_notes —
+    not part of the per-page pipeline/cache. The user reviews the merged
+    result in the popup before saving it (merge_story_update never touches
+    the database itself).
+
+    Existing characters/relationships are given as context so the model
+    updates them by name instead of creating duplicates — it has no
+    knowledge of this story's internal ids, which is why the JSON it
+    returns names characters rather than referencing ids directly.
+
+    When config.enable_web_search is set, the model is told to search for
+    `story_title` and use sources to fill in/confirm the update — the
+    opposite spoiler policy from generate_character_notes' web search
+    (which stays spoiler-free for a general style guide): here the whole
+    point is tracking plot developments, so the model is told to use
+    whatever the description implies as the boundary (e.g. "up to chapter
+    39") rather than holding back reveals.
+    """
+    if not description.strip():
+        raise TranslationError("No description provided.")
+
+    existing_characters = "\n".join(
+        f"- {c.get('name')}"
+        + (f" ({c['gender']})" if c.get("gender") and c["gender"] != "unknown" else "")
+        + (f" — {c['role']}" if c.get("role") else "")
+        for c in characters
+    ) or "(none yet)"
+
+    names_by_id = {c.get("id"): c.get("name") for c in characters}
+    existing_relationships = "\n".join(
+        f"- {names_by_id.get(r.get('character_a_id'), '?')} <-> "
+        f"{names_by_id.get(r.get('character_b_id'), '?')}: {r.get('surface_relation')}"
+        for r in relationships
+    ) or "(none yet)"
+
+    system_prompt = (
+        "You maintain a manga translator's character database from short "
+        "notes they write about what's happened in the story. You output "
+        "ONLY a single JSON object — no markdown code fences, no "
+        "commentary before or after it."
+    )
+
+    web_search_rule = ""
+    if config.enable_web_search:
+        title_hint = (
+            f'The story is titled "{story_title.strip()}" — search for that '
+            "title specifically."
+            if story_title and story_title.strip()
+            else "No title was given — try to identify the story from the "
+            "character names above or in the description, then search for it. "
+            "If you can't identify it, ignore this section and rely on the "
+            "description alone."
+        )
+        web_search_rule = f"""
+## WEB SEARCH
+You have a web search tool available — use it. {title_hint} Use sources
+(wikis, official summaries, episode/chapter guides) to fill in or confirm
+character and relationship details implied by the new development.
+**Unlike a general style guide, this database is explicitly meant to
+track plot developments as the reader progresses — do not hold back
+reveals, deaths, or twists.** Use the new development's own wording as the
+boundary for how far to go (e.g. "up to chapter 39" means chapter 39 and
+everything before it, not later chapters) — if it names a specific
+chapter/point, don't pull in anything from after it even if a source
+covers further.
+"""
+
+    prompt_text = f"""
+## EXISTING CHARACTERS
+{existing_characters}
+
+## EXISTING RELATIONSHIPS
+{existing_relationships}
+
+## NEW DEVELOPMENT (written by the user)
+{description.strip()}
+{web_search_rule}
+## TASK
+Update the character database to reflect the new development above, for a
+translation into {output_language}. Reuse the exact existing name for any
+character already listed — do not create a duplicate with a slightly
+different spelling. Only include a character or relationship in your
+output if the new development actually adds or changes something about
+it; do not restate everything that already existed unchanged.
+
+If {output_language} uses relationship-based pronouns/register (e.g.
+Vietnamese xưng hô, Japanese pronoun choice) and the development changes
+how two characters address each other, say so explicitly in
+`address_notes` (e.g. "switched from casual tớ/cậu to hostile ta/ngươi
+after the reveal").
+
+Respond with exactly this JSON shape, nothing else:
+{{
+  "characters": [
+    {{"name": "...", "gender": "male|female|other|unknown", "role": "...", "voice_notes": "..."}}
+  ],
+  "relationships": [
+    {{"character_a": "...", "character_b": "...", "surface_relation": "...", "address_notes": "..."}}
+  ],
+  "continuity_note": {{"text": "...", "source_label": "..."}}
+}}
+Omit any field you have nothing new to say for (e.g. drop "role" entirely
+rather than writing ""). `continuity_note` should summarize the
+development in one sentence for a "what's happened so far" log — set it to
+null if the description doesn't read like a plot development worth
+recording (e.g. it's just a correction or a style note).
+"""
+
+    result = _call_llm_endpoint(
+        config, [], prompt_text, debug=debug, system_prompt=system_prompt,
+        call_type="story_db_update",
+    )
+    if not result or not result.strip():
+        raise TranslationError("Empty response while updating the Story DB.")
+    return result.strip()
+
+
 def prepare_bubble_images_for_translation(
     bubble_data: List[Dict[str, Any]],
     original_cv_image: np.ndarray,

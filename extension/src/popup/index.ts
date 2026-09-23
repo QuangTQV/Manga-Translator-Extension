@@ -119,6 +119,10 @@ const storyDeleteBtn = qs<HTMLButtonElement>('btn-story-delete');
 const storyExportBtn = qs<HTMLButtonElement>('btn-story-export');
 const storyImportBtn = qs<HTMLButtonElement>('btn-story-import');
 const storyImportFileInput = qs<HTMLInputElement>('f-story-import-file');
+const storyUpdateDescriptionInput = qs<HTMLTextAreaElement>('f-story-update-description');
+const storyUpdateWebSearchToggle = qs<HTMLInputElement>('f-story-update-web-search');
+const storyUpdateFromDescriptionBtn = qs<HTMLButtonElement>('btn-story-update-from-description');
+const storyUpdateStatus = qs<HTMLDivElement>('story-update-status');
 const supersamplingSelect = qs<HTMLSelectElement>('f-supersampling');
 
 const healthBadge = qs<HTMLSpanElement>('health-badge');
@@ -544,6 +548,7 @@ function bind(): void {
     storyImportFileInput.value = '';
     if (file) void handleStoryImportFile(file);
   });
+  storyUpdateFromDescriptionBtn.addEventListener('click', () => { void handleStoryUpdateFromDescription(); });
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -1641,6 +1646,76 @@ async function handleStoryImportFile(file: File): Promise<void> {
     setStatus(t(uiLanguage, 'statusStoryImported'), 'ok');
   } catch {
     setStatus(t(uiLanguage, 'errorStoryImportFailed'), 'err');
+  }
+}
+
+/** The first enabled provider group with at least one enabled key — this
+ * feature is a low-frequency, one-off helper (like "Suggest Notes"), so it
+ * deliberately doesn't pull in the full rotation/fallback-provider
+ * machinery content-script.ts's buildProviderRotation assembles for the
+ * actual translate loop. */
+function firstEnabledProvider(): { provider: string; modelName?: string; apiKey?: string; baseUrl?: string } | null {
+  for (const group of settings.config.providerGroups ?? []) {
+    if (group.enabled === false) continue;
+    const key = group.apiKeys.find((k) => k.enabled);
+    if (key) return { provider: group.provider, modelName: group.modelName, apiKey: key.key, baseUrl: group.baseUrl };
+  }
+  return null;
+}
+
+interface StoryUpdateMessageResult {
+  ok: boolean;
+  characters?: StoryCharacter[];
+  relationships?: StoryRelationship[];
+  continuityNote?: StoryContinuityNote | null;
+  error?: string;
+}
+
+async function handleStoryUpdateFromDescription(): Promise<void> {
+  const description = storyUpdateDescriptionInput.value.trim();
+  if (!description) {
+    storyUpdateStatus.textContent = t(uiLanguage, 'errorStoryUpdateNoDescription');
+    return;
+  }
+  const providerInfo = firstEnabledProvider();
+  if (!providerInfo) {
+    storyUpdateStatus.textContent = t(uiLanguage, 'errorNoProviderConfigured');
+    return;
+  }
+
+  storyUpdateFromDescriptionBtn.disabled = true;
+  storyUpdateStatus.textContent = t(uiLanguage, 'statusStoryUpdating');
+  try {
+    const result = await storyMessage<StoryUpdateMessageResult>('STORY_UPDATE_FROM_DESCRIPTION', {
+      body: {
+        description,
+        characters: collectStoryCharacters(),
+        relationships: collectStoryRelationships(),
+        input_language: settings.config.inputLanguage,
+        output_language: settings.config.outputLanguage,
+        provider: providerInfo.provider,
+        model_name: providerInfo.modelName,
+        api_key: providerInfo.apiKey,
+        base_url: providerInfo.baseUrl,
+        enable_web_search: storyUpdateWebSearchToggle.checked,
+        story_title: storyNameInput.value.trim() || undefined,
+      },
+    });
+    if (!result.ok || !result.characters || !result.relationships) {
+      storyUpdateStatus.textContent = `${t(uiLanguage, 'errorStoryUpdateFailed')}: ${result.error ?? ''}`;
+      return;
+    }
+    renderStoryCharacters(result.characters);
+    renderStoryRelationships(result.relationships);
+    if (result.continuityNote) {
+      renderStoryContinuityNotes([...collectStoryContinuityNotes(), result.continuityNote]);
+    }
+    storyUpdateDescriptionInput.value = '';
+    storyUpdateStatus.textContent = t(uiLanguage, 'statusStoryUpdated');
+  } catch (e) {
+    storyUpdateStatus.textContent = e instanceof Error ? e.message : String(e);
+  } finally {
+    storyUpdateFromDescriptionBtn.disabled = false;
   }
 }
 

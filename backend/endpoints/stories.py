@@ -4,19 +4,32 @@ core/story_context.py. Opt-in per user regardless of MT_REQUIRE_AUTH: any
 logged-in account (registered or Google-signed-in via the extension's
 Account tab) can create and use stories here.
 """
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth import require_login
+from auth import require_login, verify_token
 from core.accounts import Account
+from core.services.translation import generate_story_update
 from core.story_context import (
     StoryNotFoundError,
+    StoryUpdateParseError,
     create_story,
     delete_story,
     get_story,
     list_stories,
+    merge_story_update,
     save_story,
 )
-from schemas import CreateStoryRequest, StoryContextPayload, StoryDetail, StorySummary
+from endpoints.translate import _apply_shared_llm_config, _config_for_request
+from schemas import (
+    CreateStoryRequest,
+    StoryContextPayload,
+    StoryDetail,
+    StorySummary,
+    StoryUpdateRequest,
+    StoryUpdateResponse,
+)
 
 router = APIRouter(prefix="/stories", tags=["stories"])
 
@@ -87,3 +100,51 @@ async def delete_my_story(story_id: str, account: Account = Depends(require_logi
     except StoryNotFoundError:
         raise HTTPException(status_code=404, detail="Story not found")
     return {"ok": True}
+
+
+@router.post("/update-from-description", response_model=StoryUpdateResponse)
+async def update_story_from_description(
+    req: StoryUpdateRequest, account=Depends(verify_token),
+) -> StoryUpdateResponse:
+    """Turn a free-text note about a story development ("chapter 39, the
+    villain turns out to be Akira's childhood friend Hina, so they switch
+    to hostile pronouns") into a Story DB update — see
+    core/services/translation.py:generate_story_update and
+    core/story_context.py:merge_story_update.
+
+    Gated by verify_token (a one-off LLM-cost-incurring helper, same as
+    /suggest-instructions and /region/translate) rather than require_login
+    like this router's other routes — it never reads or writes the
+    database, so there's no account-scoped row to protect; the Story DB
+    tab it's called from is already login-gated in the popup regardless.
+    Stateless: takes whatever characters/relationships the caller currently
+    has (saved or not) and returns the merged result for review — the
+    caller decides whether/how to save it.
+    """
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail="No description provided.")
+    _apply_shared_llm_config(req, account)
+    config = _config_for_request(req)
+    config.translation.enable_web_search = req.enable_web_search
+    characters = [c.model_dump() for c in req.characters]
+    relationships = [r.model_dump() for r in req.relationships]
+
+    try:
+        raw_reply = await asyncio.to_thread(
+            generate_story_update,
+            config.translation, req.description, characters, relationships, req.output_language,
+            story_title=req.story_title,
+        )
+        merged_characters, merged_relationships, continuity_note = merge_story_update(
+            characters, relationships, raw_reply,
+        )
+    except StoryUpdateParseError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Story update failed: {e}")
+
+    return StoryUpdateResponse(
+        characters=merged_characters,
+        relationships=merged_relationships,
+        continuity_note=continuity_note,
+    )

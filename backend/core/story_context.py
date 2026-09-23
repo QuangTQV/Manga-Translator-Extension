@@ -199,6 +199,133 @@ def save_story(
     )
 
 
+class StoryUpdateParseError(Exception):
+    """Raised when the LLM's reply to a "update from description" request
+    isn't valid JSON in the expected shape — the caller surfaces this as a
+    normal error rather than silently discarding the user's description."""
+
+
+def _extract_json_object(raw: str) -> dict:
+    """Best-effort JSON extraction from an LLM reply: strips a ```json ...```
+    fence if present (models add one occasionally despite being told not
+    to), then parses the first '{' to the last '}' — the same
+    fence-stripping shape as endpoints/regions.py's _clean_translation, one
+    level more defensive since here the whole payload must parse as JSON,
+    not just be usable as literal text."""
+    import json
+    import re
+
+    text = raw.strip()
+    fence = re.match(r"^```[a-zA-Z]*\n?(.*?)\n?```$", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise StoryUpdateParseError("The model's reply did not contain a JSON object.")
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError as e:
+        raise StoryUpdateParseError(f"The model's reply was not valid JSON: {e}") from e
+    if not isinstance(parsed, dict):
+        raise StoryUpdateParseError("The model's reply was not a JSON object.")
+    return parsed
+
+
+def merge_story_update(
+    characters: list[dict],
+    relationships: list[dict],
+    raw_llm_reply: str,
+) -> tuple[list[dict], list[dict], Optional[dict]]:
+    """Applies an LLM-drafted update (see
+    core/services/translation.py:generate_story_update's prompt for the
+    exact JSON shape asked for) on top of a story's existing characters/
+    relationships, matching by **name** (case-insensitive, trimmed) rather
+    than id — the model has no way to know this story's internal ids, so it
+    names characters instead, and this is where those names get resolved
+    back to stable ids: an existing character/relationship is updated in
+    place (id kept), a new one is created with a fresh id. Returns
+    (characters, relationships, continuity_note_or_None) — a plain function,
+    no I/O, so it's cheap to unit test without a real LLM call.
+
+    A relationship naming a character that isn't in the story (not existing,
+    not in this same update's character list) is dropped rather than
+    creating a dangling reference — this can only happen if the model
+    invents a name it didn't itself also add as a character.
+    """
+    data = _extract_json_object(raw_llm_reply)
+
+    characters = [dict(c) for c in characters]
+    relationships = [dict(r) for r in relationships]
+
+    def find_character_index(name: str) -> Optional[int]:
+        key = name.strip().casefold()
+        for i, c in enumerate(characters):
+            if c.get("name", "").strip().casefold() == key:
+                return i
+        return None
+
+    for raw_char in data.get("characters") or []:
+        name = (raw_char.get("name") or "").strip()
+        if not name:
+            continue
+        idx = find_character_index(name)
+        if idx is None:
+            characters.append({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "gender": raw_char.get("gender") or "unknown",
+                "role": raw_char.get("role") or None,
+                "voice_notes": raw_char.get("voice_notes") or None,
+            })
+        else:
+            existing = characters[idx]
+            if raw_char.get("gender"):
+                existing["gender"] = raw_char["gender"]
+            if raw_char.get("role"):
+                existing["role"] = raw_char["role"]
+            if raw_char.get("voice_notes"):
+                existing["voice_notes"] = raw_char["voice_notes"]
+
+    def find_relationship_index(id_a: str, id_b: str) -> Optional[int]:
+        pair = {id_a, id_b}
+        for i, r in enumerate(relationships):
+            if {r.get("character_a_id"), r.get("character_b_id")} == pair:
+                return i
+        return None
+
+    for raw_rel in data.get("relationships") or []:
+        idx_a = find_character_index(raw_rel.get("character_a") or "")
+        idx_b = find_character_index(raw_rel.get("character_b") or "")
+        surface_relation = (raw_rel.get("surface_relation") or "").strip()
+        if idx_a is None or idx_b is None or idx_a == idx_b or not surface_relation:
+            continue
+        id_a, id_b = characters[idx_a]["id"], characters[idx_b]["id"]
+        rel_idx = find_relationship_index(id_a, id_b)
+        if rel_idx is None:
+            relationships.append({
+                "id": str(uuid.uuid4()),
+                "character_a_id": id_a,
+                "character_b_id": id_b,
+                "surface_relation": surface_relation,
+                "address_notes": raw_rel.get("address_notes") or None,
+            })
+        else:
+            relationships[rel_idx]["surface_relation"] = surface_relation
+            if raw_rel.get("address_notes"):
+                relationships[rel_idx]["address_notes"] = raw_rel["address_notes"]
+
+    continuity_note = None
+    raw_note = data.get("continuity_note")
+    if isinstance(raw_note, dict) and (raw_note.get("text") or "").strip():
+        continuity_note = {
+            "id": str(uuid.uuid4()),
+            "text": raw_note["text"].strip(),
+            "source_label": raw_note.get("source_label") or None,
+        }
+
+    return characters, relationships, continuity_note
+
+
 def delete_story(story_id: str, account_email: str) -> None:
     engine = get_engine()
     with engine.begin() as conn:

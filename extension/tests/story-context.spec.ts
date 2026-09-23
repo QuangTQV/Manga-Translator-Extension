@@ -419,3 +419,101 @@ test.describe('popup — Story DB tab', () => {
     });
   }
 });
+
+test.describe('popup — Story DB update from description', () => {
+  test('drafts characters/relationships/continuity note from a free-text update and merges them into the form', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({
+        accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1',
+        config: { providerGroups: [{ provider: 'Google', modelName: 'gemini-3.1-flash', enabled: true, apiKeys: [{ key: 'k1', enabled: true }] }] },
+      }),
+      firstKeyMatches('k1'),
+    );
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'story-1', name: 'My Manga', updated_at: 0,
+          characters: [{ id: 'c-akira', name: 'Akira', gender: 'male' }],
+          relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+        }),
+      });
+    });
+
+    let capturedBody: any = null;
+    await context.route('**/stories/update-from-description', async (route) => {
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          characters: [
+            { id: 'c-akira', name: 'Akira', gender: 'male', role: 'protagonist' },
+            { id: 'c-hina', name: 'Hina', gender: 'female', role: 'antagonist' },
+          ],
+          relationships: [{ id: 'r1', character_a_id: 'c-akira', character_b_id: 'c-hina', surface_relation: 'secret enemies', address_notes: 'ta/ngươi now' }],
+          continuity_note: { id: 'n1', text: 'Hina is revealed as the mastermind.', source_label: 'Chapter 39' },
+        }),
+      });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('#story-content-fields')).toBeVisible({ timeout: 5_000 });
+    await expect(popup.locator('.story-char-row')).toHaveCount(1);
+
+    await popup.locator('#f-story-update-description').fill("Update up to chapter 39: Hina turns out to be the villain, Akira's childhood friend.");
+    await popup.locator('#f-story-update-web-search').check({ force: true });
+    await popup.locator('#btn-story-update-from-description').click();
+
+    await expect(popup.locator('.story-char-row')).toHaveCount(2, { timeout: 5_000 });
+    await expect(popup.locator('.story-char-row').nth(1).locator('.sc-name')).toHaveValue('Hina');
+    await expect(popup.locator('.story-rel-row')).toHaveCount(1);
+    await expect(popup.locator('.story-rel-row .sr-relation')).toHaveValue('secret enemies');
+    await expect(popup.locator('.story-continuity-note-row')).toHaveCount(1);
+    await expect(popup.locator('.story-continuity-note-row .scn-text')).toHaveValue('Hina is revealed as the mastermind.');
+    await expect(popup.locator('#f-story-update-description')).toHaveValue('');
+
+    expect(capturedBody.description).toContain('villain');
+    expect(capturedBody.provider).toBe('Google');
+    expect(capturedBody.api_key).toBe('k1');
+    expect(capturedBody.characters).toHaveLength(1); // what was in the form before the update
+    expect(capturedBody.enable_web_search).toBe(true);
+    expect(capturedBody.story_title).toBe('My Manga');
+  });
+
+  test('shows an error and does not touch the form when the description is empty', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ id: 'story-1', name: 'My Manga', updated_at: 0, characters: [], relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false }),
+      });
+    });
+    let called = false;
+    await context.route('**/stories/update-from-description', async (route) => { called = true; await route.abort(); });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('#story-content-fields')).toBeVisible({ timeout: 5_000 });
+    await popup.locator('#btn-story-update-from-description').click();
+    await expect(popup.locator('#story-update-status')).toContainText('Describe what happened');
+    expect(called).toBe(false);
+  });
+});
