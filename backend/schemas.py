@@ -404,12 +404,14 @@ class RegionTranslateResponse(BaseModel):
 
 class RegionItem(BaseModel):
     box: RegionBox
-    text: str = ""  # empty = just clean the spot
+    text: str = ""  # empty = just clean the spot; ignored when restore_only is set
+    restore_only: bool = False  # paste the original (pre-translation) pixels back at this box instead of cleaning+drawing — see RegionRenderRequest.source_image
 
 
 class RegionRenderRequest(TranslateOptions):
     image: str  # raw base64 of the image to draw on
     regions: List[RegionItem]
+    source_image: Optional[str] = None  # raw base64 of the untranslated page; required when any region has restore_only=True
 
 
 class RegionRenderResponse(BaseModel):

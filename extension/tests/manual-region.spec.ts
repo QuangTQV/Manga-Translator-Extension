@@ -54,7 +54,7 @@ test('box a text area, read it, AI-translate, apply — and it comes back after 
   await editor.locator('#apply').click();
   await expect(page.locator('#mt-region-editor')).toHaveCount(0);
   expect(seen.render).toHaveLength(1);
-  expect(seen.render[0].regions).toEqual([{ box: seen.ocr[0].box, text: 'Xin chào' }]);
+  expect(seen.render[0].regions).toEqual([{ box: seen.ocr[0].box, text: 'Xin chào', restore_only: false }]);
   await expect(page.locator('img.mt-page-overlay')).toHaveAttribute('src', new RegExp(`^data:image/png;base64,${FAKE_TRANSLATED_IMAGE_B64.slice(0, 20)}`));
 
   // Persisted: the content script is injected on demand (no manifest

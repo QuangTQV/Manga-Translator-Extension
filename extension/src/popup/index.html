@@ -333,6 +333,24 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="field">
+          <label class="label" data-i18n="labelFontPack">Font</label>
+          <select id="f-font-pack" class="select">
+            <option value="" data-i18n="fontPackAuto">Auto (by output language)</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintFontPack">Which font pack renders the translated text. Auto picks Roboto for Vietnamese/English, Noto Sans SC for Chinese/Japanese/Korean, Komika Hand otherwise. Drop your own font pack (a folder of .ttf/.otf files) into backend/fonts/ to see it here.</div>
+        </div>
+        <div class="config-row">
+          <div class="field">
+            <label class="label" data-i18n="labelMinFontSize">Min font size</label>
+            <input id="f-min-font-size" class="input" type="number" min="1" max="200" step="1" />
+          </div>
+          <div class="field">
+            <label class="label" data-i18n="labelMaxFontSize">Max font size</label>
+            <input id="f-max-font-size" class="input" type="number" min="1" max="200" step="1" />
+          </div>
+        </div>
+        <div class="toggle-hint" data-i18n="hintFontSize">The layout engine picks the largest size in this range that fits each bubble; if even the minimum doesn't fit, it uses the minimum anyway rather than dropping text.</div>
         <div class="toggle-row">
           <div class="toggle-copy">
             <div class="toggle-title" data-i18n="labelPreTranslate">Pre-translate</div>

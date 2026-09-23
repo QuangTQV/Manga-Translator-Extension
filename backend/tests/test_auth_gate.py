@@ -93,6 +93,7 @@ def test_health_and_providers_are_never_gated(monkeypatch):
     monkeypatch.setattr(settings, "require_auth", True)
     assert client.get("/health").status_code == 200
     assert client.get("/providers").status_code == 200
+    assert client.get("/fonts").status_code == 200
 
 
 def test_account_register_then_me_round_trips():

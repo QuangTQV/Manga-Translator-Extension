@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 import main
-from core.manual_region import box_to_pixels, decode_image, encode_png, render_regions
+from core.manual_region import box_to_pixels, decode_image, encode_png, render_regions, restore_regions
 
 client = TestClient(main.app, raise_server_exceptions=False)
 FONT_DIR = "fonts/Roboto"
@@ -118,3 +118,85 @@ def test_render_route_limits_regions_per_page():
     region = {"box": {"x1": 0.1, "y1": 0.1, "x2": 0.5, "y2": 0.5}, "text": "x"}
     resp = client.post("/region/render", json={**OPTS, "image": _b64(_page()), "regions": [region] * 51})
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# restore_regions — undoing a wrongly-placed/translated bubble by pasting
+# back the real pre-translation pixels, used by /region/render's
+# restore_only regions (delete/move a detected bubble).
+# ---------------------------------------------------------------------------
+def _solid(color, size=(400, 300)):
+    return Image.new("RGB", size, color)
+
+
+def test_restore_regions_pastes_exact_source_pixels():
+    source = _solid((10, 20, 30))
+    target = render_regions(_page(), [((0.3, 0.25, 0.7, 0.5), "translated")], FONT_DIR)
+    out = restore_regions(target, source, [(0.3, 0.25, 0.7, 0.5)])
+    px_box = box_to_pixels(out.size, (0.3, 0.25, 0.7, 0.5))
+    region = np.array(out)[px_box[1]:px_box[3], px_box[0]:px_box[2]]
+    assert (region == (10, 20, 30)).all()
+    # Outside the box is untouched.
+    outside = np.ones(np.array(out).shape[:2], bool)
+    outside[px_box[1]:px_box[3], px_box[0]:px_box[2]] = False
+    assert (np.array(out)[outside] == np.array(target)[outside]).all()
+
+
+def test_restore_regions_resizes_when_source_and_target_differ_in_size():
+    source = _solid((200, 0, 0), size=(800, 600))  # 2x resolution
+    target = _solid((255, 255, 255), size=(400, 300))
+    out = restore_regions(target, source, [(0.25, 0.25, 0.75, 0.75)])
+    px_box = box_to_pixels(out.size, (0.25, 0.25, 0.75, 0.75))
+    region = np.array(out)[px_box[1]:px_box[3], px_box[0]:px_box[2]]
+    assert (region == (200, 0, 0)).all()
+
+
+def test_render_route_restores_a_bubble_with_source_image():
+    page = _solid((255, 255, 255))  # a plain page with no text under the box, unlike _page()
+    translated = render_regions(page, [((0.3, 0.25, 0.7, 0.5), "translated")], FONT_DIR)
+    resp = client.post("/region/render", json={
+        **OPTS, "image": _b64(translated), "source_image": _b64(page),
+        "regions": [{"box": {"x1": 0.3, "y1": 0.25, "x2": 0.7, "y2": 0.5}, "restore_only": True}],
+    })
+    assert resp.status_code == 200
+    out = Image.open(io.BytesIO(base64.b64decode(resp.json()["image"])))
+    px_box = box_to_pixels(out.size, (0.3, 0.25, 0.7, 0.5))
+    region = np.array(out)[px_box[1]:px_box[3], px_box[0]:px_box[2]]
+    # Restored back to the page's plain white background, not left translated.
+    assert (region == 255).all()
+
+
+def test_render_route_requires_source_image_for_a_restore_only_region():
+    resp = client.post("/region/render", json={
+        **OPTS, "image": _b64(_page()),
+        "regions": [{"box": {"x1": 0.3, "y1": 0.25, "x2": 0.7, "y2": 0.5}, "restore_only": True}],
+    })
+    assert resp.status_code == 400
+    assert "source_image" in resp.json()["detail"]
+
+
+def test_render_route_can_restore_one_bubble_and_draw_another_in_one_call():
+    page = _page()
+    resp = client.post("/region/render", json={
+        **OPTS, "image": _b64(page), "source_image": _b64(page),
+        "regions": [
+            {"box": {"x1": 0.3, "y1": 0.25, "x2": 0.7, "y2": 0.5}, "restore_only": True},
+            {"box": {"x1": 0.0, "y1": 0.6, "x2": 0.4, "y2": 0.8}, "text": "Moved here"},
+        ],
+    })
+    assert resp.status_code == 200
+    out = Image.open(io.BytesIO(base64.b64decode(resp.json()["image"])))
+    assert out.size == page.size
+
+
+def test_restore_only_region_ignores_its_text_field():
+    page = _solid((255, 255, 255))
+    resp = client.post("/region/render", json={
+        **OPTS, "image": _b64(page), "source_image": _b64(page),
+        "regions": [{"box": {"x1": 0.3, "y1": 0.25, "x2": 0.7, "y2": 0.5}, "text": "should be ignored", "restore_only": True}],
+    })
+    assert resp.status_code == 200
+    out = Image.open(io.BytesIO(base64.b64decode(resp.json()["image"])))
+    px_box = box_to_pixels(out.size, (0.3, 0.25, 0.7, 0.5))
+    region = np.array(out)[px_box[1]:px_box[3], px_box[0]:px_box[2]]
+    assert (region == 255).all()

@@ -1,7 +1,7 @@
-import type { AppSettings, BubbleInfo, TranslateRequest } from '../shared/types.js';
+import type { AppSettings, BubbleInfo, RegionBoxNorm, TranslateRequest } from '../shared/types.js';
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
 import { withEffectiveConfig } from '../shared/economy.js';
-import { initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startRegionSelect } from './region-tool.js';
+import { deleteBubbleRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect } from './region-tool.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -47,6 +47,7 @@ const EN_MESSAGES = {
   bubbles: '{count} bubbles - {time}s',
   doneWithTime: 'Done - {time}s',
   regionPickHint: 'Drag over the text you want to change · Esc to cancel',
+  regionMovePickHint: 'Drag over where this bubble should go · Esc to cancel',
   regionTooSmall: 'That area is too small.',
   regionNoImage: 'Could not find a page image under that selection.',
   regionTitle: 'Text area',
@@ -74,6 +75,9 @@ const EN_MESSAGES = {
   fixHintTooltip: "Click to fix this bubble's translation",
   zoomTooltip: 'Click to view full size',
   fixHintCurrentLabel: 'Current:',
+  fixMoveBtn: '⇔ Move',
+  fixDeleteBtn: '🗑 Delete',
+  confirmDeleteBubble: 'Delete this bubble and restore the original art underneath?',
   fixHintPlaceholder: 'Describe the correction, e.g. "wrong pronoun, should be anh/em" or "should be formal tone"',
   fixHintApply: 'Apply',
   fixHintApplying: 'Re-translating...',
@@ -131,6 +135,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} bubble - {time}s',
     doneWithTime: 'Xong - {time}s',
     regionPickHint: 'Keo chon vung chu can sua · Esc de huy',
+    regionMovePickHint: 'Keo den vi tri moi cho bong bong nay · Esc de huy',
     regionTooSmall: 'Vung chon qua nho.',
     regionNoImage: 'Khong tim thay anh trang o vung da chon.',
     regionTitle: 'Vung chu',
@@ -158,6 +163,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintTooltip: 'Bam de sua ban dich o bubble nay',
     zoomTooltip: 'Bam de xem anh phong to',
     fixHintCurrentLabel: 'Hien tai:',
+    fixMoveBtn: '⇔ Di chuyen',
+    fixDeleteBtn: '🗑 Xoa',
+    confirmDeleteBubble: 'Xoa bong bong nay va khoi phuc tranh goc ben duoi?',
     fixHintPlaceholder: 'Mo ta cach sua, vd "phai dung xung anh/em" hoac "giong dieu trang trong hon"',
     fixHintApply: 'Ap dung',
     fixHintApplying: 'Dang dich lai...',
@@ -210,6 +218,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} 个气泡 - {time}s',
     doneWithTime: '完成 - {time}s',
     regionPickHint: '拖动框选要修改的文字 · Esc 取消',
+    regionMovePickHint: '拖动到该气泡应放置的位置 · Esc 取消',
     regionTooSmall: '选区太小。',
     regionNoImage: '在选区下未找到页面图片。',
     regionTitle: '文字区域',
@@ -237,6 +246,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintTooltip: '点击修正这个气泡的翻译',
     zoomTooltip: '点击查看大图',
     fixHintCurrentLabel: '当前:',
+    fixMoveBtn: '⇔ 移动',
+    fixDeleteBtn: '🗑 删除',
+    confirmDeleteBubble: '删除这个气泡并恢复下面的原图？',
     fixHintPlaceholder: '描述修正内容，例如"应该用敬语"或"人称代词错了"',
     fixHintApply: '应用',
     fixHintApplying: '重新翻译中...',
@@ -289,6 +301,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '{count} 吹き出し - {time}s',
     doneWithTime: '完了 - {time}s',
     regionPickHint: '変更したい文字をドラッグで囲む · Esc でキャンセル',
+    regionMovePickHint: 'この吹き出しの移動先をドラッグ · Esc でキャンセル',
     regionTooSmall: '選択範囲が小さすぎます。',
     regionNoImage: '選択範囲の下にページ画像が見つかりません。',
     regionTitle: '文字エリア',
@@ -316,6 +329,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintTooltip: 'クリックしてこの吹き出しの翻訳を修正',
     zoomTooltip: 'クリックして拡大表示',
     fixHintCurrentLabel: '現在の訳:',
+    fixMoveBtn: '⇔ 移動',
+    fixDeleteBtn: '🗑 削除',
+    confirmDeleteBubble: 'この吹き出しを削除して下の元絵を復元しますか？',
     fixHintPlaceholder: '修正内容を入力（例:「敬語にして」「代名詞が違う」など）',
     fixHintApply: '適用',
     fixHintApplying: '再翻訳中...',
@@ -368,6 +384,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     bubbles: '말풍선 {count}개 - {time}s',
     doneWithTime: '완료 - {time}s',
     regionPickHint: '바꿀 글자를 드래그로 선택 · Esc로 취소',
+    regionMovePickHint: '이 말풍선을 옮길 위치로 드래그 · Esc로 취소',
     regionTooSmall: '선택 영역이 너무 작습니다.',
     regionNoImage: '선택 영역 아래에서 페이지 이미지를 찾을 수 없습니다.',
     regionTitle: '글자 영역',
@@ -395,6 +412,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixHintTooltip: '클릭하여 이 말풍선의 번역 수정',
     zoomTooltip: '클릭하여 크게 보기',
     fixHintCurrentLabel: '현재:',
+    fixMoveBtn: '⇔ 이동',
+    fixDeleteBtn: '🗑 삭제',
+    confirmDeleteBubble: '이 말풍선을 삭제하고 원본 그림을 복원할까요?',
     fixHintPlaceholder: '수정 내용을 입력하세요 (예: "존댓말로", "대명사가 틀림")',
     fixHintApply: '적용',
     fixHintApplying: '다시 번역 중...',
@@ -2326,6 +2346,27 @@ function ensureBubbleMagnifierScrollHandler(): void {
 // image, positioned by percentage of the bubble's bbox (pixel coords in the
 // source image) so it tracks the displayed size without recomputing pixel
 // offsets on resize. bbox is [x1, y1, x2, y2].
+/** A detected bubble's box, normalised 0..1 against the image's natural
+ * size — the same coordinate space the manual region tool uses. */
+function normalizedBubbleBox(img: HTMLImageElement, bubble: BubbleInfo): RegionBoxNorm | null {
+  const [x1, y1, x2, y2] = bubble.bbox ?? [0, 0, 0, 0];
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!w || !h || x2 <= x1 || y2 <= y1) return null;
+  return { x1: x1 / w, y1: y1 / h, x2: x2 / w, y2: y2 / h };
+}
+
+/** Drops one bubble from the page's fix/move/delete hit targets — called
+ * right after the user moves or deletes it, so its old hit target (now
+ * either empty or replaced by a plain manual region) doesn't linger. */
+function removeBubbleFromFixTargets(img: HTMLImageElement, bubbleIndex: number): void {
+  const info = lastTranslateInfo.get(img);
+  if (!info) return;
+  const bubbles = info.bubbles.filter((_, i) => i !== bubbleIndex);
+  lastTranslateInfo.set(img, { ...info, bubbles });
+  renderBubbleFixTargets(img, bubbles);
+}
+
 function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): void {
   ensureBubbleMagnifierScrollHandler();
 
@@ -2462,6 +2503,48 @@ function openFixHintPopover(img: HTMLImageElement, bubbleIndex: number, bubble: 
     currentLabel.textContent = `${tr('fixHintCurrentLabel')} ${bubble.translatedText}`;
     popover.appendChild(currentLabel);
   }
+
+  // Detection got the box wrong rather than the text: let the user move it
+  // to the right spot, or drop it entirely (both reuse the manual region
+  // tool's restore-from-source, see region-tool.ts).
+  const bubbleActionsRow = document.createElement('div');
+  bubbleActionsRow.style.display = 'flex';
+  bubbleActionsRow.style.gap = '6px';
+  bubbleActionsRow.style.marginBottom = '8px';
+
+  const moveBtn = document.createElement('button');
+  moveBtn.textContent = tr('fixMoveBtn');
+  moveBtn.style.flex = '1';
+  styleFixPopoverButton(moveBtn, false);
+  moveBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    const rawUrl = resolveMangaUrl(img);
+    const box = normalizedBubbleBox(img, bubble);
+    closeFixHintPopover();
+    if (!rawUrl || !box) { toast(tr('regionNoImage'), true); return; }
+    removeBubbleFromFixTargets(img, bubbleIndex);
+    startMoveBubbleSelect(img, rawUrl, box, bubble.originalText ?? '', bubble.translatedText ?? '');
+  };
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.textContent = tr('fixDeleteBtn');
+  deleteBtn.style.flex = '1';
+  styleFixPopoverButton(deleteBtn, false);
+  deleteBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!window.confirm(tr('confirmDeleteBubble'))) return;
+    const rawUrl = resolveMangaUrl(img);
+    const box = normalizedBubbleBox(img, bubble);
+    closeFixHintPopover();
+    if (!rawUrl || !box) { toast(tr('regionNoImage'), true); return; }
+    removeBubbleFromFixTargets(img, bubbleIndex);
+    void deleteBubbleRegion(img, rawUrl, box).catch((e) => {
+      toast(e instanceof Error ? e.message : String(e), true);
+    });
+  };
+
+  bubbleActionsRow.append(moveBtn, deleteBtn);
+  popover.appendChild(bubbleActionsRow);
 
   const textarea = document.createElement('textarea');
   textarea.placeholder = tr('fixHintPlaceholder');
