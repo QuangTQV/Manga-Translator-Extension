@@ -607,6 +607,15 @@ test.describe('popup — Story DB unsaved-draft recovery', () => {
     await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
     await popup2.getByRole('button', { name: 'Story DB' }).click();
     await expect(popup2.locator('#story-draft-banner')).toBeVisible({ timeout: 5_000 });
+    // Regression check: the Discard button reuses .btn-add-fallback (which
+    // defaults to width:100%) with an inline `flex:none` that doesn't cancel
+    // that width — without an explicit `width:auto` override too, the button
+    // claims almost the whole row and squeezes the banner's message text
+    // down to one word per line. A single line's worth of height is enough
+    // room for the whole sentence; several times that means it's wrapping
+    // badly again.
+    const bannerTextHeight = await popup2.locator('#story-draft-banner span').evaluate((el) => el.getBoundingClientRect().height);
+    expect(bannerTextHeight).toBeLessThan(40);
     await expect(popup2.locator('.story-char-row')).toHaveCount(2);
     await expect(popup2.locator('.story-char-row').nth(0).locator('.sc-name')).toHaveValue('Akira the Bold');
     await expect(popup2.locator('.story-char-row').nth(1).locator('.sc-name')).toHaveValue('Hina');
