@@ -5,6 +5,37 @@ import { normalizeUiLanguage, t } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
 
+// The Story DB's "active story" (settings.activeStoryId) is one global
+// selection, not per-site — nothing stops a user from forgetting to switch it
+// when they move from reading one manga to another. We can't safely
+// auto-switch it for them (a translate request already in flight, or a tab
+// with a story deliberately different from what a domain "usually" uses,
+// would silently get overridden), so instead we just remember the last
+// story actually used per hostname here, and the popup (popup/index.ts's
+// checkStoryDomainMismatch) warns if the currently selected story doesn't
+// match what this site was last translated with.
+const STORY_DOMAIN_MAP_KEY = 'mtStoryDomainMap';
+
+async function recordStoryDomainUsage(pageUrl: string | undefined, storyId: string | undefined): Promise<void> {
+  if (!storyId || !pageUrl) return;
+  let hostname: string;
+  try {
+    hostname = new URL(pageUrl).hostname;
+  } catch {
+    return;
+  }
+  if (!hostname) return;
+  try {
+    const raw = await chrome.storage.local.get(STORY_DOMAIN_MAP_KEY);
+    const map = (raw[STORY_DOMAIN_MAP_KEY] as Record<string, string> | undefined) ?? {};
+    if (map[hostname] === storyId) return;
+    map[hostname] = storyId;
+    await chrome.storage.local.set({ [STORY_DOMAIN_MAP_KEY]: map });
+  } catch {
+    // Best-effort only — must never affect the actual translate request.
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   const current = await chrome.storage.local.get(STORAGE_KEY);
   if (!current[STORAGE_KEY]) {
@@ -351,7 +382,11 @@ function authHeaders(settings: AppSettings): Record<string, string> {
 async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | undefined, body: TranslateRequest): Promise<TranslateResult> {
   // Image is already fetched and base64-encoded by content script (with page cookies/auth).
   // Background only calls the backend API — no image fetching here.
-  void imageUrl; void pageUrl;
+  void imageUrl;
+  // Awaited, not fire-and-forget: an MV3 service worker can be torn down the
+  // instant the message handler that woke it up resolves, which would cut
+  // an un-awaited storage write off mid-flight more often than not.
+  await recordStoryDomainUsage(pageUrl, body.story_id);
 
   const settings = await getSettings();
   // Master kill switch — every translate path (scan, auto-translate, batch
