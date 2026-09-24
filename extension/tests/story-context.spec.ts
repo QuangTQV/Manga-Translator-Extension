@@ -517,3 +517,149 @@ test.describe('popup — Story DB update from description', () => {
     expect(called).toBe(false);
   });
 });
+
+test('a character with explicit x/y: null (the real backend\'s JSON shape) still gets a valid default graph position, not NaN', async ({ context, extensionId }) => {
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+  await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+  await context.route('**/stories', async (route) => {
+    if (route.request().method() !== 'GET') { await route.fallback(); return; }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+  });
+  await context.route('**/stories/story-1', async (route) => {
+    if (route.request().method() !== 'GET') { await route.fallback(); return; }
+    // Pydantic serialises an unset Optional[float] field as JSON null, not
+    // by omitting the key — this is the real backend's actual response
+    // shape (unlike a hand-written test fixture that just leaves x/y out).
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'story-1', name: 'My Manga', updated_at: 0,
+        characters: [{ id: 'c1', name: 'Akira', gender: 'male', role: null, voice_notes: null, x: null, y: null, avatar: null, reference_images: [] }],
+        relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+      }),
+    });
+  });
+
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+  await popup.getByRole('button', { name: 'Story DB' }).click();
+  await expect(popup.locator('.story-char-row')).toHaveCount(1, { timeout: 5_000 });
+  await expect(popup.locator('.story-char-row')).not.toHaveAttribute('data-x', /.*/);
+
+  const node = popup.locator('#story-graph g[data-id="c1"]');
+  await expect(node).toHaveCount(1);
+  const transform = await node.getAttribute('transform');
+  expect(transform).not.toContain('NaN');
+  const box = await node.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeGreaterThan(0);
+});
+
+test.describe('popup — Story DB unsaved-draft recovery', () => {
+  test('typed changes survive closing and reopening the popup, and Save story clears the draft', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    let putBody: any = null;
+    let serverCharacters: any[] = [{ id: 'c1', name: 'Akira', gender: 'male', role: null, voice_notes: null, x: null, y: null, avatar: null, reference_images: [] }];
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({
+            id: 'story-1', name: 'My Manga', updated_at: 0,
+            characters: serverCharacters,
+            relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+          }),
+        });
+        return;
+      }
+      if (route.request().method() === 'PUT') {
+        putBody = route.request().postDataJSON();
+        serverCharacters = putBody.characters;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'story-1', ...putBody, updated_at: 1 }) });
+        return;
+      }
+      await route.fallback();
+    });
+
+    // First "session": open the popup, edit something, and add a character —
+    // but close the popup (a Chrome action popup is destroyed, not just
+    // hidden, the moment it loses focus) before ever clicking Save story.
+    const popup1 = await context.newPage();
+    await popup1.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup1.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup1.locator('.story-char-row')).toHaveCount(1, { timeout: 5_000 });
+    await popup1.locator('.story-char-row .sc-name').fill('Akira the Bold');
+    await popup1.locator('#btn-add-story-character').click();
+    await popup1.locator('.story-char-row').nth(1).locator('.sc-name').fill('Hina');
+    await popup1.waitForTimeout(700); // debounced draft save
+    await popup1.close();
+
+    // Second "session": reopen — the unsaved edits should come back, with a
+    // visible "restored a draft" banner.
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup2.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup2.locator('#story-draft-banner')).toBeVisible({ timeout: 5_000 });
+    await expect(popup2.locator('.story-char-row')).toHaveCount(2);
+    await expect(popup2.locator('.story-char-row').nth(0).locator('.sc-name')).toHaveValue('Akira the Bold');
+    await expect(popup2.locator('.story-char-row').nth(1).locator('.sc-name')).toHaveValue('Hina');
+
+    // Saving commits it for real and clears the draft.
+    await popup2.locator('#btn-story-save').click();
+    await expect.poll(() => putBody, { timeout: 5_000 }).not.toBeNull();
+    expect(putBody.characters).toHaveLength(2);
+    await expect(popup2.locator('#story-draft-banner')).toBeHidden();
+
+    const popup3 = await context.newPage();
+    await popup3.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup3.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup3.locator('.story-char-row')).toHaveCount(2, { timeout: 5_000 });
+    await expect(popup3.locator('#story-draft-banner')).toBeHidden();
+  });
+
+  test('Discard drops the draft and reloads the story fresh from the server', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'story-1', name: 'My Manga', updated_at: 0,
+          characters: [{ id: 'c1', name: 'Akira', gender: 'male', role: null, voice_notes: null, x: null, y: null, avatar: null, reference_images: [] }],
+          relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+        }),
+      });
+    });
+
+    const popup1 = await context.newPage();
+    await popup1.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup1.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup1.locator('.story-char-row')).toHaveCount(1, { timeout: 5_000 });
+    await popup1.locator('.story-char-row .sc-name').fill('Some typo I regret');
+    await popup1.waitForTimeout(700);
+    await popup1.close();
+
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup2.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup2.locator('#story-draft-banner')).toBeVisible({ timeout: 5_000 });
+    await expect(popup2.locator('.story-char-row .sc-name')).toHaveValue('Some typo I regret');
+
+    await popup2.locator('#btn-story-draft-discard').click();
+    await expect(popup2.locator('#story-draft-banner')).toBeHidden({ timeout: 5_000 });
+    await expect(popup2.locator('.story-char-row .sc-name')).toHaveValue('Akira');
+  });
+});
