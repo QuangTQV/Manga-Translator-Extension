@@ -244,6 +244,12 @@ Repo owner sent a screenshot: the "Restored unsaved changes..." banner's message
 
 **Verified:** extended `tests/story-context.spec.ts`'s existing draft-recovery test with an assertion that the banner text's rendered height stays under 40px (one line's worth) instead of many — confirmed this fails without the fix (reverted it, span height ballooned from wrapping) and passes with it.
 
+## Bug fixed: Story DB continuity note text was a single-line input, clipping long notes
+
+Another repo-owner screenshot from testing the same area: a continuity note's text field was a plain `<input type="text">` — a note like "...7 tuổi và bắt đầu hành trình mạnh lên, truy tìm thân thế..." just scrolled horizontally inside one line instead of wrapping, so most of it was invisible without manually scrolling the input.
+
+**Fix:** `popup/index.ts:createStoryContinuityNoteRow()` now creates a `<textarea class="textarea scn-text" rows="2">` (matching the `.textarea` styling already used elsewhere in this popup) instead of an `<input>`, with `resize: vertical` set inline so a longer note can be dragged taller. `collectStoryContinuityNotes()` updated to query it as `HTMLTextAreaElement`. No wiring changes needed elsewhere — the draft-autosave/undo-redo listeners on `#story-content-fields` are generic `input`/`change` listeners, not input-specific. Verified all 15 existing `story-context.spec.ts` tests still pass unchanged (Playwright's `.fill()`/`toHaveValue()` work the same on a textarea) plus a new assertion that the field is really a `TEXTAREA` now.
+
 ## Roadmap: popup UX polish — items 1-4 DONE (2026-09-24), items 5-6 still open
 
 Raised by the repo owner after a general "tối ưu trải nghiệm người dùng" (optimize UX) ask. Items 1-4 assessed as not requiring the "don't clutter the main screen" restructuring the repo owner has twice deferred (see the Professional-Translation UI-placement decision further up this file) — in-place polish, not a redesign — built on branch `feature/popup-ux-polish`, merged to `main` 2026-09-24.

@@ -67,7 +67,12 @@ test.describe('popup — Story DB tab', () => {
     await expect(popup.locator('.story-char-row .sc-name')).toHaveValue('Aoi');
     await expect(popup.locator('.story-glossary-row .sg-term')).toHaveValue('Kage-ryu');
     await expect(popup.locator('#f-story-continuity-enabled')).toBeChecked();
-    await expect(popup.locator('.story-continuity-note-row .scn-text')).toHaveValue('Something happened');
+    const noteText = popup.locator('.story-continuity-note-row .scn-text');
+    await expect(noteText).toHaveValue('Something happened');
+    // A textarea, not a single-line input — a continuity note is often a full
+    // sentence or two, and a single-line input just clips/scrolls it
+    // horizontally instead of showing it (reported by the repo owner).
+    await expect(noteText).toHaveJSProperty('tagName', 'TEXTAREA');
   });
 
   test('creating a story, adding a character/relationship/term, and saving sends the whole payload', async ({ context, extensionId }) => {
