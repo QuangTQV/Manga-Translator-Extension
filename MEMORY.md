@@ -221,3 +221,32 @@ Reported directly by the repo owner with a screenshot + concrete repro: typed "a
 Also gave both an immediate `change`-listener autosave (the same pattern used for toggles/selects elsewhere), rather than relying solely on the `window` `blur`/`beforeunload` catch-all that plain textareas like `specialInstructions`/`llmInstructions` depend on — a Playwright test using `popup.close()` (which is a real page teardown, not just hiding it) initially failed against blur-only saving, suggesting that catch-all may be racy against a popup being torn down before its async `chrome.storage.local.set()` finishes. Didn't touch the existing blur-only textareas (out of scope for this report), but this is worth revisiting if a similar loss is ever reported for those two.
 
 Swept the rest of `popup/index.ts` for the same class of bug (every `qs<...>('...')`-declared element cross-checked against `collectAllSettings()`) — no other field had this gap; everything else not in that function is either an action button/display element, or has its own dedicated persistence path (Story DB, Owner shared LLM config, Account).
+
+## Roadmap: popup UX polish — items 1-4 DONE (2026-09-24), items 5-6 still open
+
+Raised by the repo owner after a general "tối ưu trải nghiệm người dùng" (optimize UX) ask. Items 1-4 assessed as not requiring the "don't clutter the main screen" restructuring the repo owner has twice deferred (see the Professional-Translation UI-placement decision further up this file) — in-place polish, not a redesign — and built on branch `feature/popup-ux-polish` (uncommitted as of this writing; awaiting the repo owner's go-ahead to commit/push, per their standing requirement to confirm every git action).
+
+### 1. Confirm before "Discard" in the Story DB draft-recovery banner — DONE
+**Was:** `handleStoryDraftDiscard()` threw away unsaved edits immediately on click, no `window.confirm()` — inconsistent with Delete story and Delete-bubble, which both confirm before an equally unrecoverable action.
+**Fix:** added `if (!window.confirm(t(uiLanguage, 'confirmStoryDraftDiscard'))) return;` guard at the top of `handleStoryDraftDiscard()` in `popup/index.ts`; new i18n key `confirmStoryDraftDiscard` added in all 5 languages.
+
+### 2. More visible status feedback across the popup — DONE
+**Was:** `setStatus()` just swapped a small text line's color/content (`#popup-status`) — easy to miss, especially right before the popup closes on a fast action.
+**Fix:** `#popup-status` in `popup/index.html` converted to a `position: fixed` banner (bottom of the popup, slide-up/fade-in via a `.visible` class) so it stays visible regardless of scroll position in a tall tab; `setStatus()` in `popup/index.ts` now toggles `.visible` and auto-hides 'ok'-type messages after 3s (errors and empty messages are left for the caller/next status update to clear).
+
+### 3. Backend error messages surfaced too technically in a few spots — DONE (partial: extension-side only)
+**Was:** every network-failure catch block in `background/index.ts` (`fetchTestApiKey`, `accountApiCall`, `adminApiCall`, `storiesApiCall`, `regionApiCall` — 5 call sites) hardcoded an English-only `` `Could not reach backend: ${msg}` `` string, bypassing the extension's `t(uiLanguage, key)` translation system entirely even though `background/index.ts` already imports from `shared/i18n.ts` and already has `settings.uiLanguage` in scope via the existing `getSettings()` call in each function.
+**Fix:** added `t` to the existing `shared/i18n.ts` import in `background/index.ts`; added a new `errorBackendUnreachable: 'Could not reach backend: {msg}'` i18n key (all 5 languages); replaced all 5 call sites with `t(settings.uiLanguage, 'errorBackendUnreachable', { msg })`.
+**Explicitly out of scope:** backend Python `HTTPException` `detail` strings (e.g. from `/test-key`, `/stories/*`, `/region/*`) are still raw English from the backend itself — translating those would require backend-side i18n, a separate and much larger effort not attempted here.
+
+### 4. Popup tab row layout is cramped (6 tabs: Dịch/Cấu hình LLM/Cấu hình/Tài khoản/CSDL truyện/Chuyên nghiệp) — DONE
+**Was:** `.tabs` was hardcoded `grid-template-columns: repeat(4, minmax(0, 1fr))` despite 6 actual tab buttons, wrapping to a visually lopsided 4+2 row layout at the popup's ~390px width.
+**Fix:** changed to `repeat(3, minmax(0, 1fr))` in `popup/index.html`, giving an even 3+3 layout. CSS-only — no tab content merged/hidden/migrated.
+
+### 5. No onboarding for a brand-new install
+**Problem:** first popup open goes straight to Provider/Model/API key fields with no "what do I do first" guidance.
+**Difficulty:** medium — needs actual copy/design, not just wiring; scope (a dismissible banner? a checklist? a link to HUONG-DAN-CHAY.md?) still undecided — ask before building.
+
+### 6. Auto-translate doesn't resume after a page reload / the extension being toggled off-and-on
+**Problem:** `autoTranslateActive` is in-memory only in the content script; a page refresh, navigation, or the extension being disabled-then-re-enabled (Chrome tears down all injected content scripts on disable) silently stops it, and the user must click "Auto-translate" again.
+**Status: explicitly NOT decided yet.** Asked the repo owner directly whether resuming should (a) prompt with a one-click "Continue?" banner (recommended — never sends a request without an explicit click), (b) resume completely silently, or (c) stay as-is; the answer given ("ý là setting của extension ấy") was actually about a *different*, already-resolved question (popup settings persistence — see the "Suggest box" bug fix above), not this one. Re-ask before implementing anything here — resuming translation without an explicit click would arguably contradict the "Bật tiện ích" toggle's own stated promise ("không tự dịch bất ngờ" / no surprise auto-translate).
