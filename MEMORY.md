@@ -222,9 +222,19 @@ Also gave both an immediate `change`-listener autosave (the same pattern used fo
 
 Swept the rest of `popup/index.ts` for the same class of bug (every `qs<...>('...')`-declared element cross-checked against `collectAllSettings()`) — no other field had this gap; everything else not in that function is either an action button/display element, or has its own dedicated persistence path (Story DB, Owner shared LLM config, Account).
 
+## Feature: resizable popup window — IMPLEMENTED (2026-09-24)
+
+Repo owner asked whether the popup can be resized ("thu nhỏ, phóng to (điều chỉnh kích cỡ) của extension") — clarified via AskUserQuestion to mean the popup window itself (as opposed to the manual-region box, page zoom, or in-bubble font size, which already exist/were considered and rejected).
+
+**How:** `popup/index.html`'s `body` already had a fixed `width: 390px`; changed to `min-width/max-width` (340-720px) + `min-height/max-height` (460-680px) plus `overflow: auto; resize: both;` (same native drag-corner mechanism a resizable `<textarea>` already uses elsewhere in this popup) and `html { overflow: hidden; }` so `body` (not `html`) is the one scrolling/resizable box. A Chrome MV3 action popup auto-fits its native window to `body`'s live layout size continuously (not just once at open) — dragging the resize handle changes `body`'s box, which the browser then re-measures and grows/shrinks the actual popup frame to match, not just an inner scrollable div.
+
+**Persistence:** a resized MV3 popup does NOT remember its own size the next time it's opened, so `popup/index.ts:initPopupResize()` watches `document.body` with a `ResizeObserver`, debounced 300ms, saving `{w, h}` to `chrome.storage.local['mtPopupSize']` — a separate key from `AppSettings`, since it's a per-device UI preference, not something that belongs in settings export/import. `restorePopupSize()` applies it as an inline `body.style.width/height` before `loadAndBind()` runs.
+
+**Verified:** `tests/popup.spec.ts` ("resizable window" describe block) asserts `getComputedStyle(body).resize === 'both'`, simulates a resize by setting `body.style.width/height` directly (indistinguishable to the ResizeObserver from a real drag), confirms the debounced save lands in `chrome.storage.local`, and confirms a fresh popup page restores that exact size. A real native-window drag-resize itself isn't Playwright-testable (the popup is loaded as a plain page in the test harness, no real popup window frame) — only manually verified by reasoning about Chrome's known auto-fit-to-content behavior; if a user reports the corner handle doing nothing, re-verify by hand in a real loaded-unpacked install.
+
 ## Roadmap: popup UX polish — items 1-4 DONE (2026-09-24), items 5-6 still open
 
-Raised by the repo owner after a general "tối ưu trải nghiệm người dùng" (optimize UX) ask. Items 1-4 assessed as not requiring the "don't clutter the main screen" restructuring the repo owner has twice deferred (see the Professional-Translation UI-placement decision further up this file) — in-place polish, not a redesign — and built on branch `feature/popup-ux-polish` (uncommitted as of this writing; awaiting the repo owner's go-ahead to commit/push, per their standing requirement to confirm every git action).
+Raised by the repo owner after a general "tối ưu trải nghiệm người dùng" (optimize UX) ask. Items 1-4 assessed as not requiring the "don't clutter the main screen" restructuring the repo owner has twice deferred (see the Professional-Translation UI-placement decision further up this file) — in-place polish, not a redesign — built on branch `feature/popup-ux-polish`, merged to `main` 2026-09-24.
 
 ### 1. Confirm before "Discard" in the Story DB draft-recovery banner — DONE
 **Was:** `handleStoryDraftDiscard()` threw away unsaved edits immediately on click, no `window.confirm()` — inconsistent with Delete story and Delete-bubble, which both confirm before an equally unrecoverable action.
