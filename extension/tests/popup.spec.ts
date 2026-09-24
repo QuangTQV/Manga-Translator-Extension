@@ -215,4 +215,29 @@ test.describe('popup — resizable window', () => {
     }));
     expect(restored).toEqual({ width: '500px', height: '600px' });
   });
+
+  test('"open in window" opens a real, freely-resizable standalone window and closes the action popup', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    const [standalone] = await Promise.all([
+      context.waitForEvent('page'),
+      popup.locator('#btn-open-window').click(),
+    ]);
+    await standalone.waitForLoadState();
+
+    expect(standalone.url()).toContain('standalone=1');
+    await expect.poll(() => popup.isClosed()).toBe(true);
+
+    const state = await standalone.evaluate(() => ({
+      hasClass: document.documentElement.classList.contains('standalone-window'),
+      resize: getComputedStyle(document.body).resize,
+      btnHidden: getComputedStyle(document.getElementById('btn-open-window')!).display === 'none',
+    }));
+    expect(state).toEqual({ hasClass: true, resize: 'none', btnHidden: true });
+  });
 });
