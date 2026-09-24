@@ -620,6 +620,10 @@
           </div>
 
           <div id="story-content-fields" style="display:none;margin-top:10px">
+            <div id="story-draft-banner" class="toggle-hint" style="display:none;background:rgba(122,162,255,0.1);border:1px solid rgba(122,162,255,0.3);border-radius:8px;padding:8px 10px;margin-bottom:10px;align-items:center;justify-content:space-between;gap:8px">
+              <span data-i18n="statusStoryDraftRestored">Restored unsaved changes from last time.</span>
+              <button id="btn-story-draft-discard" class="btn-add-fallback" type="button" style="flex:none" data-i18n="btnStoryDraftDiscard">Discard</button>
+            </div>
             <div class="field">
               <label class="label" data-i18n="labelStoryName">Story name</label>
               <input id="f-story-name" class="input" type="text" autocomplete="off" />

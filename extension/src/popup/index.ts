@@ -95,6 +95,8 @@ const storySelect = qs<HTMLSelectElement>('f-story-select');
 const storyNewNameInput = qs<HTMLInputElement>('f-story-new-name');
 const storyNewBtn = qs<HTMLButtonElement>('btn-story-new');
 const storyContentFields = qs<HTMLDivElement>('story-content-fields');
+const storyDraftBanner = qs<HTMLDivElement>('story-draft-banner');
+const storyDraftDiscardBtn = qs<HTMLButtonElement>('btn-story-draft-discard');
 const storyNameInput = qs<HTMLInputElement>('f-story-name');
 const storyCharactersList = qs<HTMLDivElement>('story-characters-list');
 const addStoryCharacterBtn = qs<HTMLButtonElement>('btn-add-story-character');
@@ -549,6 +551,17 @@ function bind(): void {
     if (file) void handleStoryImportFile(file);
   });
   storyUpdateFromDescriptionBtn.addEventListener('click', () => { void handleStoryUpdateFromDescription(); });
+  storyContentFields.addEventListener('input', scheduleStoryDraftSave);
+  storyContentFields.addEventListener('change', scheduleStoryDraftSave);
+  // Adding/removing a character/relationship/glossary/note row, and dragging
+  // a node in the relationship map (which sets data-x/data-y directly), are
+  // structural DOM changes that don't fire input/change — a MutationObserver
+  // catches those too, so nothing needs a bespoke draft-save call at each
+  // individual add/remove/drag site.
+  new MutationObserver(scheduleStoryDraftSave).observe(storyContentFields, {
+    childList: true, subtree: true, attributes: true, attributeFilter: ['data-x', 'data-y', 'data-avatar', 'data-refs'],
+  });
+  storyDraftDiscardBtn.addEventListener('click', () => { void handleStoryDraftDiscard(); });
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -1487,6 +1500,76 @@ async function refreshStoryOptions(preferredId?: string): Promise<string> {
   return populateStorySelect(result.stories, preferredId);
 }
 
+// Popups get torn down and rebuilt from scratch every time they're closed —
+// unlike the other tabs (which autosave to the account/settings on every
+// change), Story DB only ever commits on an explicit "Save story" click, so
+// anything typed but not yet saved was silently lost the moment the popup
+// closed (clicking elsewhere on the page closes it, same as any browser
+// action popup). This mirrors that same content into chrome.storage.local
+// as a per-story draft, restored the next time the popup opens on that
+// story, and cleared once it's actually saved (or the story is deleted).
+interface StoryDraft {
+  name: string;
+  characters: StoryCharacter[];
+  relationships: StoryRelationship[];
+  glossary: StoryGlossaryTerm[];
+  continuityNotes: StoryContinuityNote[];
+  continuityNotesEnabled: boolean;
+  updateDescription: string;
+  savedAt: number;
+}
+
+const storyDraftKey = (id: string): string => `mtStoryDraft:${id}`;
+let storyDraftSaveTimer: number | undefined;
+
+function scheduleStoryDraftSave(): void {
+  const id = storySelect.value;
+  if (!id) return;
+  window.clearTimeout(storyDraftSaveTimer);
+  storyDraftSaveTimer = window.setTimeout(() => { void saveStoryDraftNow(id); }, 500);
+}
+
+async function saveStoryDraftNow(id: string): Promise<void> {
+  const draft: StoryDraft = {
+    name: storyNameInput.value,
+    characters: collectStoryCharacters(),
+    relationships: collectStoryRelationships(),
+    glossary: collectStoryGlossary(),
+    continuityNotes: collectStoryContinuityNotes(),
+    continuityNotesEnabled: storyContinuityEnabledToggle.checked,
+    updateDescription: storyUpdateDescriptionInput.value,
+    savedAt: Date.now(),
+  };
+  try {
+    await chrome.storage.local.set({ [storyDraftKey(id)]: draft });
+  } catch { /* storage is best-effort — worst case the draft just doesn't survive a reopen */ }
+}
+
+async function loadStoryDraft(id: string): Promise<StoryDraft | null> {
+  try {
+    const raw = await chrome.storage.local.get(storyDraftKey(id));
+    return (raw[storyDraftKey(id)] as StoryDraft | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearStoryDraft(id: string): Promise<void> {
+  try {
+    await chrome.storage.local.remove(storyDraftKey(id));
+  } catch { /* ignore */ }
+}
+
+function applyStoryDraft(draft: StoryDraft): void {
+  storyNameInput.value = draft.name;
+  renderStoryCharacters(draft.characters);
+  renderStoryRelationships(draft.relationships);
+  renderStoryGlossary(draft.glossary);
+  storyContinuityEnabledToggle.checked = draft.continuityNotesEnabled;
+  renderStoryContinuityNotes(draft.continuityNotes);
+  storyUpdateDescriptionInput.value = draft.updateDescription ?? '';
+}
+
 async function loadStoryIntoForm(id: string): Promise<void> {
   const result = await storyMessage<StoryDetailMessageResult>('STORY_GET', { id });
   if (!result.ok || !result.story) {
@@ -1500,9 +1583,25 @@ async function loadStoryIntoForm(id: string): Promise<void> {
   renderStoryGlossary(result.story.glossary);
   storyContinuityEnabledToggle.checked = result.story.continuity_notes_enabled;
   renderStoryContinuityNotes(result.story.continuity_notes);
+  storyUpdateDescriptionInput.value = '';
   storyContentFields.style.display = '';
+  storyDraftBanner.style.display = 'none';
   settings.activeStoryId = id;
   await autoSave();
+
+  const draft = await loadStoryDraft(id);
+  if (draft) {
+    applyStoryDraft(draft);
+    storyDraftBanner.style.display = 'flex';
+  }
+}
+
+async function handleStoryDraftDiscard(): Promise<void> {
+  const id = storySelect.value;
+  if (!id) return;
+  await clearStoryDraft(id);
+  storyDraftBanner.style.display = 'none';
+  await loadStoryIntoForm(id); // reloads from the server, with no draft left to restore
 }
 
 async function loadStoryList(): Promise<void> {
@@ -1570,6 +1669,8 @@ async function handleStorySave(): Promise<void> {
       return;
     }
     await refreshStoryOptions(id); // picks up a renamed title in the select's option text
+    await clearStoryDraft(id); // now safely persisted server-side — no draft left to restore
+    storyDraftBanner.style.display = 'none';
     setStatus(t(uiLanguage, 'statusStorySaved'), 'ok');
   } finally {
     storySaveBtn.disabled = false;
@@ -1591,6 +1692,7 @@ async function handleStoryDelete(): Promise<void> {
       settings.activeStoryId = undefined;
       await autoSave();
     }
+    await clearStoryDraft(id);
     await loadStoryList();
     setStatus(t(uiLanguage, 'statusStoryDeleted'), 'ok');
   } finally {
@@ -1643,6 +1745,7 @@ async function handleStoryImportFile(file: File): Promise<void> {
     storyContinuityEnabledToggle.checked = !!data.continuity_notes_enabled;
     renderStoryContinuityNotes(Array.isArray(data.continuity_notes) ? data.continuity_notes : []);
     storyContentFields.style.display = '';
+    scheduleStoryDraftSave(); // imported content isn't saved server-side until Save story — protect it the same as any other unsaved edit
     setStatus(t(uiLanguage, 'statusStoryImported'), 'ok');
   } catch {
     setStatus(t(uiLanguage, 'errorStoryImportFailed'), 'err');
@@ -1711,6 +1814,7 @@ async function handleStoryUpdateFromDescription(): Promise<void> {
       renderStoryContinuityNotes([...collectStoryContinuityNotes(), result.continuityNote]);
     }
     storyUpdateDescriptionInput.value = '';
+    scheduleStoryDraftSave(); // the merged result isn't saved server-side until Save story — protect it the same as any other unsaved edit
     storyUpdateStatus.textContent = t(uiLanguage, 'statusStoryUpdated');
   } catch (e) {
     storyUpdateStatus.textContent = e instanceof Error ? e.message : String(e);
@@ -1758,7 +1862,13 @@ function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
   row.dataset.charId = data?.id ?? crypto.randomUUID();
   if (data?.avatar) row.dataset.avatar = data.avatar;
   if (data?.reference_images?.length) row.dataset.refs = JSON.stringify(data.reference_images);
-  if (data?.x !== undefined && data?.y !== undefined) {
+  // A character freshly loaded from the backend always carries explicit
+  // `x`/`y` keys — Pydantic serialises an unset Optional field as JSON
+  // `null`, not by omitting the key — so `!== undefined` alone let a
+  // never-dragged character's position through as the literal string
+  // "null", which Number() turns into NaN and the graph then renders at a
+  // garbled (0,0)-ish spot. Only accept an actual number.
+  if (typeof data?.x === 'number' && typeof data?.y === 'number') {
     row.dataset.x = String(data.x);
     row.dataset.y = String(data.y);
   }
