@@ -620,6 +620,10 @@
           </div>
 
           <div id="story-content-fields" style="display:none;margin-top:10px">
+            <div class="actions-row" style="margin-bottom:10px">
+              <button id="btn-story-undo" class="btn-add-fallback" type="button" title="Ctrl+Z" data-i18n="btnStoryUndo" disabled>↶ Undo</button>
+              <button id="btn-story-redo" class="btn-add-fallback" type="button" title="Ctrl+Shift+Z" data-i18n="btnStoryRedo" disabled>↷ Redo</button>
+            </div>
             <div id="story-draft-banner" class="toggle-hint" style="display:none;background:rgba(122,162,255,0.1);border:1px solid rgba(122,162,255,0.3);border-radius:8px;padding:8px 10px;margin-bottom:10px;align-items:center;justify-content:space-between;gap:8px">
               <span data-i18n="statusStoryDraftRestored">Restored unsaved changes from last time.</span>
               <button id="btn-story-draft-discard" class="btn-add-fallback" type="button" style="flex:none" data-i18n="btnStoryDraftDiscard">Discard</button>

@@ -203,3 +203,21 @@ Fixed the annoyance reported directly by the repo owner: "tôi đã điền như
 - Also explicitly captured after "Update from description" and "Import" (their DOM rewrites are structural, but a MutationObserver already catches those — see below), so a suggested/imported result that hasn't been reviewed-and-saved yet also survives a reopen.
 - Uses a `MutationObserver` on `#story-content-fields` (`childList`/`subtree` + an `attributeFilter` for `data-x`/`data-y`/`data-avatar`/`data-refs`) alongside plain `input`/`change` listeners — needed because adding/removing a row and dragging a node in the relationship map don't fire ordinary form events at all.
 - New Playwright tests actually close and reopen a fresh popup page (not just re-render in place) to prove the draft survives what real popup teardown does.
+
+
+## Feature: Story DB undo/redo — IMPLEMENTED
+
+Requested directly by the repo owner right after the unsaved-draft-recovery fix above. Undo/Redo buttons (+ Ctrl+Z/Ctrl+Shift+Z) in the Story DB tab, covering the story's actual data (name/characters/relationships/glossary/continuity notes+toggle) — deliberately excludes the "update from description" textarea, which isn't story data.
+
+- Debounced (600ms) checkpoint commits, so continuous typing collapses into one undo step rather than one per keystroke; a checkpoint that doesn't actually change anything (e.g. adding a character row but never naming it — `collectStoryCharacters()` already drops unnamed ones) is a no-op, not a wasted history entry.
+- A fresh edit after an Undo clears the redo stack, standard editor semantics.
+- History resets whenever a story (re)loads — including after switching stories, creating a new one, or discarding/restoring a draft — so there's nothing to undo past the state it loaded in.
+- Reuses the exact same event wiring (`input`/`change` + a `MutationObserver` for structural changes and relationship-map drags) already built for draft-saving, just adds a second debounced consumer.
+
+## Bug fixed: "Suggest" box's story title + web-search checkbox were never saved at all
+
+Reported directly by the repo owner with a screenshot + concrete repro: typed "abc" into the Translate tab's Suggest-instructions story title field, closed and reopened the popup, found it empty. Root cause: `suggestStoryTitleInput`/`suggestWebSearchToggle` (`f-suggest-story-title`, `f-suggest-web-search`) were declared and *read* (only when the Suggest button is clicked) but never included in `collectAllSettings()`/`loadAndBind()` at all — unlike every other field on that tab, which round-trips through `AppSettings`. Fixed by adding both to `TranslateConfig` (`suggestStoryTitle`/`suggestWebSearch`) and wiring load/save.
+
+Also gave both an immediate `change`-listener autosave (the same pattern used for toggles/selects elsewhere), rather than relying solely on the `window` `blur`/`beforeunload` catch-all that plain textareas like `specialInstructions`/`llmInstructions` depend on — a Playwright test using `popup.close()` (which is a real page teardown, not just hiding it) initially failed against blur-only saving, suggesting that catch-all may be racy against a popup being torn down before its async `chrome.storage.local.set()` finishes. Didn't touch the existing blur-only textareas (out of scope for this report), but this is worth revisiting if a similar loss is ever reported for those two.
+
+Swept the rest of `popup/index.ts` for the same class of bug (every `qs<...>('...')`-declared element cross-checked against `collectAllSettings()`) — no other field had this gap; everything else not in that function is either an action button/display element, or has its own dedicated persistence path (Story DB, Owner shared LLM config, Account).
