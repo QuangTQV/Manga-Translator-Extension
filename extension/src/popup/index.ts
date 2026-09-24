@@ -97,6 +97,8 @@ const storyNewBtn = qs<HTMLButtonElement>('btn-story-new');
 const storyContentFields = qs<HTMLDivElement>('story-content-fields');
 const storyDraftBanner = qs<HTMLDivElement>('story-draft-banner');
 const storyDraftDiscardBtn = qs<HTMLButtonElement>('btn-story-draft-discard');
+const storyUndoBtn = qs<HTMLButtonElement>('btn-story-undo');
+const storyRedoBtn = qs<HTMLButtonElement>('btn-story-redo');
 const storyNameInput = qs<HTMLInputElement>('f-story-name');
 const storyCharactersList = qs<HTMLDivElement>('story-characters-list');
 const addStoryCharacterBtn = qs<HTMLButtonElement>('btn-add-story-character');
@@ -335,6 +337,8 @@ async function loadAndBind(): Promise<void> {
   contextToggle.checked = settings.config.sendFullPageContext;
   instructionsInput.value = settings.config.specialInstructions ?? '';
   llmInstructionsInput.value = settings.config.llmInstructions ?? '';
+  suggestStoryTitleInput.value = settings.config.suggestStoryTitle ?? '';
+  suggestWebSearchToggle.checked = settings.config.suggestWebSearch ?? false;
 
   settingsLoaded = true;
   bind();
@@ -362,7 +366,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput]) {
+  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -551,17 +555,33 @@ function bind(): void {
     if (file) void handleStoryImportFile(file);
   });
   storyUpdateFromDescriptionBtn.addEventListener('click', () => { void handleStoryUpdateFromDescription(); });
-  storyContentFields.addEventListener('input', scheduleStoryDraftSave);
-  storyContentFields.addEventListener('change', scheduleStoryDraftSave);
+  const onStoryFieldChange = (ev: Event): void => {
+    scheduleStoryDraftSave();
+    // Undo/redo is about the story's actual data, not the scratch
+    // "update from description" input box.
+    if (ev.target !== storyUpdateDescriptionInput) scheduleStoryHistoryCheckpoint();
+  };
+  storyContentFields.addEventListener('input', onStoryFieldChange);
+  storyContentFields.addEventListener('change', onStoryFieldChange);
   // Adding/removing a character/relationship/glossary/note row, and dragging
   // a node in the relationship map (which sets data-x/data-y directly), are
   // structural DOM changes that don't fire input/change — a MutationObserver
-  // catches those too, so nothing needs a bespoke draft-save call at each
-  // individual add/remove/drag site.
-  new MutationObserver(scheduleStoryDraftSave).observe(storyContentFields, {
+  // catches those too, so nothing needs a bespoke draft-save/history call at
+  // each individual add/remove/drag site.
+  new MutationObserver(() => {
+    scheduleStoryDraftSave();
+    scheduleStoryHistoryCheckpoint();
+  }).observe(storyContentFields, {
     childList: true, subtree: true, attributes: true, attributeFilter: ['data-x', 'data-y', 'data-avatar', 'data-refs'],
   });
   storyDraftDiscardBtn.addEventListener('click', () => { void handleStoryDraftDiscard(); });
+  storyUndoBtn.addEventListener('click', handleStoryUndo);
+  storyRedoBtn.addEventListener('click', handleStoryRedo);
+  storyContentFields.addEventListener('keydown', (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'z') return;
+    ev.preventDefault();
+    if (ev.shiftKey) handleStoryRedo(); else handleStoryUndo();
+  });
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -1082,6 +1102,8 @@ function collectAllSettings(): AppSettings {
       contextMemorySequential: contextMemorySequentialToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
+      suggestStoryTitle: suggestStoryTitleInput.value.trim() || undefined,
+      suggestWebSearch: suggestWebSearchToggle.checked,
       providerGroups: collectProviderGroups(),
     },
   };
@@ -1570,6 +1592,115 @@ function applyStoryDraft(draft: StoryDraft): void {
   storyUpdateDescriptionInput.value = draft.updateDescription ?? '';
 }
 
+// ── Story DB undo/redo ──────────────────────────────────────────────────────
+// A history of form snapshots, separate from the draft-recovery mechanism
+// above (which is about surviving a *closed popup*; this is about stepping
+// back and forth *within* one editing session). Deliberately excludes the
+// "update from description" textarea — undo/redo is about the story's actual
+// data, not a scratch input box. Reset to empty every time a story is
+// (re)loaded, so there is nothing to undo past the state it loaded in.
+interface StorySnapshot {
+  name: string;
+  characters: StoryCharacter[];
+  relationships: StoryRelationship[];
+  glossary: StoryGlossaryTerm[];
+  continuityNotes: StoryContinuityNote[];
+  continuityNotesEnabled: boolean;
+}
+
+let storyUndoStack: StorySnapshot[] = [];
+let storyRedoStack: StorySnapshot[] = [];
+let storyHistoryCurrent: StorySnapshot | null = null;
+let storyHistoryTimer: number | undefined;
+let applyingStoryHistory = false;
+const STORY_HISTORY_LIMIT = 50;
+
+function captureStorySnapshot(): StorySnapshot {
+  return {
+    name: storyNameInput.value,
+    characters: collectStoryCharacters(),
+    relationships: collectStoryRelationships(),
+    glossary: collectStoryGlossary(),
+    continuityNotes: collectStoryContinuityNotes(),
+    continuityNotesEnabled: storyContinuityEnabledToggle.checked,
+  };
+}
+
+function snapshotsEqual(a: StorySnapshot, b: StorySnapshot): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function applyStorySnapshot(snap: StorySnapshot): void {
+  storyNameInput.value = snap.name;
+  renderStoryCharacters(snap.characters);
+  renderStoryRelationships(snap.relationships);
+  renderStoryGlossary(snap.glossary);
+  storyContinuityEnabledToggle.checked = snap.continuityNotesEnabled;
+  renderStoryContinuityNotes(snap.continuityNotes);
+}
+
+function updateStoryUndoRedoButtons(): void {
+  storyUndoBtn.disabled = storyUndoStack.length === 0;
+  storyRedoBtn.disabled = storyRedoStack.length === 0;
+}
+
+/** Resets history to "nothing to undo past the current state" — called
+ * whenever a story is (re)loaded (including after restoring a draft). */
+function resetStoryHistory(): void {
+  window.clearTimeout(storyHistoryTimer);
+  storyUndoStack = [];
+  storyRedoStack = [];
+  storyHistoryCurrent = captureStorySnapshot();
+  updateStoryUndoRedoButtons();
+}
+
+/** Pushes the *previous* checkpoint onto the undo stack and adopts the
+ * live form as the new checkpoint, if it actually differs — called after a
+ * debounced pause in editing so rapid typing collapses into one undo step,
+ * not one per keystroke. */
+function commitStoryHistoryCheckpoint(): void {
+  if (applyingStoryHistory) return;
+  const snap = captureStorySnapshot();
+  if (storyHistoryCurrent && snapshotsEqual(snap, storyHistoryCurrent)) return;
+  if (storyHistoryCurrent) {
+    storyUndoStack.push(storyHistoryCurrent);
+    if (storyUndoStack.length > STORY_HISTORY_LIMIT) storyUndoStack.shift();
+  }
+  storyHistoryCurrent = snap;
+  storyRedoStack = [];
+  updateStoryUndoRedoButtons();
+}
+
+function scheduleStoryHistoryCheckpoint(): void {
+  if (applyingStoryHistory) return;
+  window.clearTimeout(storyHistoryTimer);
+  storyHistoryTimer = window.setTimeout(commitStoryHistoryCheckpoint, 600);
+}
+
+function handleStoryUndo(): void {
+  window.clearTimeout(storyHistoryTimer);
+  commitStoryHistoryCheckpoint(); // finalise whatever's mid-edit first, so undo reverts it like any other step
+  if (!storyUndoStack.length || !storyHistoryCurrent) return;
+  const previous = storyUndoStack.pop()!;
+  storyRedoStack.push(storyHistoryCurrent);
+  applyingStoryHistory = true;
+  applyStorySnapshot(previous);
+  applyingStoryHistory = false;
+  storyHistoryCurrent = previous;
+  updateStoryUndoRedoButtons();
+}
+
+function handleStoryRedo(): void {
+  if (!storyRedoStack.length || !storyHistoryCurrent) return;
+  const next = storyRedoStack.pop()!;
+  storyUndoStack.push(storyHistoryCurrent);
+  applyingStoryHistory = true;
+  applyStorySnapshot(next);
+  applyingStoryHistory = false;
+  storyHistoryCurrent = next;
+  updateStoryUndoRedoButtons();
+}
+
 async function loadStoryIntoForm(id: string): Promise<void> {
   const result = await storyMessage<StoryDetailMessageResult>('STORY_GET', { id });
   if (!result.ok || !result.story) {
@@ -1594,6 +1725,7 @@ async function loadStoryIntoForm(id: string): Promise<void> {
     applyStoryDraft(draft);
     storyDraftBanner.style.display = 'flex';
   }
+  resetStoryHistory();
 }
 
 async function handleStoryDraftDiscard(): Promise<void> {

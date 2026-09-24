@@ -148,3 +148,25 @@ test.describe('popup — LLM Config tab', () => {
     await expect(warning).toContainText('gemini-3.1-flash');
   });
 });
+
+test.describe('popup — Translate tab', () => {
+  test('the Suggest box\'s story title and web-search checkbox persist across closing and reopening the popup', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup1 = await context.newPage();
+    await popup1.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup1.locator('#f-suggest-story-title').fill('abc');
+    await popup1.locator('#f-suggest-web-search').check();
+    // A popup is destroyed (not hidden) the instant it loses focus — closing
+    // it is what actually exercises the window 'blur' autosave, unlike just
+    // re-reading the same still-open page.
+    await popup1.close();
+
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await expect(popup2.locator('#f-suggest-story-title')).toHaveValue('abc');
+    await expect(popup2.locator('#f-suggest-web-search')).toBeChecked();
+  });
+});

@@ -663,3 +663,104 @@ test.describe('popup — Story DB unsaved-draft recovery', () => {
     await expect(popup2.locator('.story-char-row .sc-name')).toHaveValue('Akira');
   });
 });
+
+test.describe('popup — Story DB undo/redo', () => {
+  test('Undo steps back through debounced edits, Redo steps forward, and a new edit clears redo', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'story-1', name: 'My Manga', updated_at: 0,
+          characters: [{ id: 'c1', name: 'Akira', gender: 'male', role: null, voice_notes: null, x: null, y: null, avatar: null, reference_images: [] }],
+          relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+        }),
+      });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('.story-char-row')).toHaveCount(1, { timeout: 5_000 });
+    await expect(popup.locator('#btn-story-undo')).toBeDisabled();
+    await expect(popup.locator('#btn-story-redo')).toBeDisabled();
+
+    // Edit 1: rename the character (a settled, debounced checkpoint).
+    await popup.locator('.story-char-row .sc-name').fill('Akira the Bold');
+    await popup.waitForTimeout(700);
+    await expect(popup.locator('#btn-story-undo')).toBeEnabled();
+
+    // Edit 2: add a second character (a structural change via the observer).
+    await popup.locator('#btn-add-story-character').click();
+    await popup.locator('.story-char-row').nth(1).locator('.sc-name').fill('Hina');
+    await popup.waitForTimeout(700);
+    await expect(popup.locator('.story-char-row')).toHaveCount(2);
+
+    // Undo #1: back to just "Akira the Bold", one character.
+    await popup.locator('#btn-story-undo').click();
+    await expect(popup.locator('.story-char-row')).toHaveCount(1);
+    await expect(popup.locator('.story-char-row .sc-name')).toHaveValue('Akira the Bold');
+    await expect(popup.locator('#btn-story-redo')).toBeEnabled();
+
+    // Undo #2: back to the original loaded name.
+    await popup.locator('#btn-story-undo').click();
+    await expect(popup.locator('.story-char-row .sc-name')).toHaveValue('Akira');
+    await expect(popup.locator('#btn-story-undo')).toBeDisabled();
+
+    // Redo brings back "Akira the Bold".
+    await popup.locator('#btn-story-redo').click();
+    await expect(popup.locator('.story-char-row .sc-name')).toHaveValue('Akira the Bold');
+    await expect(popup.locator('.story-char-row')).toHaveCount(1);
+
+    // A fresh edit after an undo clears the redo stack.
+    await popup.locator('.story-char-row .sc-name').fill('Someone else entirely');
+    await popup.waitForTimeout(700);
+    await expect(popup.locator('#btn-story-redo')).toBeDisabled();
+
+    // Ctrl+Z / Ctrl+Shift+Z keyboard shortcuts work too.
+    await popup.locator('.story-char-row .sc-name').press('Control+z');
+    await expect(popup.locator('.story-char-row .sc-name')).toHaveValue('Akira the Bold');
+    await popup.locator('.story-char-row .sc-name').press('Control+Shift+z');
+    await expect(popup.locator('.story-char-row .sc-name')).toHaveValue('Someone else entirely');
+  });
+
+  test('switching to a different story resets the undo/redo history', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'Story One', updated_at: 0 }, { id: 'story-2', name: 'Story Two', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'story-1', name: 'Story One', updated_at: 0, characters: [], relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false }) });
+    });
+    await context.route('**/stories/story-2', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'story-2', name: 'Story Two', updated_at: 0, characters: [], relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false }) });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('#story-content-fields')).toBeVisible({ timeout: 5_000 });
+
+    await popup.locator('#btn-add-story-character').click();
+    await popup.locator('.story-char-row .sc-name').fill('Someone');
+    await popup.waitForTimeout(700);
+    await expect(popup.locator('#btn-story-undo')).toBeEnabled();
+
+    await popup.locator('#f-story-select').selectOption('story-2');
+    await expect(popup.locator('#f-story-name')).toHaveValue('Story Two', { timeout: 5_000 });
+    await expect(popup.locator('#btn-story-undo')).toBeDisabled();
+    await expect(popup.locator('#btn-story-redo')).toBeDisabled();
+  });
+});
