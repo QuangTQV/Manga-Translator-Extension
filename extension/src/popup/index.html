@@ -34,6 +34,26 @@
     }
     .health-badge.ok { background: #0d3320; color: #4ade80; }
     .health-badge.err { background: #2d0d0d; color: #f87171; }
+    .popup-header-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .btn-open-window {
+      font-size: 13px; line-height: 1; padding: 5px 7px;
+      background: rgba(59,130,246,0.15); color: #60a5fa;
+      border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btn-open-window:hover { background: rgba(59,130,246,0.28); }
+    /* Opened via #btn-open-window as a real chrome.windows popup-type window
+       (?standalone=1) instead of the anchored action popup — fills that
+       window and relies on the OS's own resize handles instead of the CSS
+       `resize`/fixed-size rules below, which only make sense for the
+       action popup's own auto-fit-to-content behavior. */
+    html.standalone-window { height: 100%; }
+    html.standalone-window body {
+      width: 100%; min-width: 340px; max-width: none;
+      height: 100%; min-height: 460px; max-height: none;
+      overflow: auto; resize: none;
+    }
+    .standalone-window #btn-open-window { display: none; }
     .tabs {
       /* 6 tabs at 3-per-row (not the old 4) so the second row is a full,
          evenly-spaced row instead of 2 tabs left-stranded under a row of 4. */
@@ -279,7 +299,10 @@
         <div class="popup-title">MangaTranslator</div>
         <div class="popup-subtitle" data-i18n="popupSubtitle">Scan page · Select · Translate</div>
       </div>
-      <span id="health-badge" class="health-badge" data-i18n="healthChecking">Checking</span>
+      <div class="popup-header-actions">
+        <button id="btn-open-window" class="btn-open-window" type="button">⤢</button>
+        <span id="health-badge" class="health-badge" data-i18n="healthChecking">Checking</span>
+      </div>
     </div>
 
     <div id="master-toggle-row" class="master-toggle-row">

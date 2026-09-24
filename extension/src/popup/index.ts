@@ -130,6 +130,7 @@ const storyUpdateStatus = qs<HTMLDivElement>('story-update-status');
 const supersamplingSelect = qs<HTMLSelectElement>('f-supersampling');
 
 const healthBadge = qs<HTMLSpanElement>('health-badge');
+const openWindowBtn = qs<HTMLButtonElement>('btn-open-window');
 const statusEl = qs<HTMLDivElement>('popup-status');
 const urlDisplay = qs<HTMLDivElement>('backend-url-display');
 
@@ -227,6 +228,7 @@ function applyI18n(): void {
   setHealthState(healthState);
   setAutoButtonState(autoBtn.classList.contains('active'));
   setInstructionsExpandedState(instructionsInput.classList.contains('textarea-expanded'));
+  openWindowBtn.title = t(uiLanguage, 'titleOpenPopupWindow');
 }
 
 function applyExtensionEnabledState(): void {
@@ -279,10 +281,14 @@ function initSliders(): void {
 
 // The popup's body has CSS `resize: both` so the user can drag its bottom-right
 // corner to make it bigger/smaller (a native browser resize-handle, same
-// mechanism as a resizable <textarea>). A resized MV3 action popup does NOT
-// remember its own size across being closed and reopened, so we persist it
-// ourselves in chrome.storage.local (not AppSettings — this is a per-device UI
-// preference, not something to sync/export/import with the rest of settings).
+// mechanism as a resizable <textarea>). In practice this is unreliable on a
+// Chrome MV3 action popup — the browser continuously re-measures the popup's
+// "natural" content size and can snap it back, so the handle sometimes just
+// doesn't appear or doesn't visibly do anything (reported by the repo owner
+// after this was first shipped). Left in as a harmless bonus for when it does
+// work, but `#btn-open-window` below is the reliable way to get an actually,
+// freely resizable window: it opens the same page as a real `chrome.windows`
+// popup-type window, which the OS resizes normally like any other window.
 const POPUP_SIZE_KEY = 'mtPopupSize';
 let popupSizeSaveTimer: number | undefined;
 
@@ -310,11 +316,58 @@ function initPopupResize(): void {
   observer.observe(document.body);
 }
 
+// A real chrome.windows popup-type window (as opposed to the action popup) is
+// freely, reliably resizable by dragging any of its OS-drawn edges — the same
+// page just runs with `?standalone=1` so it can fill that window instead of
+// being capped to the action popup's fixed size, and remembers its own size
+// across opens via window resize events (not ResizeObserver on body, since in
+// this mode body just fills whatever the real window's content area is).
+const POPUP_WINDOW_SIZE_KEY = 'mtPopupWindowSize';
+const isStandaloneWindow = new URLSearchParams(window.location.search).get('standalone') === '1';
+let popupWindowSizeSaveTimer: number | undefined;
+
+async function openInStandaloneWindow(): Promise<void> {
+  let width = 460;
+  let height = 680;
+  try {
+    const raw = await chrome.storage.local.get(POPUP_WINDOW_SIZE_KEY);
+    const saved = raw[POPUP_WINDOW_SIZE_KEY] as { w?: number; h?: number } | undefined;
+    if (saved?.w) width = saved.w;
+    if (saved?.h) height = saved.h;
+  } catch {
+    // chrome.storage unavailable — fall back to the defaults above.
+  }
+  await chrome.windows.create({
+    url: chrome.runtime.getURL('popup/index.html?standalone=1'),
+    type: 'popup',
+    width,
+    height,
+  });
+  window.close();
+}
+
+function initStandaloneWindow(): void {
+  document.documentElement.classList.add('standalone-window');
+  window.addEventListener('resize', () => {
+    window.clearTimeout(popupWindowSizeSaveTimer);
+    popupWindowSizeSaveTimer = window.setTimeout(() => {
+      void chrome.storage.local.set({
+        [POPUP_WINDOW_SIZE_KEY]: { w: window.outerWidth, h: window.outerHeight },
+      });
+    }, 300);
+  });
+}
+
 async function init(): Promise<void> {
   initTabs();
   initSliders();
-  await restorePopupSize();
-  initPopupResize();
+  if (isStandaloneWindow) {
+    initStandaloneWindow();
+  } else {
+    await restorePopupSize();
+    initPopupResize();
+    openWindowBtn.addEventListener('click', () => { void openInStandaloneWindow(); });
+  }
   window.addEventListener('blur', () => { void autoSave(); });
   window.addEventListener('beforeunload', () => { void autoSave(); });
   await loadAndBind();
