@@ -1,7 +1,7 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
 import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
 import { effectiveConfig } from '../shared/economy.js';
-import { normalizeUiLanguage } from '../shared/i18n.js';
+import { normalizeUiLanguage, t } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
 
@@ -485,7 +485,7 @@ async function fetchTestApiKey(body: TestApiKeyBody): Promise<TestApiKeyResult> 
     return (await res.json()) as TestApiKeyResult;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `Could not reach backend: ${msg}` };
+    return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg }) };
   }
 }
 
@@ -554,7 +554,7 @@ async function accountApiCall(path: string, init: RequestInit): Promise<AccountR
     return { ok: true, account: (await res.json()) as AccountInfo };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `Could not reach backend: ${msg}` };
+    return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg }) };
   }
 }
 
@@ -638,7 +638,7 @@ async function adminApiCall(init: RequestInit): Promise<AdminLlmConfigResult> {
     return { ok: true, config: (await res.json()) as SharedLlmConfigInfo };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `Could not reach backend: ${msg}` };
+    return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg }) };
   }
 }
 
@@ -694,7 +694,7 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
     return { ok: true, data: (await res.json()) as T };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: `Could not reach backend: ${msg}` };
+    return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg }) };
   }
 }
 
@@ -722,7 +722,7 @@ async function regionApiCall(path: string, body: Record<string, unknown>): Promi
     }
     return { ok: true, data: await res.json() };
   } catch (e) {
-    return { ok: false, error: `Could not reach backend: ${e instanceof Error ? e.message : String(e)}` };
+    return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg: e instanceof Error ? e.message : String(e) }) };
   }
 }
 

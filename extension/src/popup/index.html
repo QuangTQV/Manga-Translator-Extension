@@ -29,7 +29,9 @@
     .health-badge.ok { background: #0d3320; color: #4ade80; }
     .health-badge.err { background: #2d0d0d; color: #f87171; }
     .tabs {
-      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px;
+      /* 6 tabs at 3-per-row (not the old 4) so the second row is a full,
+         evenly-spaced row instead of 2 tabs left-stranded under a row of 4. */
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px;
       background: rgba(8,14,28,0.9);
       border: 1px solid rgba(59,130,246,0.1);
       border-radius: 10px; padding: 3px;
@@ -234,9 +236,22 @@
       border: 1px solid rgba(59,130,246,0.06); font-size: 11px; padding: 8px;
     }
     .btn-clear-cache:hover { color: #7a90b8; border-color: rgba(59,130,246,0.15); }
-    #popup-status { font-size: 11px; color: #6b7fa8; text-align: center; min-height: 16px; }
-    #popup-status.err { color: #f87171; }
-    #popup-status.ok { color: #4ade80; }
+    /* Fixed to the popup's own viewport (not the scrolling document — the
+       popup body has no internal scroll container, so a tall tab like
+       Story DB can easily push the old in-flow status line below the fold,
+       past where the user is actually looking after clicking a button). */
+    #popup-status {
+      position: fixed; left: 16px; right: 16px; bottom: 8px; z-index: 20;
+      font-size: 12px; font-weight: 600; color: #9fb0cf; text-align: center;
+      padding: 8px 12px; border-radius: 8px;
+      background: rgba(11,17,32,0.97); border: 1px solid rgba(59,130,246,0.25);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+      opacity: 0; transform: translateY(6px); pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+    #popup-status.visible { opacity: 1; transform: translateY(0); }
+    #popup-status.err { color: #f87171; border-color: rgba(248,113,113,0.4); }
+    #popup-status.ok { color: #4ade80; border-color: rgba(74,222,128,0.4); }
     .popup-footer { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 10px; color: #3a4f6a; }
     .master-toggle-row {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;

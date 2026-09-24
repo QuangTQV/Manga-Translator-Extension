@@ -1195,9 +1195,21 @@ async function ensureContentScript(tabId: number): Promise<boolean> {
   }
 }
 
+let statusHideTimer: number | undefined;
+
+// The status line is fixed to the popup's own viewport (see its CSS) so it
+// stays visible regardless of scroll position in a tall tab — but that also
+// means it should get out of the way again once its job is done. A success
+// message auto-hides after a few seconds; an error stays until replaced, so
+// the user has time to actually read it.
 function setStatus(message: string, type: '' | 'ok' | 'err'): void {
+  window.clearTimeout(statusHideTimer);
   statusEl.textContent = message;
   statusEl.className = type;
+  statusEl.classList.toggle('visible', message.length > 0);
+  if (type === 'ok' && message) {
+    statusHideTimer = window.setTimeout(() => { statusEl.classList.remove('visible'); }, 3000);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1731,6 +1743,7 @@ async function loadStoryIntoForm(id: string): Promise<void> {
 async function handleStoryDraftDiscard(): Promise<void> {
   const id = storySelect.value;
   if (!id) return;
+  if (!window.confirm(t(uiLanguage, 'confirmStoryDraftDiscard'))) return;
   await clearStoryDraft(id);
   storyDraftBanner.style.display = 'none';
   await loadStoryIntoForm(id); // reloads from the server, with no draft left to restore
