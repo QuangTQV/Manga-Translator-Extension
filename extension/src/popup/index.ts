@@ -2344,9 +2344,14 @@ function createStoryContinuityNoteRow(data?: StoryContinuityNote): HTMLDivElemen
   const row = document.createElement('div');
   row.className = 'story-continuity-note-row';
 
-  const textField = document.createElement('input');
-  textField.className = 'input scn-text';
-  textField.type = 'text';
+  // A textarea, not a single-line input — continuity notes are often a full
+  // sentence or two (e.g. "Ch.39: the villain turns out to be Akira's
+  // childhood friend Hina..."), which a single-line input just clips/scrolls
+  // horizontally instead of showing.
+  const textField = document.createElement('textarea');
+  textField.className = 'textarea scn-text';
+  textField.rows = 2;
+  textField.style.resize = 'vertical';
   textField.placeholder = t(uiLanguage, 'placeholderContinuityNoteText');
   textField.value = data?.text ?? '';
 
@@ -2469,7 +2474,7 @@ function collectStoryGlossary(): StoryGlossaryTerm[] {
 function collectStoryContinuityNotes(): StoryContinuityNote[] {
   const out: StoryContinuityNote[] = [];
   for (const row of Array.from(storyContinuityNotesList.querySelectorAll<HTMLDivElement>('.story-continuity-note-row'))) {
-    const text = row.querySelector<HTMLInputElement>('.scn-text')?.value.trim() ?? '';
+    const text = row.querySelector<HTMLTextAreaElement>('.scn-text')?.value.trim() ?? '';
     if (!text) continue;
     const sourceLabel = row.querySelector<HTMLInputElement>('.scn-source')?.value.trim() || undefined;
     out.push({ id: crypto.randomUUID(), text, source_label: sourceLabel });
