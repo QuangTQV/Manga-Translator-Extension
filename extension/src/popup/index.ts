@@ -92,6 +92,7 @@ const ownerSaveBtn = qs<HTMLButtonElement>('btn-owner-save');
 const storyDbLockedView = qs<HTMLDivElement>('storydb-locked');
 const storyDbEditorView = qs<HTMLDivElement>('storydb-editor');
 const storySelect = qs<HTMLSelectElement>('f-story-select');
+const storyDomainMismatchWarning = qs<HTMLDivElement>('story-domain-mismatch-warning');
 const storyNewNameInput = qs<HTMLInputElement>('f-story-new-name');
 const storyNewBtn = qs<HTMLButtonElement>('btn-story-new');
 const storyContentFields = qs<HTMLDivElement>('story-content-fields');
@@ -1613,6 +1614,38 @@ function populateStorySelect(stories: StorySummary[], preferredId?: string): str
   return resolvedId;
 }
 
+// "Active story" (settings.activeStoryId) is one global selection, not
+// per-site — nothing stops the user from forgetting to switch it when they
+// move from reading one manga to another, and a wrong selection means the
+// wrong character DB/glossary gets silently applied. We don't auto-switch it
+// for them (too easy to override a choice they made on purpose), but we can
+// warn: background/index.ts remembers the last story actually used per
+// hostname (chrome.storage.local['mtStoryDomainMap']) every time a translate
+// request goes out with a story_id, and this checks the currently active
+// tab's hostname against that the moment a story is loaded into the form.
+const STORY_DOMAIN_MAP_KEY = 'mtStoryDomainMap';
+
+async function checkStoryDomainMismatch(currentStoryId: string): Promise<void> {
+  storyDomainMismatchWarning.style.display = 'none';
+  if (!currentStoryId) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url) return;
+    const hostname = new URL(tab.url).hostname;
+    if (!hostname) return;
+    const raw = await chrome.storage.local.get(STORY_DOMAIN_MAP_KEY);
+    const map = raw[STORY_DOMAIN_MAP_KEY] as Record<string, string> | undefined;
+    const previousStoryId = map?.[hostname];
+    if (!previousStoryId || previousStoryId === currentStoryId) return;
+    const previousStoryName = Array.from(storySelect.options).find((o) => o.value === previousStoryId)?.textContent;
+    if (!previousStoryName) return; // that story was renamed/deleted since — nothing useful to say
+    storyDomainMismatchWarning.textContent = t(uiLanguage, 'warningStoryDomainMismatch', { domain: hostname, story: previousStoryName });
+    storyDomainMismatchWarning.style.display = '';
+  } catch {
+    // chrome.tabs unavailable, or tab.url unreadable (e.g. a chrome:// page) — nothing to warn about.
+  }
+}
+
 async function refreshStoryOptions(preferredId?: string): Promise<string> {
   const result = await storyMessage<StoryListMessageResult>('STORY_LIST');
   if (!result.ok || !result.stories) {
@@ -1819,6 +1852,7 @@ async function loadStoryIntoForm(id: string): Promise<void> {
   storyDraftBanner.style.display = 'none';
   settings.activeStoryId = id;
   await autoSave();
+  await checkStoryDomainMismatch(id);
 
   const draft = await loadStoryDraft(id);
   if (draft) {
@@ -1850,6 +1884,7 @@ async function handleStorySelectChange(): Promise<void> {
   const id = storySelect.value;
   if (!id) {
     storyContentFields.style.display = 'none';
+    storyDomainMismatchWarning.style.display = 'none';
     settings.activeStoryId = undefined;
     await autoSave();
     return;

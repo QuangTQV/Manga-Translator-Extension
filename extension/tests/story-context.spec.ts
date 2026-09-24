@@ -779,3 +779,117 @@ test.describe('popup — Story DB undo/redo', () => {
     await expect(popup.locator('#btn-story-redo')).toBeDisabled();
   });
 });
+
+// "Active story" is one global selection, not per-site, so nothing stops a
+// user from forgetting to switch it when they move from reading one manga to
+// another — this warns (without auto-switching) when the currently active
+// tab's domain was last translated using a different story than the one
+// currently selected.
+test.describe('popup — Story DB per-site mismatch warning', () => {
+  test('warns when the active tab\'s domain was last translated with a different story, and clears once the matching story is selected', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-2' }),
+      firstKeyMatches('seed-key'),
+    );
+    // Simulate a prior real translate on this domain having recorded story-1
+    // as the one actually used there (background/index.ts's recordStoryDomainUsage).
+    await worker.evaluate(async () => {
+      await chrome.storage.local.set({ mtStoryDomainMap: { 'example-manga-site.test': 'story-1' } });
+    });
+
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify([
+          { id: 'story-1', name: 'Seirei Gensouki', updated_at: 0 },
+          { id: 'story-2', name: 'One Piece', updated_at: 0 },
+        ]),
+      });
+    });
+    for (const [id, name] of [['story-1', 'Seirei Gensouki'], ['story-2', 'One Piece']]) {
+      await context.route(`**/stories/${id}`, async (route) => {
+        if (route.request().method() !== 'GET') { await route.fallback(); return; }
+        await route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({ id, name, updated_at: 0, characters: [], relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false }),
+        });
+      });
+    }
+    // The navigation itself is intercepted too — no real network/DNS needed
+    // for a fake domain, Playwright just needs *some* response to load.
+    await context.route('https://example-manga-site.test/**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>Manga page</body></html>' });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto('https://example-manga-site.test/chapter-1');
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    // The check runs once automatically on popup load — reload after making
+    // the manga page the active tab so chrome.tabs.query({active:true, ...})
+    // resolves to it, not to the popup's own tab (which was the most
+    // recently created/navigated one until now).
+    await mangaPage.bringToFront();
+    await popup.reload();
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+
+    const warning = popup.locator('#story-domain-mismatch-warning');
+    await expect(warning).toBeVisible({ timeout: 5_000 });
+    await expect(warning).toContainText('Seirei Gensouki');
+    await expect(warning).toContainText('example-manga-site.test');
+
+    await popup.locator('#f-story-select').selectOption({ label: 'Seirei Gensouki' });
+    await expect(popup.locator('#f-story-name')).toHaveValue('Seirei Gensouki', { timeout: 5_000 });
+    await expect(warning).toBeHidden();
+  });
+
+  test('a real translate request records its page domain against the story that was used', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }),
+      firstKeyMatches('seed-key'),
+    );
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+        }),
+      });
+    });
+    // Bypasses the scanner UI and the actual manga page on purpose — this
+    // test is only about background/index.ts:recordStoryDomainUsage actually
+    // firing on a real translate call, not about how the request gets
+    // triggered. Sent from a popup page rather than the manga page itself
+    // (a regular page has no chrome.runtime access at all, only an injected
+    // content script does) — chrome.runtime.sendMessage refuses to deliver a
+    // message back to the exact same script that sent it ("Receiving end
+    // does not exist"), so this can't be sent from the worker's own context.
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    const sendResult = await popup.evaluate(async () => {
+      return new Promise<{ response: unknown; lastError?: string }>((resolve) => {
+        chrome.runtime.sendMessage(
+          { type: 'TRANSLATE_IMAGE_WITH_BODY', imageUrl: 'https://another-manga-site.test/page1.jpg', pageUrl: 'https://another-manga-site.test/chapter-1', body: { image: 'ZmFrZQ==', story_id: 'story-1' } },
+          (response: unknown) => resolve({ response, lastError: chrome.runtime.lastError?.message }),
+        );
+      });
+    });
+    expect(sendResult.lastError).toBeUndefined();
+
+    const map = await worker.evaluate(async () => {
+      const result = await chrome.storage.local.get('mtStoryDomainMap');
+      return result.mtStoryDomainMap;
+    });
+    expect(map).toMatchObject({ 'another-manga-site.test': 'story-1' });
+  });
+});
