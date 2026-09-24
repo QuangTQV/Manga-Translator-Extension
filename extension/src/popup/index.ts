@@ -277,9 +277,44 @@ function initSliders(): void {
   topKSlider.addEventListener('input', () => { topKVal.textContent = topKSlider.value; });
 }
 
+// The popup's body has CSS `resize: both` so the user can drag its bottom-right
+// corner to make it bigger/smaller (a native browser resize-handle, same
+// mechanism as a resizable <textarea>). A resized MV3 action popup does NOT
+// remember its own size across being closed and reopened, so we persist it
+// ourselves in chrome.storage.local (not AppSettings — this is a per-device UI
+// preference, not something to sync/export/import with the rest of settings).
+const POPUP_SIZE_KEY = 'mtPopupSize';
+let popupSizeSaveTimer: number | undefined;
+
+async function restorePopupSize(): Promise<void> {
+  try {
+    const raw = await chrome.storage.local.get(POPUP_SIZE_KEY);
+    const saved = raw[POPUP_SIZE_KEY] as { w?: number; h?: number } | undefined;
+    if (saved?.w) document.body.style.width = `${saved.w}px`;
+    if (saved?.h) document.body.style.height = `${saved.h}px`;
+  } catch {
+    // chrome.storage unavailable (shouldn't happen in the real extension) — keep the CSS default size.
+  }
+}
+
+function initPopupResize(): void {
+  const observer = new ResizeObserver((entries) => {
+    const entry = entries[0];
+    if (!entry) return;
+    const { width, height } = entry.contentRect;
+    window.clearTimeout(popupSizeSaveTimer);
+    popupSizeSaveTimer = window.setTimeout(() => {
+      void chrome.storage.local.set({ [POPUP_SIZE_KEY]: { w: Math.round(width), h: Math.round(height) } });
+    }, 300);
+  });
+  observer.observe(document.body);
+}
+
 async function init(): Promise<void> {
   initTabs();
   initSliders();
+  await restorePopupSize();
+  initPopupResize();
   window.addEventListener('blur', () => { void autoSave(); });
   window.addEventListener('beforeunload', () => { void autoSave(); });
   await loadAndBind();

@@ -170,3 +170,49 @@ test.describe('popup — Translate tab', () => {
     await expect(popup2.locator('#f-suggest-web-search')).toBeChecked();
   });
 });
+
+test.describe('popup — resizable window', () => {
+  test('body is drag-resizable and the resized size persists across reopening the popup', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup1 = await context.newPage();
+    await popup1.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    // CSS resize needs overflow != visible to take effect at all.
+    const style = await popup1.evaluate(() => {
+      const cs = getComputedStyle(document.body);
+      return { resize: cs.resize, overflow: cs.overflow };
+    });
+    expect(style.resize).toBe('both');
+    expect(style.overflow).toBe('auto');
+
+    // Simulate what dragging the native resize handle produces: the browser
+    // sets an explicit inline size on body, which our ResizeObserver reacts
+    // to exactly the same way regardless of whether a real drag or this
+    // direct style write caused it.
+    await popup1.evaluate(() => {
+      document.body.style.width = '500px';
+      document.body.style.height = '600px';
+    });
+    // The observer's own save is debounced 300ms.
+    await popup1.waitForTimeout(500);
+
+    const saved = await worker.evaluate(async () => {
+      const result = await chrome.storage.local.get('mtPopupSize');
+      return result.mtPopupSize;
+    });
+    expect(saved).toEqual({ w: 500, h: 600 });
+
+    await popup1.close();
+
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    const restored = await popup2.evaluate(() => ({
+      width: document.body.style.width,
+      height: document.body.style.height,
+    }));
+    expect(restored).toEqual({ width: '500px', height: '600px' });
+  });
+});

@@ -658,6 +658,7 @@ test.describe('popup — Story DB unsaved-draft recovery', () => {
     await expect(popup2.locator('#story-draft-banner')).toBeVisible({ timeout: 5_000 });
     await expect(popup2.locator('.story-char-row .sc-name')).toHaveValue('Some typo I regret');
 
+    popup2.on('dialog', (dialog) => { void dialog.accept(); });
     await popup2.locator('#btn-story-draft-discard').click();
     await expect(popup2.locator('#story-draft-banner')).toBeHidden({ timeout: 5_000 });
     await expect(popup2.locator('.story-char-row .sc-name')).toHaveValue('Akira');

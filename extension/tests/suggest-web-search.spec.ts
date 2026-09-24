@@ -4,10 +4,12 @@ import { baseSeed, firstKeyMatches, seedSettings } from './storage';
 // The "Suggest" (Story Notes draft) button can optionally ask the model to
 // use its provider's own built-in web search to ground the draft in real
 // character names/relationships instead of guessing from sample pages
-// alone. These are per-action options (not saved settings — re-checking
-// before each Suggest click is cheap and avoids bloating the settings
-// schema with transient action parameters), so they should simply default
-// to off/empty on every popup open regardless of prior use.
+// alone. They default to off/empty for a brand-new profile. They used to be
+// treated as transient, per-action-only fields that reset on every popup
+// open, but that caused a real reported bug (typed text silently lost on
+// reopen if you hadn't clicked Suggest yet) — they're now persisted like any
+// other setting; see tests/popup.spec.ts's "persist across closing and
+// reopening the popup" test for that behavior.
 test.describe('popup — Suggest Story Notes web search option', () => {
   test('web search checkbox and story title default to off/empty and are independently editable', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
@@ -36,11 +38,5 @@ test.describe('popup — Suggest Story Notes web search option', () => {
     await webSearchToggle.check();
     await expect(titleInput).toHaveValue('Attack on Titan');
     await expect(webSearchToggle).toBeChecked();
-
-    // Not a saved setting — a fresh popup instance goes back to defaults.
-    const reopened = await context.newPage();
-    await reopened.goto(`chrome-extension://${extensionId}/popup/index.html`);
-    await expect(reopened.locator('#f-suggest-web-search')).not.toBeChecked();
-    await expect(reopened.locator('#f-suggest-story-title')).toHaveValue('');
   });
 });
