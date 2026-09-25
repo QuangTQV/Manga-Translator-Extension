@@ -47,7 +47,7 @@ MangaTranslator Extension được tạo cho người đọc muốn đọc truy�
 | Popup điều khiển | Trình quét trang |
 | --- | --- |
 | <img src="assets/popup-preview.png" alt="Popup MangaTranslator Extension" width="390"> | <img src="assets/scanner-preview.png" alt="Trinh quet trang MangaTranslator Extension" width="720"> |
-| Cấu hình ngôn ngữ, nhận diện chữ ngoài bubble, trạng thái backend và auto-translate một chạm. | Quét chapter, xem trước các trang đã phát hiện, chọn đúng ảnh cần dịch và dịch hàng loạt. |
+| Ngôn ngữ nguồn/đích, CSDL truyện, chữ ngoài bubble và chất lượng xoá chữ. Header hiện trạng thái backend, nút **?** để hỏi trợ giúp và **⤢** để mở cửa sổ riêng. | Quét chapter, xem trước các trang đã phát hiện, chọn đúng ảnh cần dịch và dịch hàng loạt. |
 
 ### Kết Quả Dịch
 
@@ -60,6 +60,19 @@ MangaTranslator Extension được tạo cho người đọc muốn đọc truy�
 - Giữ cảm giác manga: chữ gốc được xóa và chữ dịch được render lại vào ảnh.
 - Dịch cả ngoài bubble: hỗ trợ SFX, lời dẫn, caption và các đoạn chữ nằm ngoài bóng thoại.
 - Nhẹ hơn theo mặc định: Flux Klein 4B là tùy chọn, nên người dùng thông thường không phải tải một gói quá nặng.
+
+### CSDL Truyện Và Trợ Giúp
+
+| CSDL truyện | Trợ giúp |
+| --- | --- |
+| <img src="assets/story-db-preview.png" alt="Tab CSDL truyện với sơ đồ quan hệ và danh sách nhân vật" width="390"> | <img src="assets/help-chat-preview.png" alt="Khung trợ giúp trả lời cách để bản dịch hay hơn" width="390"> |
+| Lưu nhân vật, mối quan hệ và thuật ngữ dịch cố định của một truyện ở một chỗ, để tên và xưng hô nhất quán qua từng chương. Kéo nhân vật trên sơ đồ quan hệ, hoặc dùng **Nối** để nối hai nhân vật. | Bấm **?** trong popup và hỏi cách cài đặt một thứ gì đó. Câu trả lời đến từ chính LLM của bạn, dựa trên tài liệu của dự án. |
+
+### Sửa Chỗ Auto-Translate Bỏ Sót
+
+<img src="assets/manual-region-preview.png" alt="Công cụ vùng chữ thủ công dịch một hiệu ứng âm thanh chưa được dịch" width="560">
+
+Auto-translate đã bỏ sót hiệu ứng âm thanh "ピンポーン". Bấm **✂ Chọn vùng chữ**, kéo khung quanh chỗ đó, chữ sẽ được đọc tự động. Tự gõ bản dịch hoặc bấm **Dịch bằng AI**, rồi **Áp dụng** để xoá chữ gốc và vẽ chữ mới vào trang. Với chữ cong hoặc chéo mà khung chữ nhật không tách gọn được, dùng **🩹 Xoá vùng chữ** để tô lên thay vào đó.
 
 ## Tổng Quan
 
@@ -90,7 +103,7 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Sửa bản dịch | Bấm vào 1 bubble đã dịch, mô tả chỗ sai để dịch lại đúng trang đó với hướng dẫn sửa áp riêng cho bubble đó. Để sửa cùng 1 lỗi lặp lại trên nhiều trang (vd tên nhân vật sai), chọn các trang đã dịch trong trình quét, mô tả 1 lần rồi áp dụng cho tất cả. |
 | Di chuyển / xoá bong bóng | Máy khoanh sai vị trí, hoặc không nên có bong bóng ở đó? Mở popover Fix của bong bóng và bấm **Move** (kéo khung mới; chỗ cũ được khôi phục về tranh gốc) hoặc **Delete** (chỉ khôi phục tranh gốc). |
 | Vùng chữ thủ công | Chưa ưng một chỗ, hoặc auto-detect bỏ sót? Bấm **✂ Chọn vùng chữ** trong popup rồi kéo khung quanh chữ bất kỳ trên trang: chữ được đọc tự động (OCR), sau đó bạn tự gõ bản dịch hoặc bấm **Dịch bằng AI** (áp dụng Story DB và chỉ dẫn của bạn). Chỗ đó được xóa chữ và vẽ lại bản dịch vào ảnh. Chọn lại đúng chỗ để sửa hoặc xóa; các khung được nhớ theo từng trang. Cần chạy backend bản mới nhất. |
-| Bút tẩy | Với chữ raw/SFX mà hình chữ nhật không tách gọn được (SFX cong hoặc chéo, chữ dính vào nét vẽ nhân vật): bấm **🩹 Eraser** rồi tô lên bằng bút vẽ; chỗ đó được xóa và vá lại. Được nhớ theo từng trang như công cụ vùng chữ thủ công. |
+| Bút tẩy | Với chữ raw/SFX mà hình chữ nhật không tách gọn được (SFX cong hoặc chéo, chữ dính vào nét vẽ nhân vật): bấm **🩹 Xoá vùng chữ** rồi tô lên bằng bút vẽ; chỗ đó được xóa và vá lại. Được nhớ theo từng trang như công cụ vùng chữ thủ công. |
 | Chế độ tiết kiệm | Một công tắc để giảm chi phí API: ảnh chi tiết thấp, không gửi ngữ cảnh toàn trang/trang trước, không gửi ảnh tham chiếu Story DB, và thu nhỏ ảnh ngữ cảnh. Cài đặt của bạn được giữ nguyên và trở lại khi tắt. |
 | Cài đặt font | Chọn font pack vẽ chữ đã dịch, và khoảng cỡ chữ nhỏ nhất/lớn nhất, ngay trong tab Translate — bỏ font pack của bạn (thư mục chứa file .ttf/.otf) vào `backend/fonts/` để thấy trong danh sách. Có thêm ô chỉnh độ nét chữ (supersampling) trong tab **Pro** mới, cùng các cài đặt nâng cao khác để riêng khỏi các tab chính. |
 | Web app (không cần extension) | Dịch file ảnh có sẵn trên máy — không cần ảnh đó đã có trên trang web nào. Chạy backend rồi mở `http://localhost:7677/app` bằng trình duyệt bất kỳ, kéo file vào, dịch, xuất ZIP/CBZ. Cố tình tối giản (không có Story DB/xoay vòng key/công cụ thủ công) — cần đầy đủ tính năng thì dùng extension. |

@@ -55,7 +55,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Popup controls | Page scanner |
 | --- | --- |
 | <img src="docs/assets/popup-preview.png" alt="MangaTranslator Extension popup" width="390"> | <img src="docs/assets/scanner-preview.png" alt="MangaTranslator Extension page scanner" width="720"> |
-| Configure source/target languages, outside-text detection, backend status, and one-click auto translation. | Scan a chapter, preview detected pages, select only what you need, and translate pages in batch. |
+| Source/target languages, Story DB, outside-bubble text and inpainting quality. The header shows backend status, the **?** help chat and **⤢** open-in-window. | Scan a chapter, preview detected pages, select only what you need, and translate pages in batch. |
 
 ### Translation Result
 
@@ -68,6 +68,19 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 - Keep the manga feel: original text is cleaned and translated text is rendered back into the image.
 - Translate more than bubbles: SFX, narration, captions, and other outside-bubble text can be handled too.
 - Stay lightweight by default: Flux Klein 4B is optional, so normal users do not need to download a workstation-sized package.
+
+### Story DB and Help Chat
+
+| Story DB | Help chat |
+| --- | --- |
+| <img src="docs/assets/story-db-preview.png" alt="Story DB tab with a relationship map and character list" width="390"> | <img src="docs/assets/help-chat-preview.png" alt="Help chat answering how to get better translations" width="390"> |
+| Keep a story's characters, relationships, and fixed term translations in one place, so names and pronouns stay consistent from chapter to chapter. Drag characters around the relationship map, or use **Connect** to link two of them. | Click **?** in the popup and ask how to set something up. Answers come from your own LLM, based on this project's documentation. |
+
+### Fix What Auto-Translate Missed
+
+<img src="docs/assets/manual-region-preview.png" alt="Manual text area tool translating an untranslated sound effect" width="560">
+
+Auto-translate left the "ピンポーン" sound effect untouched. Click **✂ Select text area**, drag a box over it, and the text is read for you. Type a translation or click **Translate with AI**, then **Apply** to clean the spot and draw the new text into the page. For curved or diagonal text that a box can't isolate, use **🩹 Eraser** to paint over it instead.
 
 ## Features
 
@@ -280,6 +293,14 @@ Compile-check backend files:
 ```powershell
 cd ..\backend
 python -m py_compile pipeline\wrapper.py
+```
+
+Regenerate the popup/tool screenshots in `docs/assets/` after UI changes (the backend is mocked, so nothing else needs to be running):
+
+```powershell
+cd extension
+npm run build
+node scripts/readme-screenshots.mjs
 ```
 
 Check backend health:
