@@ -133,6 +133,14 @@ const supersamplingSelect = qs<HTMLSelectElement>('f-supersampling');
 
 const healthBadge = qs<HTMLSpanElement>('health-badge');
 const openWindowBtn = qs<HTMLButtonElement>('btn-open-window');
+const helpChatBtn = qs<HTMLButtonElement>('btn-help-chat');
+const supportChatOverlay = qs<HTMLDivElement>('support-chat-overlay');
+const supportChatMessagesEl = qs<HTMLDivElement>('support-chat-messages');
+const supportChatErrorEl = qs<HTMLDivElement>('support-chat-error');
+const supportChatInput = qs<HTMLTextAreaElement>('support-chat-input');
+const supportChatSendBtn = qs<HTMLButtonElement>('btn-send-support-chat');
+const supportChatCloseBtn = qs<HTMLButtonElement>('btn-close-support-chat');
+const supportChatClearBtn = qs<HTMLButtonElement>('btn-clear-support-chat');
 const statusEl = qs<HTMLDivElement>('popup-status');
 const urlDisplay = qs<HTMLDivElement>('backend-url-display');
 
@@ -231,6 +239,7 @@ function applyI18n(): void {
   setAutoButtonState(autoBtn.classList.contains('active'));
   setInstructionsExpandedState(instructionsInput.classList.contains('textarea-expanded'));
   openWindowBtn.title = t(uiLanguage, 'titleOpenPopupWindow');
+  helpChatBtn.title = t(uiLanguage, 'supportChatTitle');
 }
 
 function applyExtensionEnabledState(): void {
@@ -372,6 +381,7 @@ async function init(): Promise<void> {
   }
   window.addEventListener('blur', () => { void autoSave(); });
   window.addEventListener('beforeunload', () => { void autoSave(); });
+  await initSupportChat();
   await loadAndBind();
 }
 
@@ -2521,6 +2531,142 @@ function collectStoryContinuityNotes(): StoryContinuityNote[] {
     out.push({ id: crypto.randomUUID(), text, source_label: sourceLabel });
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Help chat ("?" button, header) — answers "how do I use this" questions
+// with the user's own configured LLM, grounded in the project's own docs
+// (backend/endpoints/translate.py:support_chat). Persisted to
+// chrome.storage.local so a conversation survives the popup being closed
+// (a Chrome action popup is destroyed, not hidden, on blur), same
+// reasoning as the Story DB draft/undo-redo work.
+// ─────────────────────────────────────────────────────────────────────────
+interface SupportChatEntry {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+const SUPPORT_CHAT_HISTORY_KEY = 'mtSupportChatHistory';
+let supportChatHistory: SupportChatEntry[] = [];
+
+async function loadSupportChatHistory(): Promise<void> {
+  try {
+    const raw = await chrome.storage.local.get(SUPPORT_CHAT_HISTORY_KEY);
+    const stored = raw[SUPPORT_CHAT_HISTORY_KEY];
+    if (Array.isArray(stored)) supportChatHistory = stored as SupportChatEntry[];
+  } catch {
+    // chrome.storage unavailable — start with an empty conversation.
+  }
+}
+
+function saveSupportChatHistory(): void {
+  void chrome.storage.local.set({ [SUPPORT_CHAT_HISTORY_KEY]: supportChatHistory });
+}
+
+function renderSupportChatMessages(): void {
+  supportChatMessagesEl.innerHTML = '';
+  if (supportChatHistory.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'support-chat-empty';
+    empty.textContent = t(uiLanguage, 'supportChatEmptyHint');
+    supportChatMessagesEl.appendChild(empty);
+  } else {
+    for (const entry of supportChatHistory) {
+      const bubble = document.createElement('div');
+      bubble.className = `support-chat-msg ${entry.role}`;
+      bubble.textContent = entry.content;
+      supportChatMessagesEl.appendChild(bubble);
+    }
+  }
+  supportChatMessagesEl.scrollTop = supportChatMessagesEl.scrollHeight;
+}
+
+function openSupportChat(): void {
+  supportChatOverlay.classList.add('open');
+  supportChatErrorEl.style.display = 'none';
+  renderSupportChatMessages();
+  supportChatInput.focus();
+}
+
+function closeSupportChat(): void {
+  supportChatOverlay.classList.remove('open');
+}
+
+async function handleSupportChatClear(): Promise<void> {
+  if (supportChatHistory.length === 0) return;
+  if (!window.confirm(t(uiLanguage, 'confirmClearSupportChat'))) return;
+  supportChatHistory = [];
+  saveSupportChatHistory();
+  renderSupportChatMessages();
+}
+
+async function handleSupportChatSend(): Promise<void> {
+  const question = supportChatInput.value.trim();
+  if (!question) return;
+  supportChatErrorEl.style.display = 'none';
+
+  const providerInfo = firstEnabledProvider();
+  if (!providerInfo) {
+    supportChatErrorEl.textContent = t(uiLanguage, 'errorNoProviderConfigured');
+    supportChatErrorEl.style.display = '';
+    return;
+  }
+
+  supportChatHistory.push({ role: 'user', content: question });
+  saveSupportChatHistory();
+  supportChatInput.value = '';
+  renderSupportChatMessages();
+
+  const pending = document.createElement('div');
+  pending.className = 'support-chat-msg assistant pending';
+  pending.textContent = t(uiLanguage, 'supportChatThinking');
+  supportChatMessagesEl.appendChild(pending);
+  supportChatMessagesEl.scrollTop = supportChatMessagesEl.scrollHeight;
+
+  supportChatSendBtn.disabled = true;
+  supportChatInput.disabled = true;
+  try {
+    const result = await storyMessage<{ reply?: string; error?: string }>('SUPPORT_CHAT', {
+      body: {
+        messages: supportChatHistory,
+        ui_language: UI_LANGUAGES.find((l) => l.code === uiLanguage)?.name,
+        provider: providerInfo.provider,
+        model_name: providerInfo.modelName,
+        api_key: providerInfo.apiKey,
+        base_url: providerInfo.baseUrl,
+      },
+    });
+    if (!result.reply) {
+      supportChatErrorEl.textContent = `${t(uiLanguage, 'errorSupportChatFailed')}: ${result.error ?? ''}`;
+      supportChatErrorEl.style.display = '';
+      return;
+    }
+    supportChatHistory.push({ role: 'assistant', content: result.reply });
+    saveSupportChatHistory();
+    renderSupportChatMessages();
+  } catch (e) {
+    supportChatErrorEl.textContent = e instanceof Error ? e.message : String(e);
+    supportChatErrorEl.style.display = '';
+  } finally {
+    pending.remove();
+    supportChatSendBtn.disabled = false;
+    supportChatInput.disabled = false;
+    supportChatInput.focus();
+  }
+}
+
+async function initSupportChat(): Promise<void> {
+  await loadSupportChatHistory();
+  helpChatBtn.addEventListener('click', openSupportChat);
+  supportChatCloseBtn.addEventListener('click', closeSupportChat);
+  supportChatClearBtn.addEventListener('click', () => { void handleSupportChatClear(); });
+  supportChatSendBtn.addEventListener('click', () => { void handleSupportChatSend(); });
+  supportChatInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      void handleSupportChatSend();
+    }
+  });
 }
 
 void init();
