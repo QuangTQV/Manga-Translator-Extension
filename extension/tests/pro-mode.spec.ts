@@ -115,6 +115,60 @@ test.describe('CBZ export', () => {
   });
 });
 
+test.describe('PDF export', () => {
+  // Hand-rolled PDF (see content-script/index.ts:buildPdf) rather than a
+  // library — verified with a real PDF parser (pdf-lib, a test-only
+  // devDependency), not just a magic-byte/regex check, so a structural
+  // mistake in the hand-written xref/object syntax would actually be caught.
+  test('exports a real, parseable PDF with one page per translated image', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    await context.route('**/translate', async (route) => {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [],
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(SINGLE_URL);
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    await mangaPage.bringToFront();
+    await popup.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await expect(mangaPage.locator('#mt-toast')).toBeVisible({ timeout: 5_000 });
+
+    const [download] = await Promise.all([
+      mangaPage.waitForEvent('download'),
+      clickScannerAction(mangaPage, cdp, 'export-pdf'),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^manga-translated-\d{4}-\d{2}-\d{2}\.pdf$/);
+
+    const downloadPath = await download.path();
+    const fs = await import('node:fs');
+    const { PDFDocument } = await import('pdf-lib');
+    const pdfDoc = await PDFDocument.load(fs.readFileSync(downloadPath!));
+    expect(pdfDoc.getPageCount()).toBe(1);
+    // The fixture is a 1x1 PNG re-encoded to JPEG — the page's MediaBox uses
+    // the image's pixel dimensions directly as points (see buildPdf).
+    const { width, height } = pdfDoc.getPage(0).getSize();
+    expect(width).toBe(1);
+    expect(height).toBe(1);
+  });
+});
+
 test.describe('Story DB import/export', () => {
   test('Export downloads a JSON file with the current form contents, and Import fills the form back in', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();

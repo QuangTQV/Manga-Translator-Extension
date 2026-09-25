@@ -99,6 +99,7 @@ const EN_MESSAGES = {
   exportPageTitle: 'Download this translated page',
   btnExportAll: 'Export',
   btnExportCbz: 'Export CBZ',
+  btnExportPdf: 'Export PDF',
   exportingStatus: 'Exporting...',
   exportNoneTranslated: 'No translated pages to export yet',
   exportDone: 'Exported {count} page(s)',
@@ -200,6 +201,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     exportPageTitle: 'Tai anh da dich cua trang nay',
     btnExportAll: 'Xuat',
     btnExportCbz: 'Xuat CBZ',
+    btnExportPdf: 'Xuat PDF',
     exportingStatus: 'Dang xuat...',
     exportNoneTranslated: 'Chua co trang nao da dich de xuat',
     exportDone: 'Da xuat {count} trang',
@@ -296,6 +298,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     exportPageTitle: '下载这一页的翻译图片',
     btnExportAll: '导出',
     btnExportCbz: '导出 CBZ',
+    btnExportPdf: '导出 PDF',
     exportingStatus: '正在导出...',
     exportNoneTranslated: '还没有已翻译的页面可导出',
     exportDone: '已导出 {count} 页',
@@ -392,6 +395,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     exportPageTitle: 'このページの翻訳画像をダウンロード',
     btnExportAll: 'エクスポート',
     btnExportCbz: 'CBZをエクスポート',
+    btnExportPdf: 'PDFをエクスポート',
     exportingStatus: 'エクスポート中...',
     exportNoneTranslated: 'まだエクスポートできる翻訳済みページがありません',
     exportDone: '{count} ページをエクスポートしました',
@@ -488,6 +492,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     exportPageTitle: '이 페이지의 번역 이미지 다운로드',
     btnExportAll: '내보내기',
     btnExportCbz: 'CBZ 내보내기',
+    btnExportPdf: 'PDF 내보내기',
     exportingStatus: '내보내는 중...',
     exportNoneTranslated: '아직 내보낼 번역된 페이지가 없습니다',
     exportDone: '{count}개 페이지를 내보냈습니다',
@@ -756,6 +761,139 @@ async function exportTranslatedPagesAsCbz(
   const blob = await zip.generateAsync({ type: 'blob' });
   const stamp = new Date().toISOString().slice(0, 10);
   triggerDownload(blob, `manga-translated-${stamp}.cbz`);
+}
+
+// PDF export hand-rolls the file rather than pulling in a PDF-writing
+// library (jsPDF etc. would meaningfully bloat this content-script bundle)
+// — a "one JPEG image per page" PDF is a well-documented minimal structure:
+// a Catalog, a Pages tree, and per page a Page/Contents/Image-XObject triple
+// with the JPEG bytes embedded as-is via /Filter /DCTDecode (JPEG's own
+// encoding is already what that filter expects, no re-encoding needed once
+// we have JPEG bytes). Each page's MediaBox uses the image's pixel
+// dimensions directly as points (1:1) — physically nonsensical for
+// printing, but irrelevant for on-screen reading and the same convention
+// plenty of small scan-to-PDF tools use.
+function base64ToBytes(base64: string): Uint8Array {
+  const byteChars = atob(base64);
+  const bytes = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+  return bytes;
+}
+
+function asciiBytes(s: string): Uint8Array {
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  return bytes;
+}
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+  return out;
+}
+
+interface PdfImagePage {
+  width: number;
+  height: number;
+  jpegBytes: Uint8Array;
+}
+
+// Re-encodes a translated page (PNG, per the backend's rendering output) to
+// JPEG via a canvas — PDF has no native filter for PNG's compression, but
+// DCTDecode accepts a JPEG byte stream unmodified.
+async function pngBase64ToJpegPage(base64Png: string, quality = 0.92): Promise<PdfImagePage> {
+  const blob = base64ToBlob(base64Png, 'image/png');
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+  const jpegBytes = base64ToBytes(dataUrl.slice(dataUrl.indexOf(',') + 1));
+  return { width: canvas.width, height: canvas.height, jpegBytes };
+}
+
+function buildPdf(pages: PdfImagePage[]): Uint8Array {
+  const pagesObjNum = 2;
+  const totalObjects = 2 + pages.length * 3; // 1 Catalog + 1 Pages + (Page, Contents, Image) per page
+  const objBytes = new Map<number, Uint8Array>();
+
+  objBytes.set(1, asciiBytes(`1 0 obj\n<< /Type /Catalog /Pages ${pagesObjNum} 0 R >>\nendobj\n`));
+
+  const pageObjNums = pages.map((_, i) => 3 + i * 3);
+  objBytes.set(pagesObjNum, asciiBytes(
+    `${pagesObjNum} 0 obj\n<< /Type /Pages /Kids [${pageObjNums.map((n) => `${n} 0 R`).join(' ')}] /Count ${pages.length} >>\nendobj\n`,
+  ));
+
+  pages.forEach((page, i) => {
+    const pageNum = 3 + i * 3;
+    const contentsNum = pageNum + 1;
+    const imageNum = pageNum + 2;
+    const { width, height, jpegBytes } = page;
+
+    objBytes.set(pageNum, asciiBytes(
+      `${pageNum} 0 obj\n<< /Type /Page /Parent ${pagesObjNum} 0 R /MediaBox [0 0 ${width} ${height}] `
+      + `/Resources << /XObject << /Im0 ${imageNum} 0 R >> >> /Contents ${contentsNum} 0 R >>\nendobj\n`,
+    ));
+
+    const contentStream = `q ${width} 0 0 ${height} 0 0 cm /Im0 Do Q`;
+    objBytes.set(contentsNum, asciiBytes(
+      `${contentsNum} 0 obj\n<< /Length ${contentStream.length} >>\nstream\n${contentStream}\nendstream\nendobj\n`,
+    ));
+
+    objBytes.set(imageNum, concatBytes([
+      asciiBytes(
+        `${imageNum} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} `
+        + `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`,
+      ),
+      jpegBytes,
+      asciiBytes('\nendstream\nendobj\n'),
+    ]));
+  });
+
+  const header = asciiBytes('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'); // binary-content marker comment, standard practice
+  const parts: Uint8Array[] = [header];
+  const offsets: number[] = new Array(totalObjects + 1).fill(0);
+  let cursor = header.length;
+  for (let objNum = 1; objNum <= totalObjects; objNum++) {
+    const bytes = objBytes.get(objNum)!;
+    offsets[objNum] = cursor;
+    parts.push(bytes);
+    cursor += bytes.length;
+  }
+
+  const xrefOffset = cursor;
+  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
+  for (let objNum = 1; objNum <= totalObjects; objNum++) {
+    xref += `${String(offsets[objNum]).padStart(10, '0')} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  parts.push(asciiBytes(xref), asciiBytes(trailer));
+
+  return concatBytes(parts);
+}
+
+async function exportTranslatedPagesAsPdf(
+  entries: Array<{ url: string; base64: string; index: number }>,
+  onStatus?: (text: string) => void,
+): Promise<void> {
+  const sorted = [...entries].sort((a, b) => a.index - b.index);
+  onStatus?.(tr('exportingStatus'));
+  const pages: PdfImagePage[] = [];
+  for (const { base64 } of sorted) {
+    pages.push(await pngBase64ToJpegPage(base64));
+  }
+  const pdfBytes = buildPdf(pages);
+  // TS's DOM lib types Uint8Array.buffer as ArrayBuffer | SharedArrayBuffer even
+  // though it's always a plain ArrayBuffer here (never backed by a
+  // SharedArrayBuffer) — a safe, narrow cast rather than loosening Blob's own types.
+  const blob = new Blob([pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) as ArrayBuffer], { type: 'application/pdf' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  triggerDownload(blob, `manga-translated-${stamp}.pdf`);
 }
 
 const AUTO_VIEWPORT_MARGIN_PX = 250;
@@ -3801,6 +3939,7 @@ function buildScannerHTML(): string {
         <button class="mts-btn-toolbar" data-action="fix-selected" disabled>${tr('btnFixSelected')}</button>
         <button class="mts-btn-toolbar" data-action="export-all">${tr('btnExportAll')}</button>
         <button class="mts-btn-toolbar" data-action="export-cbz">${tr('btnExportCbz')}</button>
+        <button class="mts-btn-toolbar" data-action="export-pdf">${tr('btnExportPdf')}</button>
         <button class="mts-btn-primary mts-btn-translate" data-action="translate" disabled>${tr('translate')}</button>
       </div>
       <div class="mts-grid">${cards}</div>
@@ -4070,6 +4209,28 @@ function bindScanner(shadow: ShadowRoot): void {
     } finally {
       exportCbzBtn.textContent = originalLabel;
       exportCbzBtn.disabled = false;
+    }
+  });
+
+  const exportPdfBtn = shadow.querySelector<HTMLButtonElement>('[data-action="export-pdf"]')!;
+  exportPdfBtn.addEventListener('click', async () => {
+    const entries = currentPages
+      .filter((p) => translatedCache.has(p.rawUrl))
+      .map((p) => ({ url: p.rawUrl, base64: translatedCache.get(p.rawUrl)!, index: p.index }));
+
+    if (entries.length === 0) {
+      toast(tr('exportNoneTranslated'), true);
+      return;
+    }
+
+    exportPdfBtn.disabled = true;
+    const originalLabel = exportPdfBtn.textContent;
+    try {
+      await exportTranslatedPagesAsPdf(entries, (status) => { exportPdfBtn.textContent = status; });
+      toast(tr('exportDone', { count: entries.length }));
+    } finally {
+      exportPdfBtn.textContent = originalLabel;
+      exportPdfBtn.disabled = false;
     }
   });
 
