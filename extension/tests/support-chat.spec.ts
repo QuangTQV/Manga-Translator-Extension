@@ -113,4 +113,27 @@ test.describe('popup — Help chat', () => {
     await popup.locator('#btn-close-support-chat').click();
     await expect(popup.locator('#support-chat-overlay')).not.toHaveClass(/open/);
   });
+
+  test('the input textarea takes up most of the row, not squeezed by the Send button', async ({ context, extensionId }) => {
+    // Regression check: #btn-send-support-chat reuses .btn-add-fallback
+    // (defaults to width:100%) — an earlier version only set flex:0 0 auto
+    // on it, which doesn't cancel a separately-specified width, so the
+    // button claimed the whole row and squeezed the textarea down to its
+    // min-content width (a narrow column, each word wrapping onto its own
+    // line — the exact same bug class already fixed once for the Story DB
+    // draft-discard button; see MEMORY.md's flex/width lesson).
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.locator('#btn-help-chat').click();
+
+    const textareaBox = await popup.locator('#support-chat-input').boundingBox();
+    const sendBtnBox = await popup.locator('#btn-send-support-chat').boundingBox();
+    expect(textareaBox).toBeTruthy();
+    expect(sendBtnBox).toBeTruthy();
+    expect(textareaBox!.width).toBeGreaterThan(sendBtnBox!.width);
+  });
 });
