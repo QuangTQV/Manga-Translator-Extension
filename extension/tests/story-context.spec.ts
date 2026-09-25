@@ -382,7 +382,7 @@ test.describe('popup — Story DB tab', () => {
       if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
       await seedSettings(
         worker,
-        baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1', config: { useStoryReferenceImages: enabled } }),
+        baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1', config: { useStoryDb: true, useStoryReferenceImages: enabled } }),
         firstKeyMatches('seed-key'),
       );
       let capturedBody: any = null;
@@ -423,6 +423,48 @@ test.describe('popup — Story DB tab', () => {
       else expect(capturedBody.story_use_reference_images).toBeUndefined();
     });
   }
+
+  test('the Translate tab\'s "Use Story DB" toggle is off by default, and no story_id is sent while it\'s off even with a story selected', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    // Note: no useStoryDb in the seed — defaults to unset/false.
+    await seedSettings(
+      worker,
+      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }),
+      firstKeyMatches('seed-key'),
+    );
+    let capturedBody: any = null;
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(TEST_SITE_URL);
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await expect(popup.locator('#f-use-story-db')).not.toBeChecked();
+
+    await mangaPage.bringToFront();
+    await popup.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await mangaPage.waitForTimeout(2000);
+
+    expect(capturedBody).toBeTruthy();
+    expect(capturedBody.story_id).toBeUndefined();
+  });
 });
 
 test.describe('popup — Story DB update from description', () => {
@@ -791,7 +833,7 @@ test.describe('popup — Story DB per-site mismatch warning', () => {
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
     await seedSettings(
       worker,
-      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-2' }),
+      baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-2', config: { useStoryDb: true } }),
       firstKeyMatches('seed-key'),
     );
     // Simulate a prior real translate on this domain having recorded story-1

@@ -165,9 +165,16 @@ export interface TranslateConfig {
   sendFullPageContext: boolean;
   imageDetail: string;
   outsideTextEnabled: boolean;
+  // Master switch for applying the Story DB (character DB/relationships/
+  // glossary from the currently selected story on the CSDL truyện tab) to
+  // translation — off by default so merely having a story selected there
+  // doesn't silently affect every request; the user opts in explicitly here.
+  // Also gates useStoryReferenceImages below (it would have no effect, and
+  // be confusing, with this off). Ignored when logged out, same as story_id.
+  useStoryDb?: boolean;
   // Also send each Story DB character's reference images (character sheets)
   // to the model with every page — more tokens, and only takes effect with
-  // LLM OCR. Ignored when logged out / no story is selected.
+  // LLM OCR. Ignored when logged out / no story is selected / useStoryDb is off.
   useStoryReferenceImages?: boolean;
   // Economy mode: at request time, forces image detail low and turns off the
   // full-page and previous-page context and Story DB reference images, and
