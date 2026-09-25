@@ -121,3 +121,83 @@ def test_continuity_notes_alone_still_produce_the_story_context_header():
     prompt = _format_story_context(config)
     assert "## STORY CONTEXT (character database)" in prompt
     assert "### Continuity Notes" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Placement: the Story DB block lives at the end of the (cacheable) system
+# prompt, not in the per-page prompt — see _append_story_context_to_system.
+# ---------------------------------------------------------------------------
+def _capture_calls(monkeypatch, config, images, previous_texts=None):
+    import core.services.translation as tr
+
+    calls = []
+
+    def fake_call(cfg, parts, prompt, *args, **kwargs):
+        calls.append({"prompt": prompt, "system": kwargs.get("system_prompt")})
+        return "\n".join(f"{i + 1}: hello || xin chào" for i in range(len(images)))
+
+    monkeypatch.setattr(tr, "_call_llm_endpoint", fake_call)
+    monkeypatch.setattr(tr, "get_cache", lambda: type("C", (), {
+        "get_translation_cache_key": lambda *a, **k: None,
+        "get_translation": lambda *a, **k: (None, None),
+        "set_translation": lambda *a, **k: None,
+    })())
+    try:
+        tr.call_translation_api_batch(
+            config, images, "", ["image/png"] * len(images), "image/png", [{} for _ in images],
+            previous_context_texts=previous_texts,
+        )
+    except Exception:
+        pass  # response parsing isn't under test — only what was sent
+    return calls
+
+
+def _story_config(**overrides):
+    return TranslationConfig(
+        provider="Google", google_api_key="k", model_name="gemini-2.5-flash",
+        translation_mode="one-step", ocr_method="LLM", send_full_page_context=False,
+        story_characters=[StoryCharacterConfig(id="c1", name="Aoi", gender="female", role="protagonist")],
+        story_glossary=[StoryGlossaryTermConfig(term="Kage-ryu", translation="Shadow Style")],
+        special_instructions="Aoi speaks formally.",
+        **overrides,
+    )
+
+
+def test_story_db_goes_in_the_system_prompt_not_the_per_page_prompt(monkeypatch):
+    calls = _capture_calls(monkeypatch, _story_config(), ["AAAA"])
+    call = calls[-1]
+    assert "- Aoi (female; protagonist)" in call["system"]
+    assert "- Kage-ryu -> Shadow Style" in call["system"]
+    assert "follow the STORY NOTES" in call["system"]
+    # Only a pointer stays per-page; the per-page STORY NOTES still come next to the task.
+    assert "- Aoi (female; protagonist)" not in call["prompt"]
+    assert "in your system instructions under \"STORY CONTEXT\"" in call["prompt"]
+    assert "## STORY NOTES\nAoi speaks formally." in call["prompt"]
+
+
+def test_story_db_is_appended_after_the_generic_rules(monkeypatch):
+    # Generic rules first = a prefix shared across every story, still
+    # cacheable when the user switches stories.
+    calls = _capture_calls(monkeypatch, _story_config(), ["AAAA"])
+    system = calls[-1]["system"]
+    assert system.index("## STORY CONTEXT (character database)") > len(system) // 2
+
+
+def test_system_prompt_is_identical_across_different_pages(monkeypatch):
+    # The whole point of the move: page content and previous-page text
+    # differ, the system prompt (which carries the Story DB) must not.
+    page_a = _capture_calls(monkeypatch, _story_config(), ["AAAA"], previous_texts=[["こんにちは"]])[-1]
+    page_b = _capture_calls(monkeypatch, _story_config(), ["BBBB", "CCCC"], previous_texts=[["さようなら"]])[-1]
+    assert page_a["prompt"] != page_b["prompt"]
+    assert "- Aoi (female; protagonist)" in page_a["system"]
+    assert page_a["system"] == page_b["system"]
+
+
+def test_no_story_db_leaves_the_system_prompt_and_pointer_out(monkeypatch):
+    config = TranslationConfig(
+        provider="Google", google_api_key="k", model_name="gemini-2.5-flash",
+        translation_mode="one-step", ocr_method="LLM", send_full_page_context=False,
+    )
+    call = _capture_calls(monkeypatch, config, ["AAAA"])[-1]
+    assert "STORY CONTEXT" not in call["system"]
+    assert "STORY CONTEXT" not in call["prompt"]
