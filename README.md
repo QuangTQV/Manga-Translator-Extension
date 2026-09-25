@@ -82,7 +82,7 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Bubble translation | Detects speech bubbles, removes original text, translates, and renders text back into the image. |
 | Hover-to-magnify | Hover a translated bubble for a sharp zoomed-in crop with the original text as a caption, so you can cross-check the translation at a glance. A per-page button toggles between the translated and original image. |
 | Story Notes | Per-story notes (glossary, character relationships, tone) the model always follows; a "Suggest" button drafts them from your already-scanned pages. Separate from General LLM Instructions, which apply to every story. |
-| Story DB (optional, requires login) | A persistent, per-story character database — characters (name/gender/role/voice, plus an optional avatar and up to 2 reference images), relationships, a glossary of fixed term translations, and continuity notes — synced to your account and applied automatically when translating that story. An interactive **relationship map** (drag characters around, click to highlight, "Connect" two characters to add a relationship) shows the cast at a glance, and its layout is saved. Reference images are sent to the model only if you turn on "Send reference images to the AI". Unsaved edits survive closing the popup — they're restored automatically next time, with a banner to discard them if you'd rather start over. Undo/Redo (Ctrl+Z / Ctrl+Shift+Z) step back and forth through your edits. Manage it from the `Story DB` tab. |
+| Story DB (optional, requires login) | A persistent, per-story character database — characters (name/gender/role/voice, plus an optional avatar and up to 2 reference images), relationships, a glossary of fixed term translations, and continuity notes — synced to your account. **Applied to translation only when the `Use Story DB` toggle on the `Translate` tab is on (off by default)** — selecting a story in the `Story DB` tab alone isn't enough. An interactive **relationship map** (drag characters around, click to highlight, "Connect" two characters to add a relationship) shows the cast at a glance, and its layout is saved. Reference images are sent to the model only if you turn on "Send reference images to the AI". Unsaved edits survive closing the popup — they're restored automatically next time, with a banner to discard them if you'd rather start over. Undo/Redo (Ctrl+Z / Ctrl+Shift+Z) step back and forth through your edits. Since the active story is one setting shared across every site (not per-page), a warning banner appears if the current page's site was last translated with a different story than the one now selected — it never switches anything for you, just flags a possible mismatch. Manage it from the `Story DB` tab. |
 | Update Story DB from a description | In the Story DB tab, type what just happened in the story ("Chapter 39: the villain turns out to be Akira's childhood friend Hina, so they switch from casual to hostile pronouns") and click **✨ Update from description** — AI drafts the character/relationship changes and a continuity note for you to review; nothing is saved until you click Save story. Optionally turn on **Search the internet for this story** to have it look the story up and fill in developments up to the point your description mentions — unlike Suggest Notes, this is allowed to include spoilers, since tracking them is the point. |
 | Story DB import/export | Export/Import JSON buttons in the Story DB tab, to back up a story or hand it to a co-translator/editor without re-typing it. |
 | Vietnamese pronoun accuracy | For Vietnamese output, automatically reasons about each speaker pair's relationship (age, gender, family ties, honorifics like "onii-chan") to pick the correct pronouns (anh/em, tao/mày, etc.) and keeps them consistent across a page — no configuration needed. |
@@ -95,11 +95,13 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 | Font settings | Pick which font pack renders translated text, and the min/max font size range, from the Translate tab — drop your own font pack (a folder of .ttf/.otf files) into `backend/fonts/` to see it in the list. A text-sharpness (supersampling) control sits in the new **Pro** tab, alongside other advanced/translator-focused controls kept out of the main tabs. |
 | Web app (no extension) | Translate raw image files you have on disk — nothing needs to already be on a web page. Start the backend, open `http://localhost:7677/app` in any browser, drag files in, translate, export ZIP/CBZ. Deliberately minimal (no Story DB/rotation/manual tools) — for the full toolkit, use the extension. |
 | Export | Download a single translated page as a PNG from its overlay, or export every translated page in the scanner as a ZIP in one click. |
-| CBZ export | "Export CBZ" next to the ZIP export button — same pages, but numbered by scan order so a CBZ reader pages through them correctly (a plain ZIP export's filenames come from the source URLs, which don't always sort into reading order). |
+| CBZ / PDF export | "Export CBZ" and "Export PDF" next to the ZIP export button — same pages, but numbered by scan order so they page through correctly (a plain ZIP export's filenames come from the source URLs, which don't always sort into reading order). |
 | Translation progress | A small animated marker shows which page(s) are actively being translated right now, distinct from ones still waiting in the auto-translate queue. |
 | Retry indicator | A page that fails auto-translate 3 times in a row shows a small red badge — click it to retry immediately. |
 | Outside-bubble text | Handles SFX/narration outside speech bubbles with lightweight cleanup by default. |
 | Optional Flux | Lets advanced users download Flux Klein 4B for heavier inpainting without shipping it in the default release. |
+| Help chat | Click the **?** button in the popup header to ask how to install, configure, or use the extension — answered by your own configured LLM, grounded in this project's own docs (not a canned FAQ, and not free — it uses your API key/quota like any other AI feature here). Conversation is kept locally across popup reopens; clear it any time. |
+| Resizable popup | Drag the popup's bottom-right corner to resize it (works most of the time — Chrome's own popup sizing can occasionally fight it), or click **⤢** in the header to open the same UI in a normal, freely resizable window instead. |
 | Provider support | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter, and OpenAI-compatible endpoints. |
 | UI languages | English by default, plus Vietnamese, Chinese, Japanese, and Korean. |
 | Translation languages | Source/target fields accept ~58 suggested languages (Japanese, Korean, Chinese, Spanish, French, Arabic, ...) via autocomplete, or any language name you type — the backend has no allowlist. |
@@ -181,7 +183,7 @@ Open the extension popup and use the tabs:
 
 | Tab | Options |
 | --- | --- |
-| `Translate` | Source language, target language, outside-bubble text toggle, Previous-page context, Context Memory, Story Notes (with "Suggest" to draft them). |
+| `Translate` | Source language, target language, `Use Story DB` toggle (off by default — required for the Story DB tab's data to actually affect translation), outside-bubble text toggle, Previous-page context, Context Memory, Story Notes (with "Suggest" to draft them). |
 | `LLM Config` | Provider, Base URL, model, API key (+ optional backup keys and fallback providers, tried in order on rate limit), temperature, Top P, Top K, full-page context, General LLM Instructions. |
 | `Config` | Extension UI language and backend URL. |
 | `Account` | Sign in with email or Google to use optional per-account features (Story DB); also where a centrally-hosted deployment's users see their plan/usage. |
@@ -317,6 +319,14 @@ A: Start `.\start-backend.bat`, wait until the backend is ready, then confirm th
 **Q: Why are some manga images not detected?**
 
 A: Wait for the reader page to finish lazy-loading, then run Scan & Translate Page again. If the site loads pages only while scrolling, scroll through the chapter once or use Auto-collect in the scanner.
+
+**Q: I set up a Story DB and selected it, but the translation doesn't seem to use it. Why?**
+
+A: Turn on the `Use Story DB` toggle on the `Translate` tab — selecting a story on the `Story DB` tab alone doesn't apply it, by design, so you can translate a one-off page without it even while a story is selected.
+
+**Q: I don't understand how to set something up — is there help built in?**
+
+A: Click the **?** button in the popup header to ask a question. It's answered by your own configured LLM using this project's own documentation, not a canned script — so it costs a small amount of your API quota, same as any other AI feature here.
 
 ## Troubleshooting
 

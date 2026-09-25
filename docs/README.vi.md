@@ -82,7 +82,7 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Dịch bubble | Nhận diện bubble thoại, xóa chữ gốc, dịch và render chữ lại vào ảnh. |
 | Di chuột phóng to | Di chuột vào 1 bubble đã dịch để xem bản crop phóng to sắc nét kèm chú thích là chữ gốc, giúp đối chiếu bản dịch nhanh chóng. Có nút chuyển qua lại giữa ảnh đã dịch và ảnh gốc cho từng trang. |
 | Ghi chú truyện | Ghi chú riêng cho từng truyện (glossary, quan hệ nhân vật, văn phong) mà model luôn tuân theo; có nút "Suggest" để tự soạn nháp từ các trang đã quét. Khác với Chỉ dẫn chung cho LLM (áp dụng mọi truyện). |
-| CSDL truyện (tùy chọn, cần đăng nhập) | Cơ sở dữ liệu nhân vật riêng cho từng truyện — nhân vật (tên/giới tính/vai trò/giọng điệu, kèm ảnh đại diện và tối đa 2 ảnh tham chiếu tùy chọn), mối quan hệ, thuật ngữ dịch cố định, và ghi chú diễn biến — đồng bộ theo tài khoản, dùng tự động khi dịch đúng truyện đó. **Sơ đồ quan hệ** tương tác (kéo nhân vật, bấm để làm nổi bật, nút "Nối" để thêm quan hệ giữa hai nhân vật) giúp nhìn cả dàn nhân vật, vị trí được lưu lại. Ảnh tham chiếu chỉ gửi cho AI khi bạn bật "Gửi ảnh tham chiếu cho AI". Chỉnh sửa chưa lưu vẫn còn sau khi đóng popup — tự khôi phục lại lần sau, có nút bỏ nếu muốn làm lại từ đầu. Có Undo/Redo (Ctrl+Z / Ctrl+Shift+Z) để lùi/tiến qua các thay đổi. Quản lý ở tab `Story DB`. |
+| CSDL truyện (tùy chọn, cần đăng nhập) | Cơ sở dữ liệu nhân vật riêng cho từng truyện — nhân vật (tên/giới tính/vai trò/giọng điệu, kèm ảnh đại diện và tối đa 2 ảnh tham chiếu tùy chọn), mối quan hệ, thuật ngữ dịch cố định, và ghi chú diễn biến — đồng bộ theo tài khoản. **Chỉ áp dụng khi dịch nếu bật công tắc `Dùng CSDL truyện` ở tab `Translate` (mặc định tắt)** — chỉ chọn truyện ở tab `Story DB` thôi là chưa đủ. **Sơ đồ quan hệ** tương tác (kéo nhân vật, bấm để làm nổi bật, nút "Nối" để thêm quan hệ giữa hai nhân vật) giúp nhìn cả dàn nhân vật, vị trí được lưu lại. Ảnh tham chiếu chỉ gửi cho AI khi bạn bật "Gửi ảnh tham chiếu cho AI". Chỉnh sửa chưa lưu vẫn còn sau khi đóng popup — tự khôi phục lại lần sau, có nút bỏ nếu muốn làm lại từ đầu. Có Undo/Redo (Ctrl+Z / Ctrl+Shift+Z) để lùi/tiến qua các thay đổi. Vì truyện đang chọn là 1 cài đặt dùng chung cho mọi trang web (không theo từng trang), sẽ có banner cảnh báo nếu trang web hiện tại lần trước được dịch bằng truyện khác với truyện đang chọn — không tự đổi gì cả, chỉ nhắc bạn kiểm tra lại. Quản lý ở tab `Story DB`. |
 | Cập nhật CSDL truyện từ mô tả | Trong tab Story DB, gõ điều vừa xảy ra trong truyện ("Chương 39, kẻ thù hoá ra là Hina, bạn thân thuở nhỏ của Akira, nên hai người chuyển sang xưng hô ta/ngươi") rồi bấm **✨ Cập nhật từ mô tả** — AI soạn sẵn thay đổi nhân vật/quan hệ và một ghi chú diễn biến để bạn xem lại; chưa lưu gì cho tới khi bấm Save story. Có thể bật **Tìm kiếm trên mạng cho truyện này** để AI tự tra cứu và bổ sung diễn biến đến đúng điểm mô tả của bạn — khác với Suggest Notes, cái này được phép có spoiler vì mục đích chính là theo dõi diễn biến. |
 | Xuất/nhập Story DB | Nút Export/Import JSON ngay trong tab Story DB, để sao lưu 1 truyện hoặc đưa cho người dịch/edit khác mà không cần gõ lại. |
 | Xưng hô tiếng Việt chính xác | Khi dịch sang tiếng Việt, tự động suy luận quan hệ từng cặp nhân vật (tuổi, giới tính, quan hệ gia đình, honorific như "onii-chan") để chọn đúng xưng hô (anh/em, tao/mày...) và giữ nhất quán suốt trang — không cần cấu hình gì. |
@@ -95,11 +95,13 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Cài đặt font | Chọn font pack vẽ chữ đã dịch, và khoảng cỡ chữ nhỏ nhất/lớn nhất, ngay trong tab Translate — bỏ font pack của bạn (thư mục chứa file .ttf/.otf) vào `backend/fonts/` để thấy trong danh sách. Có thêm ô chỉnh độ nét chữ (supersampling) trong tab **Pro** mới, cùng các cài đặt nâng cao khác để riêng khỏi các tab chính. |
 | Web app (không cần extension) | Dịch file ảnh có sẵn trên máy — không cần ảnh đó đã có trên trang web nào. Chạy backend rồi mở `http://localhost:7677/app` bằng trình duyệt bất kỳ, kéo file vào, dịch, xuất ZIP/CBZ. Cố tình tối giản (không có Story DB/xoay vòng key/công cụ thủ công) — cần đầy đủ tính năng thì dùng extension. |
 | Xuất file | Tải PNG 1 trang đã dịch ngay trên overlay, hoặc xuất toàn bộ trang đã dịch trong trình quét thành 1 file ZIP chỉ với 1 lần bấm. |
-| Xuất CBZ | Nút "Export CBZ" cạnh nút xuất ZIP — cùng các trang đó, nhưng đánh số theo thứ tự quét để trình đọc CBZ lật đúng thứ tự (tên file của ZIP thường theo URL gốc, không phải lúc nào cũng đúng thứ tự đọc). |
+| Xuất CBZ / PDF | Nút "Export CBZ" và "Export PDF" cạnh nút xuất ZIP — cùng các trang đó, nhưng đánh số theo thứ tự quét để lật đúng thứ tự (tên file của ZIP thường theo URL gốc, không phải lúc nào cũng đúng thứ tự đọc). |
 | Đang dịch | Một dấu hiệu nhỏ động (3 chấm nhấp nhô) hiện ở trang nào đang thật sự được dịch, phân biệt với các trang còn đang chờ trong hàng đợi auto-translate. |
 | Báo hiệu thử lại | Trang bị lỗi auto-translate 3 lần liên tiếp sẽ hiện badge đỏ nhỏ — bấm vào để thử lại ngay. |
 | Chữ ngoài bubble | Xử lý SFX/lời dẫn ngoài bubble bằng cleanup nhẹ mặc định. |
 | Flux tùy chọn | Cho phép người dùng nâng cao tải Flux Klein 4B để inpainting nặng hơn mà không làm nặng release mặc định. |
+| Chatbot hỗ trợ | Bấm nút **?** ở header popup để hỏi về cách cài đặt, cấu hình hoặc sử dụng extension — được trả lời bởi chính LLM bạn đã cấu hình, dựa trên tài liệu thật của dự án (không phải FAQ dựng sẵn, và không miễn phí — tốn API key/quota của bạn như mọi tính năng AI khác). Lịch sử chat được lưu lại trên máy qua các lần mở popup; có thể xoá bất cứ lúc nào. |
+| Popup có thể resize | Kéo góc dưới-phải của popup để đổi kích cỡ (thường hoạt động tốt — đôi khi Chrome tự đo lại kích cỡ popup và có thể "cãi" lại việc kéo), hoặc bấm **⤢** ở header để mở cùng giao diện đó trong 1 cửa sổ bình thường, resize tự do. |
 | Provider | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter và endpoint OpenAI-compatible. |
 | Ngôn ngữ UI | Tiếng Anh mặc định, kèm tiếng Việt, tiếng Trung, tiếng Nhật và tiếng Hàn. |
 | Ngôn ngữ dịch | Ô nguồn/đích gợi ý sẵn khoảng 58 ngôn ngữ (Nhật, Hàn, Trung, Tây Ban Nha, Pháp, Ả Rập...) qua autocomplete, hoặc gõ tự do bất kỳ ngôn ngữ nào — backend không giới hạn danh sách. |
@@ -181,7 +183,7 @@ Mở popup extension và dùng các tab:
 
 | Tab | Tùy chọn |
 | --- | --- |
-| `Translate` | Ngôn ngữ nguồn, ngôn ngữ đích, bật/tắt chữ ngoài bubble, Previous-page context, Trí nhớ context, Ghi chú truyện (có nút "Suggest" để soạn nháp). |
+| `Translate` | Ngôn ngữ nguồn, ngôn ngữ đích, công tắc `Dùng CSDL truyện` (mặc định tắt — cần bật thì dữ liệu ở tab Story DB mới thực sự áp dụng khi dịch), bật/tắt chữ ngoài bubble, Previous-page context, Trí nhớ context, Ghi chú truyện (có nút "Suggest" để soạn nháp). |
 | `LLM Config` | Provider, Base URL, model, API key (+ key dự phòng và provider dự phòng tùy chọn, thử lần lượt khi bị rate limit), temperature, Top P, Top K, ngữ cảnh toàn trang, Chỉ dẫn chung cho LLM. |
 | `Config` | Ngôn ngữ giao diện extension và backend URL. |
 | `Account` | Đăng nhập bằng email hoặc Google để dùng các tính năng tùy chọn theo tài khoản (CSDL truyện); cũng là nơi người dùng backend hosted tập trung xem gói/mức dùng. |
@@ -317,6 +319,14 @@ A: Chạy `.\start-backend.bat`, chờ backend khởi động xong, rồi kiểm
 **Q: Vì sao một số ảnh manga không được tìm thấy?**
 
 A: Hãy chờ trang reader load xong rồi chạy Scan & Translate Page lại. Nếu website chỉ lazy-load ảnh khi cuộn, hãy cuộn qua chapter một lần hoặc dùng Auto-collect trong scanner.
+
+**Q: Tôi đã tạo Story DB và chọn truyện rồi nhưng bản dịch không thấy áp dụng, vì sao?**
+
+A: Hãy bật công tắc `Dùng CSDL truyện` ở tab `Translate` — chỉ chọn truyện ở tab `Story DB` thôi thì chưa áp dụng, cố tình thiết kế vậy để bạn vẫn dịch được 1 trang lẻ mà không cần Story DB kể cả khi đang chọn sẵn 1 truyện.
+
+**Q: Tôi không hiểu cách cấu hình cái gì đó — có hỗ trợ trong extension không?**
+
+A: Bấm nút **?** ở header popup để hỏi trực tiếp. Câu trả lời do chính LLM bạn cấu hình trả lời, dựa trên tài liệu thật của dự án chứ không phải kịch bản dựng sẵn — nên sẽ tốn 1 chút API quota của bạn, giống mọi tính năng AI khác ở đây.
 
 ## Khắc Phục Sự Cố
 
