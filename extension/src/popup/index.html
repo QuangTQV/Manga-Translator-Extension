@@ -85,6 +85,29 @@
       border: 1px solid rgba(59,130,246,0.12); border-bottom-left-radius: 3px;
     }
     .support-chat-msg.pending { color: #6b7fa8; font-style: italic; }
+    /* Assistant replies are rendered Markdown (popup/markdown.ts) — block
+       elements supply their own spacing, so drop pre-wrap here. */
+    .support-chat-msg.md { white-space: normal; }
+    .support-chat-msg.md > :first-child { margin-top: 0; }
+    .support-chat-msg.md > :last-child { margin-bottom: 0; }
+    .support-chat-msg.md p { margin: 0 0 8px; }
+    .support-chat-msg.md h4 { margin: 10px 0 6px; font-size: 12.5px; font-weight: 700; color: #f1f5ff; }
+    .support-chat-msg.md ul, .support-chat-msg.md ol { margin: 0 0 8px; padding-left: 18px; }
+    .support-chat-msg.md ul ul, .support-chat-msg.md ul ol, .support-chat-msg.md ol ul, .support-chat-msg.md ol ol { margin: 4px 0 2px; }
+    .support-chat-msg.md li { margin: 3px 0; }
+    .support-chat-msg.md li::marker { color: #60a5fa; }
+    .support-chat-msg.md strong { color: #f1f5ff; font-weight: 700; }
+    .support-chat-msg.md code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+      background: rgba(59,130,246,0.14); border-radius: 4px; padding: 1px 4px;
+    }
+    .support-chat-msg.md pre {
+      margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; overflow-x: auto;
+      background: rgba(8,14,28,0.9); border: 1px solid rgba(59,130,246,0.12);
+    }
+    .support-chat-msg.md pre code { background: none; padding: 0; white-space: pre; }
+    .support-chat-msg.md a { color: #60a5fa; }
+    .support-chat-msg.md hr { border: none; border-top: 1px solid rgba(59,130,246,0.18); margin: 8px 0; }
     .support-chat-error { font-size: 11px; color: #f87171; padding: 0 16px 8px; flex: 0 0 auto; }
     .support-chat-input-row {
       display: flex; gap: 8px; align-items: flex-end; padding: 10px 16px; border-top: 1px solid rgba(59,130,246,0.15); flex: 0 0 auto;
@@ -149,6 +172,10 @@
     }
     .textarea { resize: none; min-height: 54px; font-family: inherit; line-height: 1.4; transition: min-height 0.15s; }
     .textarea-expanded { min-height: 260px; resize: vertical; }
+    /* Story DB free-text fields: one line tall when short, growing with the
+       text (Chrome's native field-sizing, no JS resize needed) instead of a
+       single-line input that hides everything past its width. */
+    .textarea-auto { field-sizing: content; min-height: 0; max-height: 180px; overflow-y: auto; resize: none; transition: none; }
     .llm-fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .model-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .header-buttons { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }

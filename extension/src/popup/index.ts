@@ -2,6 +2,7 @@ import { fileToDataUrl } from './image-utils.js';
 import { initRelationshipGraph } from './relationship-graph.js';
 import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig, type StoryCharacter, type StoryRelationship, type StoryGlossaryTerm, type StoryContinuityNote, type StoryDetail, type StorySummary } from '../shared/types.js';
 import { UI_LANGUAGES, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
+import { renderMarkdown } from './markdown.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
 
@@ -2174,17 +2175,9 @@ function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
   }
   genderField.value = data?.gender ?? 'unknown';
 
-  const roleField = document.createElement('input');
-  roleField.className = 'input sc-role';
-  roleField.type = 'text';
-  roleField.placeholder = t(uiLanguage, 'placeholderCharacterRole');
-  roleField.value = data?.role ?? '';
+  const roleField = createAutoGrowField('sc-role', 'placeholderCharacterRole', data?.role ?? '');
 
-  const voiceField = document.createElement('input');
-  voiceField.className = 'input sc-voice';
-  voiceField.type = 'text';
-  voiceField.placeholder = t(uiLanguage, 'placeholderCharacterVoice');
-  voiceField.value = data?.voice_notes ?? '';
+  const voiceField = createAutoGrowField('sc-voice', 'placeholderCharacterVoice', data?.voice_notes ?? '');
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
@@ -2317,6 +2310,18 @@ function createCharacterAssets(row: HTMLDivElement): HTMLDivElement {
   return box;
 }
 
+// Story DB free-text fields (role, voice notes, relationship, notes): a
+// textarea that starts one line tall and grows with its content (see
+// .textarea-auto) — a single-line input hid everything past its width.
+function createAutoGrowField(className: string, placeholderKey: I18nKey, value: string): HTMLTextAreaElement {
+  const field = document.createElement('textarea');
+  field.className = `textarea textarea-auto ${className}`;
+  field.rows = 1;
+  field.placeholder = t(uiLanguage, placeholderKey);
+  field.value = value;
+  return field;
+}
+
 function createStoryRelationshipRow(data?: StoryRelationship): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'story-rel-row';
@@ -2326,17 +2331,9 @@ function createStoryRelationshipRow(data?: StoryRelationship): HTMLDivElement {
   const charBSelect = document.createElement('select');
   charBSelect.className = 'select sr-char-b';
 
-  const relationField = document.createElement('input');
-  relationField.className = 'input sr-relation';
-  relationField.type = 'text';
-  relationField.placeholder = t(uiLanguage, 'placeholderRelationSurface');
-  relationField.value = data?.surface_relation ?? '';
+  const relationField = createAutoGrowField('sr-relation', 'placeholderRelationSurface', data?.surface_relation ?? '');
 
-  const notesField = document.createElement('input');
-  notesField.className = 'input sr-notes';
-  notesField.type = 'text';
-  notesField.placeholder = t(uiLanguage, 'placeholderRelationNotes');
-  notesField.value = data?.address_notes ?? '';
+  const notesField = createAutoGrowField('sr-notes', 'placeholderRelationNotes', data?.address_notes ?? '');
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
@@ -2372,11 +2369,7 @@ function createStoryGlossaryRow(data?: StoryGlossaryTerm): HTMLDivElement {
   translationField.placeholder = t(uiLanguage, 'placeholderGlossaryTranslation');
   translationField.value = data?.translation ?? '';
 
-  const notesField = document.createElement('input');
-  notesField.className = 'input sg-notes';
-  notesField.type = 'text';
-  notesField.placeholder = t(uiLanguage, 'placeholderGlossaryNotes');
-  notesField.value = data?.notes ?? '';
+  const notesField = createAutoGrowField('sg-notes', 'placeholderGlossaryNotes', data?.notes ?? '');
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
@@ -2395,16 +2388,7 @@ function createStoryContinuityNoteRow(data?: StoryContinuityNote): HTMLDivElemen
   const row = document.createElement('div');
   row.className = 'story-continuity-note-row';
 
-  // A textarea, not a single-line input — continuity notes are often a full
-  // sentence or two (e.g. "Ch.39: the villain turns out to be Akira's
-  // childhood friend Hina..."), which a single-line input just clips/scrolls
-  // horizontally instead of showing.
-  const textField = document.createElement('textarea');
-  textField.className = 'textarea scn-text';
-  textField.rows = 2;
-  textField.style.resize = 'vertical';
-  textField.placeholder = t(uiLanguage, 'placeholderContinuityNoteText');
-  textField.value = data?.text ?? '';
+  const textField = createAutoGrowField('scn-text', 'placeholderContinuityNoteText', data?.text ?? '');
 
   const sourceField = document.createElement('input');
   sourceField.className = 'input scn-source';
@@ -2484,8 +2468,8 @@ function collectStoryCharacters(): StoryCharacter[] {
     const name = row.querySelector<HTMLInputElement>('.sc-name')?.value.trim() ?? '';
     if (!name) continue;
     const gender = row.querySelector<HTMLSelectElement>('.sc-gender')?.value || 'unknown';
-    const role = row.querySelector<HTMLInputElement>('.sc-role')?.value.trim() || undefined;
-    const voiceNotes = row.querySelector<HTMLInputElement>('.sc-voice')?.value.trim() || undefined;
+    const role = row.querySelector<HTMLTextAreaElement>('.sc-role')?.value.trim() || undefined;
+    const voiceNotes = row.querySelector<HTMLTextAreaElement>('.sc-voice')?.value.trim() || undefined;
     const x = row.dataset.x !== undefined ? Number(row.dataset.x) : undefined;
     const y = row.dataset.y !== undefined ? Number(row.dataset.y) : undefined;
     const refs = readRowRefs(row);
@@ -2499,9 +2483,9 @@ function collectStoryRelationships(): StoryRelationship[] {
   for (const row of Array.from(storyRelationshipsList.querySelectorAll<HTMLDivElement>('.story-rel-row'))) {
     const characterAId = row.querySelector<HTMLSelectElement>('.sr-char-a')?.value ?? '';
     const characterBId = row.querySelector<HTMLSelectElement>('.sr-char-b')?.value ?? '';
-    const surfaceRelation = row.querySelector<HTMLInputElement>('.sr-relation')?.value.trim() ?? '';
+    const surfaceRelation = row.querySelector<HTMLTextAreaElement>('.sr-relation')?.value.trim() ?? '';
     if (!characterAId || !characterBId || !surfaceRelation) continue;
-    const addressNotes = row.querySelector<HTMLInputElement>('.sr-notes')?.value.trim() || undefined;
+    const addressNotes = row.querySelector<HTMLTextAreaElement>('.sr-notes')?.value.trim() || undefined;
     out.push({
       id: crypto.randomUUID(), character_a_id: characterAId, character_b_id: characterBId,
       surface_relation: surfaceRelation, address_notes: addressNotes,
@@ -2516,7 +2500,7 @@ function collectStoryGlossary(): StoryGlossaryTerm[] {
     const term = row.querySelector<HTMLInputElement>('.sg-term')?.value.trim() ?? '';
     const translation = row.querySelector<HTMLInputElement>('.sg-translation')?.value.trim() ?? '';
     if (!term || !translation) continue;
-    const notes = row.querySelector<HTMLInputElement>('.sg-notes')?.value.trim() || undefined;
+    const notes = row.querySelector<HTMLTextAreaElement>('.sg-notes')?.value.trim() || undefined;
     out.push({ id: crypto.randomUUID(), term, translation, notes });
   }
   return out;
@@ -2574,7 +2558,12 @@ function renderSupportChatMessages(): void {
     for (const entry of supportChatHistory) {
       const bubble = document.createElement('div');
       bubble.className = `support-chat-msg ${entry.role}`;
-      bubble.textContent = entry.content;
+      if (entry.role === 'assistant') {
+        bubble.classList.add('md');
+        bubble.appendChild(renderMarkdown(entry.content));
+      } else {
+        bubble.textContent = entry.content;
+      }
       supportChatMessagesEl.appendChild(bubble);
     }
   }

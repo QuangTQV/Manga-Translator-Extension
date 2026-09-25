@@ -114,6 +114,47 @@ test.describe('popup — Help chat', () => {
     await expect(popup.locator('#support-chat-overlay')).not.toHaveClass(/open/);
   });
 
+  test('assistant replies render Markdown (bold, nested lists) and never interpret HTML', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    // The shape a real model reply came back in (repo owner's screenshot),
+    // plus an HTML payload that must stay inert text.
+    const reply = [
+      'Để bản dịch hay hơn, thử trong **LLM Config** và **Translate**:',
+      '',
+      '- **Đổi sang model tốt hơn**: chất lượng phụ thuộc model.',
+      '- **Bật / tăng ngữ cảnh**:',
+      '  - **Previous-page context**: gửi chữ trang trước.',
+      '  - **Context Memory**: tóm tắt các trang trước.',
+      '- Dùng `Story DB` nếu có đăng nhập.',
+      '',
+      '<img src=x onerror="document.body.dataset.pwned=1">',
+    ].join('\n');
+    await context.route('**/support-chat', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ reply }) });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.locator('#btn-help-chat').click();
+    await popup.locator('#support-chat-input').fill('làm sao để bản dịch hay hơn');
+    await popup.locator('#btn-send-support-chat').click();
+
+    const answer = popup.locator('.support-chat-msg.assistant').last();
+    await expect(answer.locator('strong').first()).toHaveText('LLM Config');
+    await expect(answer.locator('ul > li')).toHaveCount(5); // 3 top-level + 2 nested
+    await expect(answer.locator('ul ul > li')).toHaveCount(2);
+    await expect(answer.locator('ul ul > li').first()).toContainText('Previous-page context');
+    await expect(answer.locator('code')).toHaveText('Story DB');
+    await expect(answer).not.toContainText('**');
+
+    await expect(answer.locator('img')).toHaveCount(0);
+    await expect(answer).toContainText('<img src=x');
+    expect(await popup.evaluate(() => document.body.dataset.pwned)).toBeUndefined();
+  });
+
   test('the input textarea takes up most of the row, not squeezed by the Send button', async ({ context, extensionId }) => {
     // Regression check: #btn-send-support-chat reuses .btn-add-fallback
     // (defaults to width:100%) — an earlier version only set flex:0 0 auto
