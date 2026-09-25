@@ -294,6 +294,41 @@ class SuggestInstructionsResponse(BaseModel):
     suggestion: str
 
 
+class SupportChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class SupportChatRequest(BaseModel):
+    """A user's question about how to install/configure/use this project,
+    answered by the caller's own configured LLM grounded in the project's
+    own README/setup docs (see
+    core/services/translation.py:generate_support_chat_reply). Stateless —
+    the whole conversation is sent every time; nothing is stored
+    server-side (the extension keeps history in chrome.storage.local)."""
+
+    messages: List[SupportChatMessage]
+    ui_language: Optional[str] = None  # e.g. "Vietnamese" — answer in this language when set
+    provider: str
+    base_url: Optional[str] = None
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    temperature: float = 0.2
+    top_p: float = 0.95
+    top_k: int = 40
+    reasoning_effort: Optional[str] = None
+    backup_api_keys: Optional[List[str]] = None
+    fallback_providers: Optional[List[FallbackProviderConfig]] = None
+    rotation_strategy: Optional[str] = None
+    cooldown_seconds: Optional[float] = None
+    api_key_weight: Optional[float] = None
+    backup_api_key_weights: Optional[List[float]] = None
+
+
+class SupportChatResponse(BaseModel):
+    reply: str
+
+
 class TestApiKeyRequest(BaseModel):
     """One (provider, model, key) combo to ping — the popup's "Test API
     Key" button, not part of the translate flow."""

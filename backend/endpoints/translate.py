@@ -18,6 +18,8 @@ from schemas import (
     StoryRelationship,
     SuggestInstructionsRequest,
     SuggestInstructionsResponse,
+    SupportChatRequest,
+    SupportChatResponse,
     TestApiKeyRequest,
     TestApiKeyResponse,
     TranslateBatchItem,
@@ -27,7 +29,11 @@ from schemas import (
     TranslateRequest,
     TranslateResponse,
 )
-from core.services.translation import generate_character_notes, test_api_key
+from core.services.translation import (
+    generate_character_notes,
+    generate_support_chat_reply,
+    test_api_key,
+)
 from pipeline.wrapper import (
     _build_config,
     build_test_key_config,
@@ -581,6 +587,69 @@ async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(
         raise HTTPException(status_code=500, detail=f"Failed to generate suggestion: {e}")
 
     return SuggestInstructionsResponse(suggestion=suggestion)
+
+
+@router.post("/support-chat", response_model=SupportChatResponse)
+async def support_chat(req: SupportChatRequest, account=Depends(verify_token)) -> SupportChatResponse:
+    """Answer a user's question about installing/configuring/using this
+    project, using the caller's own configured LLM grounded in the
+    project's README/setup docs (generate_support_chat_reply). Stateless
+    and gated by verify_token like /suggest-instructions and
+    /stories/update-from-description — a one-off LLM-cost-incurring
+    helper, not part of the translate pipeline, with no account-scoped
+    row to protect.
+    """
+    _apply_shared_llm_config(req, account)
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="No message provided.")
+
+    config = _build_config(
+        input_language="Auto",
+        output_language="English",
+        provider=req.provider,
+        base_url=req.base_url,
+        model_name=req.model_name,
+        api_key=req.api_key,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        top_k=req.top_k,
+        max_tokens=None,
+        translation_mode="one-step",
+        ocr_method="LLM",
+        reasoning_effort=req.reasoning_effort,
+        special_instructions=None,
+        backup_api_keys=req.backup_api_keys,
+        fallback_providers=(
+            [fb.model_dump() for fb in req.fallback_providers]
+            if req.fallback_providers
+            else None
+        ),
+        rotation_strategy=req.rotation_strategy,
+        cooldown_seconds=req.cooldown_seconds,
+        api_key_weight=req.api_key_weight,
+        backup_api_key_weights=req.backup_api_key_weights,
+        font_dir=None,
+        max_font_size=16,
+        min_font_size=8,
+        supersampling_factor=1,
+        send_full_page_context=False,
+        image_detail="auto",
+        outside_text_enabled=False,
+        models_dir=settings.models_dir,
+        fonts_base_dir=settings.fonts_base_dir,
+    )
+
+    try:
+        reply = await asyncio.to_thread(
+            generate_support_chat_reply,
+            config.translation,
+            [m.model_dump() for m in req.messages],
+            ui_language=req.ui_language,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Support chat failed: {e}")
+
+    return SupportChatResponse(reply=reply)
 
 
 @router.post("/test-key", response_model=TestApiKeyResponse)

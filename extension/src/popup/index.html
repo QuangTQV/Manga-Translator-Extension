@@ -54,6 +54,43 @@
       overflow: auto; resize: none;
     }
     .standalone-window #btn-open-window { display: none; }
+    /* Help chat: a full overlay over the popup (position:fixed is relative
+       to the viewport, not body's scroll position, so this stays put
+       regardless of which tab/scroll offset was active underneath — same
+       reasoning as #popup-status above). */
+    #support-chat-overlay {
+      display: none; position: fixed; inset: 0; z-index: 40;
+      background: #080c18; flex-direction: column;
+    }
+    #support-chat-overlay.open { display: flex; }
+    .support-chat-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 12px 16px; border-bottom: 1px solid rgba(59,130,246,0.15); flex: 0 0 auto;
+    }
+    .support-chat-title { font-size: 13px; font-weight: 700; color: #dde6f5; }
+    .support-chat-header-actions { display: flex; align-items: center; gap: 6px; }
+    .support-chat-messages {
+      flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .support-chat-empty { font-size: 11px; color: #6b7fa8; line-height: 1.5; }
+    .support-chat-msg {
+      max-width: 88%; padding: 8px 11px; border-radius: 10px; font-size: 12px; line-height: 1.5;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .support-chat-msg.user {
+      align-self: flex-end; background: rgba(59,130,246,0.25); color: #dde6f5; border-bottom-right-radius: 3px;
+    }
+    .support-chat-msg.assistant {
+      align-self: flex-start; background: rgba(15,25,48,0.9); color: #dde6f5;
+      border: 1px solid rgba(59,130,246,0.12); border-bottom-left-radius: 3px;
+    }
+    .support-chat-msg.pending { color: #6b7fa8; font-style: italic; }
+    .support-chat-error { font-size: 11px; color: #f87171; padding: 0 16px 8px; flex: 0 0 auto; }
+    .support-chat-input-row {
+      display: flex; gap: 8px; align-items: flex-end; padding: 10px 16px; border-top: 1px solid rgba(59,130,246,0.15); flex: 0 0 auto;
+    }
+    .support-chat-input-row .textarea { flex: 1; resize: none; }
+    #btn-send-support-chat { flex: 0 0 auto; }
     .tabs {
       /* 6 tabs at 3-per-row (not the old 4) so the second row is a full,
          evenly-spaced row instead of 2 tabs left-stranded under a row of 4. */
@@ -300,6 +337,7 @@
         <div class="popup-subtitle" data-i18n="popupSubtitle">Scan page · Select · Translate</div>
       </div>
       <div class="popup-header-actions">
+        <button id="btn-help-chat" class="btn-open-window" type="button">?</button>
         <button id="btn-open-window" class="btn-open-window" type="button">⤢</button>
         <span id="health-badge" class="health-badge" data-i18n="healthChecking">Checking</span>
       </div>
@@ -785,6 +823,24 @@
       <span>Backend v2.0</span>
       <span>·</span>
       <span id="backend-url-display">-</span>
+    </div>
+  </div>
+
+  <div id="support-chat-overlay">
+    <div class="support-chat-header">
+      <div class="support-chat-title" data-i18n="supportChatTitle">Help</div>
+      <div class="support-chat-header-actions">
+        <button id="btn-clear-support-chat" class="btn-open-window" type="button" data-i18n="btnClearSupportChat">Clear</button>
+        <button id="btn-close-support-chat" class="btn-open-window" type="button">✕</button>
+      </div>
+    </div>
+    <div id="support-chat-messages" class="support-chat-messages">
+      <div class="support-chat-empty" data-i18n="supportChatEmptyHint">Ask anything about installing, configuring, or using this extension — answered using the project's own documentation and your own configured LLM (uses your API key/quota, same as any other AI feature here).</div>
+    </div>
+    <div id="support-chat-error" class="support-chat-error" style="display:none"></div>
+    <div class="support-chat-input-row">
+      <textarea id="support-chat-input" class="textarea" rows="2" data-i18n-placeholder="placeholderSupportChat" placeholder="Type a question..."></textarea>
+      <button id="btn-send-support-chat" class="btn-add-fallback" type="button" data-i18n="btnSendSupportChat">Send</button>
     </div>
   </div>
 

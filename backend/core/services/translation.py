@@ -3164,6 +3164,91 @@ recording (e.g. it's just a correction or a style note).
     return result.strip()
 
 
+# Support chat is grounded in these two docs (not docs/API.md — that's
+# backend-API-integration reference, not the typical "how do I use this"
+# question this feature targets) rather than a real RAG/embeddings setup:
+# combined they're small enough (a few hundred lines) to just send in full
+# on every request, and the model reads/answers cross-lingually regardless
+# of which language the docs themselves are written in.
+_SUPPORT_CHAT_DOC_PATHS = ("README.md", "docs/HUONG-DAN-CHAY.md")
+_support_chat_docs_cache: Optional[str] = None
+
+
+def _load_support_chat_docs() -> str:
+    global _support_chat_docs_cache
+    if _support_chat_docs_cache is not None:
+        return _support_chat_docs_cache
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]  # .../backend/core/services/translation.py -> repo root
+    sections = []
+    for rel_path in _SUPPORT_CHAT_DOC_PATHS:
+        doc_path = repo_root / rel_path
+        if doc_path.is_file():
+            sections.append(f"### {rel_path}\n{doc_path.read_text(encoding='utf-8')}")
+    _support_chat_docs_cache = "\n\n".join(sections)
+    return _support_chat_docs_cache
+
+
+def generate_support_chat_reply(
+    config: TranslationConfig,
+    messages: List[Dict[str, str]],
+    ui_language: Optional[str] = None,
+    debug: bool = False,
+) -> str:
+    """One-off LLM call answering a user's question about installing,
+    configuring, or using this project — grounded in the project's own
+    README/setup docs (_load_support_chat_docs) so it doesn't just
+    hallucinate generic advice for a question the docs actually answer.
+
+    Stateless like generate_story_update/generate_character_notes: the
+    whole conversation is sent every time (flattened into one prompt_text,
+    since _call_llm_endpoint takes a single prompt string rather than a
+    native multi-turn message array — every other call site through this
+    choke point is single-shot too, so this reuses that shape rather than
+    changing the shared function's signature), and nothing is persisted
+    server-side.
+    """
+    if not messages or not (messages[-1].get("content") or "").strip():
+        raise TranslationError("No message provided.")
+
+    docs = _load_support_chat_docs()
+    system_prompt = (
+        "You are a support assistant embedded in the MangaTranslator Extension "
+        "(a browser extension + local backend that translates manga/comic pages "
+        "using the user's own LLM provider API key). Answer the user's question "
+        "about how to install, configure, or use this project, based on the "
+        "documentation provided below. If the documentation doesn't cover "
+        "something, say so plainly rather than guessing or inventing steps. "
+        "Keep answers concise and practical — concrete steps, not a lecture."
+        + (f" Answer in {ui_language}." if ui_language else "")
+    )
+
+    conversation = "\n\n".join(
+        f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')}"
+        for m in messages
+    )
+
+    prompt_text = f"""
+## PROJECT DOCUMENTATION
+{docs}
+
+## CONVERSATION SO FAR
+{conversation}
+
+## TASK
+Reply to the user's latest message above, as the Assistant, using the documentation as your source of truth.
+"""
+
+    result = _call_llm_endpoint(
+        config, [], prompt_text, debug=debug, system_prompt=system_prompt,
+        call_type="support_chat",
+    )
+    if not result or not result.strip():
+        raise TranslationError("Empty response from support chat.")
+    return result.strip()
+
+
 def prepare_bubble_images_for_translation(
     bubble_data: List[Dict[str, Any]],
     original_cv_image: np.ndarray,

@@ -209,6 +209,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'SUPPORT_CHAT') {
+      const { body } = message as { type: string; body: SupportChatBody };
+      try {
+        const result = await fetchSupportChat(body);
+        sendResponse(result);
+      } catch (error) {
+        sendResponse({ error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
     if (message.type === 'TEST_API_KEY') {
       const { body } = message as { type: string; body: TestApiKeyBody };
       sendResponse(await fetchTestApiKey(body));
@@ -480,6 +491,58 @@ async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { error: `Suggest instructions error: ${msg}` };
+  }
+}
+
+interface SupportChatBody {
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  ui_language?: string;
+  provider: string;
+  base_url?: string;
+  model_name?: string;
+  api_key?: string;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  reasoning_effort?: string;
+  backup_api_keys?: string[];
+  fallback_providers?: { provider: string; model_name?: string; api_keys: string[]; base_url?: string; reasoning_effort?: string }[];
+  rotation_strategy?: string;
+  cooldown_seconds?: number;
+}
+
+// Popup "?" help chat (see popup/index.ts:initSupportChat) — a one-off LLM
+// helper answering "how do I use this project" questions, same gating
+// family as /suggest-instructions (no account/login required for the
+// normal self-hosted setup).
+async function fetchSupportChat(body: SupportChatBody): Promise<{ reply?: string; error?: string }> {
+  const settings = await getSettings();
+  if (settings.extensionEnabled === false) {
+    return { error: 'Extension is disabled' };
+  }
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const endpoint = `${backendUrl.replace(/\/$/, '')}/support-chat`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+        else detail = JSON.stringify(errBody).slice(0, 200);
+      } catch { /* ignore */ }
+      return { error: `Support chat failed: ${detail}` };
+    }
+    const data = (await res.json()) as { reply: string };
+    return { reply: data.reply };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `Support chat error: ${msg}` };
   }
 }
 
