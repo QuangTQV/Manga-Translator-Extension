@@ -1980,6 +1980,23 @@ def _format_story_context(config: TranslationConfig) -> str:
     return "\n## STORY CONTEXT (character database)\n" + "\n\n".join(blocks) + "\n"
 
 
+def _append_story_context_to_system(system_prompt: str, story_context_block: str) -> str:
+    """Append the Story DB block to a translation system prompt. Appended
+    last so the generic rules above it stay a shared cacheable prefix even
+    across different stories. The request's own STORY NOTES (special
+    instructions) still come later, in the per-page prompt next to the
+    task, and take precedence over this database when they conflict — the
+    same priority order as before this block moved here."""
+    if not story_context_block:
+        return system_prompt
+    return (
+        system_prompt.rstrip()
+        + "\n"
+        + story_context_block
+        + "\nIf the request's STORY NOTES contradict this database, follow the STORY NOTES.\n"
+    )
+
+
 def _format_special_instructions(config: TranslationConfig) -> str:
     """Format the user's instruction fields for prompts.
 
@@ -2529,7 +2546,23 @@ def call_translation_api_batch(
             f"{pronoun_map_reuse_note}"
         )
 
-    story_context_section = _format_story_context(config)
+    # The Story DB block only depends on the selected story, not on the page,
+    # so it goes at the END of the system prompt (see
+    # _append_story_context_to_system): identical for every page of a run,
+    # which lets Anthropic's explicit cache_control and OpenAI/Gemini/
+    # DeepSeek's automatic prefix caching reuse it instead of billing it in
+    # full on every page. It used to sit in the per-page prompt, after the
+    # previous-page text, where nothing after the first varying byte can be
+    # cached. Only a short pointer (plus the reference-image note, which
+    # describes this request's own attached images) stays per-page.
+    story_context_block = _format_story_context(config)
+    story_context_section = ""
+    if story_context_block:
+        story_context_section = (
+            "\n## STORY CONTEXT\nThis story's character database, relationships, glossary "
+            "and continuity notes are in your system instructions under \"STORY CONTEXT\" — "
+            "apply them to every line on this page.\n"
+        )
     if story_reference_images:
         story_context_section += _format_story_reference_note(story_reference_images)
 
@@ -2739,6 +2772,7 @@ The target language is {output_language}. Use the appropriate translation approa
                     input_language=input_language,
                     context_memory_enabled=config.context_memory_enabled,
                 )
+                translation_system = _append_story_context_to_system(translation_system, story_context_block)
             translation_response_text = _call_llm_endpoint(
                 config,
                 translation_parts,
@@ -2847,6 +2881,7 @@ For each image, you must perform two steps:
                 input_language=input_language,
                 context_memory_enabled=config.context_memory_enabled,
             )
+            one_step_system = _append_story_context_to_system(one_step_system, story_context_block)
             response_text = _call_llm_endpoint(
                 config,
                 base_parts,
