@@ -59,7 +59,7 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
         id: row.dataset.charId ?? '',
         name,
         gender: row.querySelector<HTMLSelectElement>('.sc-gender')?.value || 'unknown',
-        role: row.querySelector<HTMLInputElement>('.sc-role')?.value.trim() ?? '',
+        role: row.querySelector<HTMLTextAreaElement>('.sc-role')?.value.trim() ?? '',
         avatar: row.dataset.avatar ?? '',
         row,
       });
@@ -75,8 +75,8 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
       if (!a || !b || a === b || !ids.has(a) || !ids.has(b)) continue;
       edges.push({
         row, a, b,
-        label: row.querySelector<HTMLInputElement>('.sr-relation')?.value.trim() ?? '',
-        notes: row.querySelector<HTMLInputElement>('.sr-notes')?.value.trim() ?? '',
+        label: row.querySelector<HTMLTextAreaElement>('.sr-relation')?.value.trim() ?? '',
+        notes: row.querySelector<HTMLTextAreaElement>('.sr-notes')?.value.trim() ?? '',
       });
     }
     return edges;
@@ -180,7 +180,7 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
         text.addEventListener('click', (ev) => {
           ev.stopPropagation();
           e.row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          e.row.querySelector<HTMLInputElement>('.sr-relation')?.focus();
+          e.row.querySelector<HTMLTextAreaElement>('.sr-relation')?.focus();
         });
         labelLayer.appendChild(text);
       }
@@ -286,7 +286,7 @@ export function initRelationshipGraph(opts: RelationshipGraphOptions): { refresh
       connectBtn.classList.remove('active');
       render();
       row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      row.querySelector<HTMLInputElement>('.sr-relation')?.focus();
+      row.querySelector<HTMLTextAreaElement>('.sr-relation')?.focus();
       return;
     }
     if (dragMoved) { dragMoved = false; return; }

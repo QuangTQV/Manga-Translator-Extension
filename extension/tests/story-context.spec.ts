@@ -75,6 +75,49 @@ test.describe('popup — Story DB tab', () => {
     await expect(noteText).toHaveJSProperty('tagName', 'TEXTAREA');
   });
 
+  test('long free-text fields (role, voice, relationship, notes) grow with their content instead of clipping to one line', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'story-1', name: 'My Manga', updated_at: 0,
+          characters: [{ id: 'c1', name: 'Aoi', gender: 'female', role: null, voice_notes: null, x: null, y: null, avatar: null, reference_images: [] }],
+          relationships: [], glossary: [], continuity_notes: [], continuity_notes_enabled: false,
+        }),
+      });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('.story-char-row')).toHaveCount(1, { timeout: 5_000 });
+
+    for (const cls of ['.sc-role', '.sc-voice']) {
+      await expect(popup.locator(`.story-char-row ${cls}`)).toHaveJSProperty('tagName', 'TEXTAREA');
+    }
+    await popup.locator('#btn-add-story-relationship').click();
+    await popup.locator('#btn-add-story-glossary').click();
+    for (const cls of ['.sr-relation', '.sr-notes', '.sg-notes']) {
+      await expect(popup.locator(cls)).toHaveJSProperty('tagName', 'TEXTAREA');
+    }
+
+    const relation = popup.locator('.story-rel-row .sr-relation');
+    const shortHeight = (await relation.boundingBox())!.height;
+    await relation.fill('Quan hệ đặc biệt với công chúa Beltrum, vượt quá mức xã giao thông thường, được cả triều đình ngầm thừa nhận từ nhiều năm nay.');
+    const longHeight = (await relation.boundingBox())!.height;
+    // Empty: one line, about as tall as a normal input. Long: wraps and grows.
+    expect(shortHeight).toBeLessThan(45);
+    expect(longHeight).toBeGreaterThan(shortHeight * 1.8);
+  });
+
   test('creating a story, adding a character/relationship/term, and saving sends the whole payload', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
