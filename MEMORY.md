@@ -265,6 +265,14 @@ Repo owner asked how the extension knows which story to apply when scanning a pa
 
 **Also learned while writing that same test:** `chrome.runtime.sendMessage()` cannot be used to send a message from a script back to a listener registered in that *exact same* script/context — Chrome rejects it with "Could not establish connection. Receiving end does not exist." A test needing to invoke a background message handler directly (bypassing the real content-script/popup UI that would normally trigger it) must send from a *different* extension context (e.g. a popup page opened via `context.newPage()`), not from `worker.evaluate()` itself.
 
+### Follow-up (2026-09-25): explicit "Use Story DB" master toggle on the Translate tab, off by default
+
+Repo owner's next ask, after the mismatch-warning above: merely having a story *selected* in the Story DB tab silently applied it to every translate request (as long as logged in) — there was no way to translate a one-off page without it, short of going into the Story DB tab and clearing the selection. Added `TranslateConfig.useStoryDb?: boolean` (unset behaves as off, same convention as `useStoryReferenceImages`) with a toggle-row on the **Translate** tab (`#f-use-story-db`, i18n `labelUseStoryDb`/`hintUseStoryDb`), wired through the same generic autosave loop as every other toggle.
+
+- `content-script/index.ts:buildTranslateRequest()` — both `story_id` and `story_use_reference_images` now additionally require `settings.config.useStoryDb`, not just `accountToken` + `activeStoryId`.
+- `popup/index.ts:checkStoryDomainMismatch()` — also gated on the toggle (`if (!currentStoryId || !useStoryDbToggle.checked) return;`): with the master switch off, no `story_id` is ever sent regardless of domain, so a stale domain→story mapping has nothing to warn about. Re-checked live via a `change` listener on the toggle itself (not just on story-select changes), since it lives on a different tab than the warning banner.
+- Existing tests that seeded `activeStoryId` and expected `story_id` on the wire (`story_use_reference_images` on/off cases) had to add `useStoryDb: true` to their seed — they were implicitly relying on the pre-this-change behavior of "selected = applied." Added a new explicit test for the opposite case: `activeStoryId` set, `useStoryDb` left unset → `story_id` is `undefined` on the real request and the toggle shows unchecked by default.
+
 ## Roadmap: popup UX polish — items 1-4 DONE (2026-09-24), items 5-6 still open
 
 Raised by the repo owner after a general "tối ưu trải nghiệm người dùng" (optimize UX) ask. Items 1-4 assessed as not requiring the "don't clutter the main screen" restructuring the repo owner has twice deferred (see the Professional-Translation UI-placement decision further up this file) — in-place polish, not a redesign — built on branch `feature/popup-ux-polish`, merged to `main` 2026-09-24.

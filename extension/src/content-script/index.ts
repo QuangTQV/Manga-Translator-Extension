@@ -4310,10 +4310,13 @@ function buildTranslateRequest(
     fallback_providers: rotation.fallback_providers,
     rotation_strategy: settings.config.rotationStrategy,
     cooldown_seconds: settings.config.cooldownSeconds,
-    // Only sent when logged in — a no-op for the normal local/self-hosted
-    // setup, where accountToken is unset (see backend/auth.py:require_login).
-    story_id: settings.accountToken ? settings.activeStoryId || undefined : undefined,
-    story_use_reference_images: settings.accountToken && settings.activeStoryId && settings.config.useStoryReferenceImages ? true : undefined,
+    // Only sent when logged in AND the Translate tab's "Use Story DB" toggle
+    // is on (default off) — a no-op for the normal local/self-hosted setup,
+    // where accountToken is unset (see backend/auth.py:require_login), and
+    // also a no-op for a logged-in user who hasn't opted in, even if they do
+    // have a story selected on the CSDL truyện tab.
+    story_id: settings.accountToken && settings.config.useStoryDb ? settings.activeStoryId || undefined : undefined,
+    story_use_reference_images: settings.accountToken && settings.config.useStoryDb && settings.activeStoryId && settings.config.useStoryReferenceImages ? true : undefined,
   };
 }
 

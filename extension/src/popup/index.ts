@@ -24,6 +24,7 @@ const sourceInput = qs<HTMLInputElement>('f-source');
 const targetInput = qs<HTMLInputElement>('f-target');
 const sourceLanguageList = qs<HTMLDataListElement>('lang-source-list');
 const targetLanguageList = qs<HTMLDataListElement>('lang-target-list');
+const useStoryDbToggle = qs<HTMLInputElement>('f-use-story-db');
 const outsideTextToggle = qs<HTMLInputElement>('f-outside-text');
 const inpaintingMethodField = qs<HTMLDivElement>('inpainting-method-field');
 const inpaintingMethodSelect = qs<HTMLSelectElement>('f-inpainting-method');
@@ -387,6 +388,7 @@ async function loadAndBind(): Promise<void> {
   backendInput.value = settings.backendUrl;
   urlDisplay.textContent = settings.backendUrl.replace(/^https?:\/\//, '');
   renderLanguageSelects();
+  useStoryDbToggle.checked = settings.config.useStoryDb ?? false;
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   storyRefImagesToggle.checked = settings.config.useStoryReferenceImages ?? false;
   economyModeToggle.checked = settings.config.economyMode ?? false;
@@ -455,7 +457,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
+  for (const el of [backendInput, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -629,6 +631,7 @@ function bind(): void {
   ownerSaveBtn.addEventListener('click', () => { void handleOwnerSave(); });
 
   storySelect.addEventListener('change', () => { void handleStorySelectChange(); });
+  useStoryDbToggle.addEventListener('change', () => { void checkStoryDomainMismatch(storySelect.value); });
   storyNewBtn.addEventListener('click', () => { void handleStoryNew(); });
   addStoryCharacterBtn.addEventListener('click', () => { addStoryCharacterRow(); });
   addStoryRelationshipBtn.addEventListener('click', () => { addStoryRelationshipRow(); });
@@ -1175,6 +1178,7 @@ function collectAllSettings(): AppSettings {
       rotationStrategy: (rotationStrategySelect.value || 'round_robin') as TranslateConfig['rotationStrategy'],
       cooldownSeconds: Math.max(0, parseFloat(cooldownSecondsInput.value)) || 15,
       sendFullPageContext: contextToggle.checked,
+      useStoryDb: useStoryDbToggle.checked,
       outsideTextEnabled: outsideTextToggle.checked,
       useStoryReferenceImages: storyRefImagesToggle.checked,
       economyMode: economyModeToggle.checked,
@@ -1627,7 +1631,9 @@ const STORY_DOMAIN_MAP_KEY = 'mtStoryDomainMap';
 
 async function checkStoryDomainMismatch(currentStoryId: string): Promise<void> {
   storyDomainMismatchWarning.style.display = 'none';
-  if (!currentStoryId) return;
+  // Nothing to warn about if the Translate tab's "Use Story DB" toggle is
+  // off — no story_id is ever sent in that case, so no mismatch is possible.
+  if (!currentStoryId || !useStoryDbToggle.checked) return;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.url) return;
