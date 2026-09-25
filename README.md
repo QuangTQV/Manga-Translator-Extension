@@ -54,8 +54,8 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 
 | Popup controls | Page scanner |
 | --- | --- |
-| <img src="docs/assets/popup-preview.png" alt="MangaTranslator Extension popup" width="390"> | <img src="docs/assets/scanner-preview.png" alt="MangaTranslator Extension page scanner" width="720"> |
-| Source/target languages, Story DB, outside-bubble text and inpainting quality. The header shows backend status, the **?** help chat and **⤢** open-in-window. | Scan a chapter, preview detected pages, select only what you need, and translate pages in batch. |
+| <img src="docs/assets/popup-preview.png" alt="MangaTranslator Extension popup" width="390"><br><br><img src="docs/assets/popup-actions-preview.png" alt="Popup buttons: Scan & Translate Page, Select text area, Eraser, Auto-translate" width="390"> | <img src="docs/assets/scanner-preview.png" alt="MangaTranslator Extension page scanner" width="720"> |
+| Source/target languages, Story DB, outside-bubble text and inpainting quality. The header shows backend status, the **?** help chat and **⤢** open-in-window. Below the settings: scan the page, select a text area, erase, or start **Auto-translate**. | Scan a chapter, preview detected pages, select only what you need, and translate pages in batch. |
 
 ### Translation Result
 

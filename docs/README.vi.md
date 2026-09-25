@@ -46,8 +46,8 @@ MangaTranslator Extension được tạo cho người đọc muốn đọc truy�
 
 | Popup điều khiển | Trình quét trang |
 | --- | --- |
-| <img src="assets/popup-preview.png" alt="Popup MangaTranslator Extension" width="390"> | <img src="assets/scanner-preview.png" alt="Trinh quet trang MangaTranslator Extension" width="720"> |
-| Ngôn ngữ nguồn/đích, CSDL truyện, chữ ngoài bubble và chất lượng xoá chữ. Header hiện trạng thái backend, nút **?** để hỏi trợ giúp và **⤢** để mở cửa sổ riêng. | Quét chapter, xem trước các trang đã phát hiện, chọn đúng ảnh cần dịch và dịch hàng loạt. |
+| <img src="assets/popup-preview.png" alt="Popup MangaTranslator Extension" width="390"><br><br><img src="assets/popup-actions-preview.png" alt="Các nút trong popup: quét và dịch trang, chọn vùng chữ, xoá vùng chữ, tự động dịch" width="390"> | <img src="assets/scanner-preview.png" alt="Trinh quet trang MangaTranslator Extension" width="720"> |
+| Ngôn ngữ nguồn/đích, CSDL truyện, chữ ngoài bubble và chất lượng xoá chữ. Header hiện trạng thái backend, nút **?** để hỏi trợ giúp và **⤢** để mở cửa sổ riêng. Bên dưới phần cài đặt là các nút quét trang, chọn vùng chữ, xoá vùng chữ và **Tự động dịch**. | Quét chapter, xem trước các trang đã phát hiện, chọn đúng ảnh cần dịch và dịch hàng loạt. |
 
 ### Kết Quả Dịch
 

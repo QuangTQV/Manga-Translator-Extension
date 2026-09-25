@@ -6,7 +6,7 @@ import path from 'node:path';
 // Regenerates the popup/tool screenshots in docs/assets/ used by the READMEs.
 // Run from extension/ after `npm run build`:
 //   node scripts/readme-screenshots.mjs            # all
-//   node scripts/readme-screenshots.mjs storydb    # one of: translate | storydb | help | region | auto
+//   node scripts/readme-screenshots.mjs storydb    # one of: translate | actions | storydb | help | region | auto
 // The backend is fully mocked (healthy, logged in, an invented sample story),
 // so no backend, account or API key is needed.
 const EXT = path.resolve('dist');
@@ -111,6 +111,13 @@ const clip = async (p, fromSel, toSel, file, pad = 0, bottomPad = pad) => {
 if (!only || only === 'translate') {
   const p = await openPopup();
   await clip(p, '.popup-header', '#inpainting-method-field', `${OUT}/popup-preview.png`, 16, 4);
+  await p.close();
+}
+if (!only || only === 'actions') {
+  // The Translate tab's action buttons (Scan, Auto-translate, ...) sit below
+  // all its settings, so they get their own small shot.
+  const p = await openPopup();
+  await clip(p, '#btn-scan', '#btn-clear-cache', `${OUT}/popup-actions-preview.png`, 8, 8);
   await p.close();
 }
 if (!only || only === 'storydb') {

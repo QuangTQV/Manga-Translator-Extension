@@ -46,8 +46,8 @@ MangaTranslator Extension 面向想要连续阅读漫画的用户，而不是把
 
 | Popup 控制面板 | 页面扫描器 |
 | --- | --- |
-| <img src="assets/popup-preview.png" alt="MangaTranslator Extension popup" width="390"> | <img src="assets/scanner-preview.png" alt="MangaTranslator Extension page scanner" width="720"> |
-| 源语言/目标语言、故事数据库、气泡外文字和修复质量。顶部显示后端状态、**?** 帮助聊天和 **⤢** 在独立窗口打开。 | 扫描章节、预览检测到的页面、只选择需要翻译的图片并批量翻译。 |
+| <img src="assets/popup-preview.png" alt="MangaTranslator Extension popup" width="390"><br><br><img src="assets/popup-actions-preview.png" alt="弹窗按钮：扫描并翻译页面、框选文字区域、橡皮擦、自动翻译" width="390"> | <img src="assets/scanner-preview.png" alt="MangaTranslator Extension page scanner" width="720"> |
+| 源语言/目标语言、故事数据库、气泡外文字和修复质量。顶部显示后端状态、**?** 帮助聊天和 **⤢** 在独立窗口打开。设置下方是扫描页面、框选文字区域、橡皮擦和 **自动翻译** 按钮。 | 扫描章节、预览检测到的页面、只选择需要翻译的图片并批量翻译。 |
 
 ### 翻译效果
 
