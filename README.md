@@ -69,6 +69,19 @@ MangaTranslator Extension is built for people who want to keep reading, not copy
 - Translate more than bubbles: SFX, narration, captions, and other outside-bubble text can be handled too.
 - Stay lightweight by default: Flux Klein 4B is optional, so normal users do not need to download a workstation-sized package.
 
+### Auto-Translate As You Read
+
+<img src="docs/assets/auto-translate-preview.png" alt="A manga reader mid auto-translate: the first page translated with a bubble magnified over its Japanese original, the next page still translating" width="560">
+
+Click **Auto-translate** in the popup (or press **Alt+Shift+A**, **⌘+Shift+A** on Mac) and just keep reading. Pages are translated as they come into view, plus a few pages ahead, so the next page is usually ready before you get there.
+
+- **Blue `•••` badge**: the page is being translated right now (bottom page above).
+- **Green `MT` badge**: the page is done. A page that fails 3 times shows a red badge instead; click it to retry.
+- **Hover a bubble** to magnify it, with the original text underneath to check the translation. A button on each page switches between the translated and original image.
+- The **Auto MT** pill in the corner counts translated pages; click **Stop** to end the session.
+
+Turn on **Pre-translate** to translate pages as soon as they load instead of when you scroll near them (faster reading, more API calls). The **Extension Enabled** switch at the top of the popup turns everything off, so nothing is ever sent by surprise.
+
 ### Story DB and Help Chat
 
 | Story DB | Help chat |
@@ -91,7 +104,7 @@ Auto-translate left the "ピンポーン" sound effect untouched. Click **✂ Se
 | Test API Key | A "Test" button next to each API key (and "Test all keys" per provider) sends a minimal request to confirm that key/model/URL actually works, without spending a real translation — a failed test shows the full provider error on demand. |
 | Prompt caching | The translation system prompt (identical across every page of the same batch/auto-translate run) is cached server-side on Anthropic via `cache_control`, cutting repeat-page input cost by up to ~90%. OpenAI-compatible and Gemini providers already cache eligible prompts automatically, no configuration needed. |
 | Page scanner | Finds manga/comic images on the active page and lets you choose which pages to translate. |
-| Auto-translate | Watches the current reading page and translates images as you scroll. |
+| Auto-translate | Click **Auto-translate** (or press **Alt+Shift+A**, **⌘+Shift+A** on Mac) and keep reading: pages are translated as they come into view, plus a few pages ahead. A floating **Auto MT** pill counts translated pages and has a **Stop** button. Optional **Pre-translate** starts pages as soon as they load. |
 | Bubble translation | Detects speech bubbles, removes original text, translates, and renders text back into the image. |
 | Hover-to-magnify | Hover a translated bubble for a sharp zoomed-in crop with the original text as a caption, so you can cross-check the translation at a glance. A per-page button toggles between the translated and original image. |
 | Story Notes | Per-story notes (glossary, character relationships, tone) the model always follows; a "Suggest" button drafts them from your already-scanned pages. Separate from General LLM Instructions, which apply to every story. |

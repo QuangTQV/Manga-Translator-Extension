@@ -61,6 +61,19 @@ MangaTranslator Extension được tạo cho người đọc muốn đọc truy�
 - Dịch cả ngoài bubble: hỗ trợ SFX, lời dẫn, caption và các đoạn chữ nằm ngoài bóng thoại.
 - Nhẹ hơn theo mặc định: Flux Klein 4B là tùy chọn, nên người dùng thông thường không phải tải một gói quá nặng.
 
+### Tự Động Dịch Khi Đọc
+
+<img src="assets/auto-translate-preview.png" alt="Trình đọc manga đang tự động dịch: trang đầu đã dịch với một bóng thoại được phóng to kèm chữ gốc tiếng Nhật, trang sau vẫn đang dịch" width="560">
+
+Bấm **Tự động dịch** trong popup (hoặc nhấn **Alt+Shift+A**, trên Mac là **⌘+Shift+A**) rồi cứ đọc bình thường. Trang được dịch khi hiện ra trên màn hình, kèm dịch trước vài trang phía sau, nên thường trang kế tiếp đã dịch xong trước khi bạn cuộn tới.
+
+- **Nhãn xanh dương `•••`**: trang đang được dịch (trang bên dưới trong ảnh).
+- **Nhãn xanh lá `MT`**: trang đã dịch xong. Trang lỗi 3 lần liên tiếp sẽ hiện nhãn đỏ; bấm vào để thử lại.
+- **Rê chuột vào một bóng thoại** để phóng to, kèm chữ gốc bên dưới để đối chiếu bản dịch. Mỗi trang có nút chuyển qua lại giữa ảnh đã dịch và ảnh gốc.
+- Khung **Auto MT** ở góc màn hình đếm số trang đã dịch; bấm **Dừng** để kết thúc.
+
+Bật **Dịch trước** để dịch trang ngay khi tải xong thay vì đợi bạn cuộn tới gần (đọc nhanh hơn, tốn nhiều lượt gọi API hơn). Công tắc **Bật tiện ích** trên cùng popup tắt toàn bộ, nên không có request nào được gửi đi bất ngờ.
+
 ### CSDL Truyện Và Trợ Giúp
 
 | CSDL truyện | Trợ giúp |
@@ -91,7 +104,7 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Test API Key | Nút "Test" cạnh mỗi API key (và "Test tất cả key" cho từng provider) gửi 1 request tối thiểu để kiểm tra key/model/URL đó có hoạt động không, không tốn 1 lượt dịch thật — nếu fail có thể xem đầy đủ lỗi từ provider. |
 | Cache prompt | Phần system prompt dịch (giống hệt nhau ở mọi trang trong cùng 1 lượt quét/auto-translate) được cache phía server trên Anthropic qua `cache_control`, giảm tới ~90% chi phí input cho các trang sau. Provider tương thích OpenAI và Gemini đã tự động cache prompt đủ điều kiện, không cần cấu hình. |
 | Trình quét trang | Tìm ảnh manga/comic trên trang hiện tại và cho phép chọn trang cần dịch. |
-| Tự động dịch | Theo dõi trang đọc hiện tại và dịch ảnh khi bạn cuộn. |
+| Tự động dịch | Bấm **Tự động dịch** (hoặc nhấn **Alt+Shift+A**, trên Mac là **⌘+Shift+A**) rồi cứ đọc: trang được dịch khi hiện ra trên màn hình, kèm dịch trước vài trang phía sau. Khung **Auto MT** ở góc màn hình đếm số trang đã dịch và có nút **Dừng**. Tùy chọn **Dịch trước** bắt đầu dịch trang ngay khi tải xong. |
 | Dịch bubble | Nhận diện bubble thoại, xóa chữ gốc, dịch và render chữ lại vào ảnh. |
 | Di chuột phóng to | Di chuột vào 1 bubble đã dịch để xem bản crop phóng to sắc nét kèm chú thích là chữ gốc, giúp đối chiếu bản dịch nhanh chóng. Có nút chuyển qua lại giữa ảnh đã dịch và ảnh gốc cho từng trang. |
 | Ghi chú truyện | Ghi chú riêng cho từng truyện (glossary, quan hệ nhân vật, văn phong) mà model luôn tuân theo; có nút "Suggest" để tự soạn nháp từ các trang đã quét. Khác với Chỉ dẫn chung cho LLM (áp dụng mọi truyện). |

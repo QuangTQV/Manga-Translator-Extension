@@ -6,7 +6,7 @@ import path from 'node:path';
 // Regenerates the popup/tool screenshots in docs/assets/ used by the READMEs.
 // Run from extension/ after `npm run build`:
 //   node scripts/readme-screenshots.mjs            # all
-//   node scripts/readme-screenshots.mjs storydb    # one of: translate | storydb | help | region
+//   node scripts/readme-screenshots.mjs storydb    # one of: translate | storydb | help | region | auto
 // The backend is fully mocked (healthy, logged in, an invented sample story),
 // so no backend, account or API key is needed.
 const EXT = path.resolve('dist');
@@ -163,6 +163,74 @@ if (!only || only === 'region') {
   await editor.locator('#ai').click();
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${OUT}/manual-region-preview.png` });
+  await page.close(); await popup.close();
+}
+if (!only || only === 'auto') {
+  // A vertical reader mid-way through auto-translate: page 1 finished (with
+  // the hover magnifier open on a bubble, original text as its caption),
+  // page 2 still translating. Page 2 is the same art re-encoded as JPEG so
+  // its request can be told apart (and so it isn't served from page 1's
+  // content-hash cache); its request is left pending for the capture.
+  const beforePng = path.join(OUT, 'manga-before.png');
+  const page2 = path.join(dir, 'page2.jpg');
+  // Re-encode in the browser (canvas) rather than with an OS tool, so this
+  // runs the same on Windows/macOS/Linux.
+  const encoder = await ctx.newPage();
+  const jpegB64 = await encoder.evaluate(async (pngB64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${pngB64}`;
+    await img.decode();
+    const canvas = Object.assign(document.createElement('canvas'), { width: img.naturalWidth, height: img.naturalHeight });
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  }, fs.readFileSync(beforePng).toString('base64'));
+  await encoder.close();
+  fs.writeFileSync(page2, Buffer.from(jpegB64, 'base64'));
+  const afterB64 = fs.readFileSync(path.join(OUT, 'manga-after.png')).toString('base64');
+  await ctx.route('**/translate', async (r) => {
+    const image = r.request().postDataJSON()?.image ?? '';
+    if (image.startsWith('/9j/')) return; // page 2 (JPEG): leave it translating
+    await r.fulfill(json({
+      translated_image: afterB64,
+      bubbles: [
+        { bbox: [462, 268, 596, 432], confidence: 0.95, original_text: '次は四十九日？ 多分大丈夫', translated_text: "The next one is the 49th day memorial? I think I'll be fine." },
+        { bbox: [128, 272, 242, 440], confidence: 0.95, original_text: 'あ 今度 おばあちゃん家 行ってくるよ', translated_text: "Oh, I'm going to visit Grandma's place soon." },
+        { bbox: [226, 478, 392, 712], confidence: 0.95, original_text: '最終面接… なくなっちゃったから', translated_text: 'The final interview... got cancelled.' },
+        { bbox: [104, 492, 176, 580], confidence: 0.95, original_text: '来た', translated_text: "It's here." },
+        { bbox: [34, 676, 120, 812], confidence: 0.95, original_text: 'じゃあね お母さん', translated_text: 'See you later, Mom' },
+      ],
+      processing_time_seconds: 4.2, source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [],
+    }));
+  });
+  const html = path.join(dir, 'reader.html');
+  fs.writeFileSync(html, `<!doctype html><meta charset="utf-8"><title>Chapter 3</title><style>body{margin:0;background:#1b1b1f}main{width:598px;margin:0 auto;padding:24px 0}img{width:598px;height:859px;display:block;margin:0 0 16px}</style><main><img id="p1" src="file://${beforePng}" alt=""><img id="p2" src="file://${page2}" alt=""></main>`);
+  const page = await ctx.newPage();
+  await page.setViewportSize({ width: 760, height: 1000 });
+  await page.goto('file://' + html);
+  await page.evaluate(() => Promise.all([...document.images].map((i) => i.decode())));
+  const popup = await ctx.newPage();
+  await popup.goto(`chrome-extension://${extId}/popup/index.html`);
+  await page.bringToFront();
+  await popup.locator('#btn-auto').click();
+  await page.locator('.mt-badge').first().waitFor({ timeout: 20_000 });
+  await page.locator('.mt-progress-badge').first().waitFor({ timeout: 20_000 });
+  await page.evaluate(() => window.scrollTo(0, 190));
+  await page.waitForTimeout(600);
+  // Hover the "visit Grandma's place" bubble (left side of page 1): its
+  // magnifier opens on the left, clear of page 2's in-progress badge, which
+  // sits at that page's top-right corner.
+  const img1 = await page.locator('#p1').boundingBox();
+  const want = { x: img1.x + 185, y: img1.y + 356 };
+  const hits = page.locator('.mt-fix-hit');
+  let target = null;
+  for (let i = 0; i < await hits.count(); i++) {
+    const b = await hits.nth(i).boundingBox();
+    if (b && want.x > b.x && want.x < b.x + b.width && want.y > b.y && want.y < b.y + b.height) target = hits.nth(i);
+  }
+  await target.hover();
+  await page.locator('.mt-bubble-magnifier').waitFor();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/auto-translate-preview.png` });
   await page.close(); await popup.close();
 }
 await ctx.close();
