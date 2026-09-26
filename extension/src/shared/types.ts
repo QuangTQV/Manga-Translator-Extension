@@ -352,6 +352,8 @@ export interface StoryGlossaryTerm {
   term: string;
   translation: string;
   notes?: string;
+  enforce?: boolean; // rewrite the term/variants found in the translation to `translation` (backend replacements.py:apply_glossary)
+  variants?: string; // comma-separated alternative spellings to also rewrite (only used with enforce)
 }
 
 // A short, user-maintained note about something that's happened/been

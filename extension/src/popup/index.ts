@@ -35,6 +35,7 @@ const fluxRemoteTokenInput = qs<HTMLInputElement>('f-flux-remote-token');
 const testFluxRemoteBtn = qs<HTMLButtonElement>('btn-test-flux-remote');
 const fluxRemoteTestStatus = qs<HTMLSpanElement>('flux-remote-test-status');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
+const textReadingSelect = qs<HTMLSelectElement>('f-text-reading');
 const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
 const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
 const contextMemorySequentialToggle = qs<HTMLInputElement>('f-context-memory-sequential');
@@ -417,6 +418,7 @@ async function loadAndBind(): Promise<void> {
   fluxRemoteTokenInput.value = settings.config.fluxRemoteToken ?? '';
   updateInpaintingMethodVisibility();
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
+  textReadingSelect.value = settings.config.translationMode === 'two-step' && settings.config.ocrMethod !== 'LLM' ? settings.config.ocrMethod : 'llm';
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
   contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? false;
@@ -487,7 +489,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
+  for (const el of [backendInput, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -1224,6 +1226,10 @@ function collectAllSettings(): AppSettings {
       inpaintingMethod: inpaintingMethodSelect.value || 'auto',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
       fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,
+      // One select drives the (translationMode, ocrMethod) pair the backend takes:
+      // a local OCR only makes sense with the two-step flow, and vice versa.
+      translationMode: textReadingSelect.value === 'llm' ? 'one-step' : 'two-step',
+      ocrMethod: textReadingSelect.value === 'llm' ? 'LLM' : (textReadingSelect.value as TranslateConfig['ocrMethod']),
       preTranslate: preTranslateToggle.checked,
       previousContextEnabled: previousContextToggle.checked,
       contextMemoryEnabled: contextMemoryToggle.checked,
@@ -2411,6 +2417,29 @@ function createStoryGlossaryRow(data?: StoryGlossaryTerm): HTMLDivElement {
 
   const notesField = createAutoGrowField('sg-notes', 'placeholderGlossaryNotes', data?.notes ?? '');
 
+  // "Enforce exactly": deterministic post-translation rewrite of this term
+  // (and the listed variants), instead of only asking the model nicely.
+  const enforceLabel = document.createElement('label');
+  enforceLabel.className = 'sg-enforce-label';
+  enforceLabel.title = t(uiLanguage, 'hintGlossaryEnforce');
+  const enforceBox = document.createElement('input');
+  enforceBox.type = 'checkbox';
+  enforceBox.className = 'sg-enforce';
+  enforceBox.checked = data?.enforce === true;
+  const enforceText = document.createElement('span');
+  enforceText.textContent = t(uiLanguage, 'labelGlossaryEnforce');
+  enforceLabel.appendChild(enforceBox);
+  enforceLabel.appendChild(enforceText);
+
+  const variantsField = document.createElement('input');
+  variantsField.className = 'input sg-variants';
+  variantsField.type = 'text';
+  variantsField.placeholder = t(uiLanguage, 'placeholderGlossaryVariants');
+  variantsField.value = data?.variants ?? '';
+  const syncVariants = (): void => { variantsField.style.display = enforceBox.checked ? '' : 'none'; };
+  enforceBox.addEventListener('change', syncVariants);
+  syncVariants();
+
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
@@ -2420,6 +2449,8 @@ function createStoryGlossaryRow(data?: StoryGlossaryTerm): HTMLDivElement {
   row.appendChild(termField);
   row.appendChild(translationField);
   row.appendChild(notesField);
+  row.appendChild(enforceLabel);
+  row.appendChild(variantsField);
   row.appendChild(removeBtn);
   return row;
 }
@@ -2541,7 +2572,9 @@ function collectStoryGlossary(): StoryGlossaryTerm[] {
     const translation = row.querySelector<HTMLInputElement>('.sg-translation')?.value.trim() ?? '';
     if (!term || !translation) continue;
     const notes = row.querySelector<HTMLTextAreaElement>('.sg-notes')?.value.trim() || undefined;
-    out.push({ id: crypto.randomUUID(), term, translation, notes });
+    const enforce = row.querySelector<HTMLInputElement>('.sg-enforce')?.checked === true;
+    const variants = enforce ? row.querySelector<HTMLInputElement>('.sg-variants')?.value.trim() || undefined : undefined;
+    out.push({ id: crypto.randomUUID(), term, translation, notes, ...(enforce ? { enforce, variants } : {}) });
   }
   return out;
 }

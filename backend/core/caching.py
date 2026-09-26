@@ -297,6 +297,11 @@ class UnifiedCache:
             name: [dataclasses.asdict(item) for item in getattr(config, name, None) or []]
             for name in ("story_characters", "story_relationships", "story_glossary", "story_continuity_notes")
         }
+        # "Enforce exactly" is applied after the cache lookup (like the post
+        # replacement dictionary), so editing it must not invalidate entries.
+        for item in story_payload["story_glossary"]:
+            item.pop("enforce", None)
+            item.pop("variants", None)
         if any(story_payload.values()):
             cache_params["story_context_hash"] = hashlib.sha256(
                 json.dumps(story_payload, sort_keys=True, ensure_ascii=False).encode()

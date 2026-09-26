@@ -81,7 +81,7 @@ export ANTHROPIC_API_KEY="..."
 
 ### Dùng LLM chạy trên máy (Ollama / LM Studio) — miễn phí, offline
 
-Cần model **nhìn được ảnh** (vd. `qwen2.5vl:7b`, `gemma3:12b`) — model chỉ có chữ sẽ không đọc được trang truyện.
+Mặc định cần model **nhìn được ảnh** (vd. `qwen2.5vl:7b`, `gemma3:12b`). Nếu chỉ có model chữ, đặt tab **Translate** → **Cách đọc chữ** thành `manga-ocr` (chỉ tiếng Nhật) hoặc `PaddleOCR-VL` — chữ được đọc trên máy trước rồi chỉ gửi văn bản cho model.
 
 ```bash
 # Ollama: cài từ https://ollama.com rồi

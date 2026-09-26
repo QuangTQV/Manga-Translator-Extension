@@ -75,6 +75,65 @@ test.describe('popup — Story DB tab', () => {
     await expect(noteText).toHaveJSProperty('tagName', 'TEXTAREA');
   });
 
+  test('a glossary row can be set to "enforce exactly" with variants; both load back and are saved (variants dropped when unchecked)', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed({ accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1' }), firstKeyMatches('seed-key'));
+    await context.route('**/stories', async (route) => {
+      if (route.request().method() !== 'GET') { await route.fallback(); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'story-1', name: 'My Manga', updated_at: 0 }]) });
+    });
+    let putBody: any = null;
+    await context.route('**/stories/story-1', async (route) => {
+      if (route.request().method() === 'PUT') {
+        putBody = route.request().postDataJSON();
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'story-1', ...putBody, updated_at: 1 }) });
+        return;
+      }
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'story-1', name: 'My Manga', updated_at: 0, characters: [], relationships: [],
+          glossary: [
+            { id: 'g1', term: 'Kage-ryu', translation: 'Shadow Style', notes: null, enforce: true, variants: 'Shadow Way, Shadow School' },
+            { id: 'g2', term: 'Ren', translation: 'Ren-kun', notes: null },
+          ],
+          continuity_notes: [], continuity_notes_enabled: false,
+        }),
+      });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Story DB' }).click();
+    await expect(popup.locator('.story-glossary-row')).toHaveCount(2, { timeout: 5_000 });
+
+    const first = popup.locator('.story-glossary-row').nth(0);
+    const second = popup.locator('.story-glossary-row').nth(1);
+    await expect(first.locator('.sg-enforce')).toBeChecked();
+    await expect(first.locator('.sg-variants')).toBeVisible();
+    await expect(first.locator('.sg-variants')).toHaveValue('Shadow Way, Shadow School');
+    await expect(second.locator('.sg-enforce')).not.toBeChecked();
+    await expect(second.locator('.sg-variants')).toBeHidden();
+
+    // Checking a row reveals its variants field; unchecking one hides it and
+    // its variants are not saved (they would silently do nothing).
+    await second.locator('.sg-enforce').check();
+    await expect(second.locator('.sg-variants')).toBeVisible();
+    await second.locator('.sg-variants').fill('Ren-san');
+    await first.locator('.sg-enforce').uncheck();
+    await expect(first.locator('.sg-variants')).toBeHidden();
+
+    await popup.locator('#btn-story-save').click();
+    await expect.poll(() => putBody, { timeout: 5_000 }).not.toBeNull();
+    const kage = putBody.glossary.find((g: any) => g.term === 'Kage-ryu');
+    const ren = putBody.glossary.find((g: any) => g.term === 'Ren');
+    expect(kage.enforce).toBeFalsy();
+    expect(kage.variants).toBeFalsy();
+    expect(ren.enforce).toBe(true);
+    expect(ren.variants).toBe('Ren-san');
+  });
+
   test('long free-text fields (role, voice, relationship, notes) grow with their content instead of clipping to one line', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });

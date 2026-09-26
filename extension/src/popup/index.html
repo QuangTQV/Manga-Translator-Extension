@@ -176,6 +176,10 @@
        text (Chrome's native field-sizing, no JS resize needed) instead of a
        single-line input that hides everything past its width. */
     .textarea-auto { field-sizing: content; min-height: 0; max-height: 180px; overflow-y: auto; resize: none; transition: none; }
+    .story-glossary-row + .story-glossary-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); }
+    .sg-enforce-label { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: #8b9bbf; cursor: pointer; }
+    .sg-enforce-label input { flex: none; margin: 0; }
+    .sg-variants { margin-top: 4px; }
     .lettering-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; margin-top: 8px; }
     .lettering-grid .label { margin: 0; }
     .lettering-color { display: flex; gap: 6px; align-items: center; min-width: 0; }
@@ -460,6 +464,15 @@
             <input id="f-economy-mode" type="checkbox" />
             <span class="toggle-slider"></span>
           </label>
+        </div>
+        <div class="field">
+          <label class="label" for="f-text-reading" data-i18n="labelTextReading">Text reading</label>
+          <select id="f-text-reading" class="select">
+            <option value="llm" data-i18n="textReadingLlm">AI reads the page image (default)</option>
+            <option value="manga-ocr" data-i18n="textReadingMangaOcr">manga-ocr, then AI translates the text (Japanese only)</option>
+            <option value="paddleocr-vl" data-i18n="textReadingPaddle">PaddleOCR-VL, then AI translates the text</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintTextReading">Default: the AI sees each bubble and reads and translates it in one step. The other two read the text locally first (a model of a few hundred MB, downloaded on first use) and send only text to the AI — cheaper, works with text-only models, and makes the Pro tab's "before translation" dictionary exact. The AI no longer sees the bubble images, so it can misread less clearly than reading them directly.</div>
         </div>
         <div class="field">
           <label class="label" data-i18n="labelFontPack">Font</label>

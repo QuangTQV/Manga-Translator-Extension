@@ -67,7 +67,14 @@ Advanced/pro-translator features must not be scattered onto the main Translate/L
 - **Team collaboration / shared Story DB with roles** — the big one; don't start without the repo owner explicitly deciding they want a real multi-user product surface.
 - **Verify the whole manual-editing toolchain on a real manga site** (see limitation note above).
 - **Popup onboarding for a new install** — scope undecided (banner? checklist? doc link?) — ask before building.
-- **Auto-translate resume after reload / extension re-enable** — **explicitly unresolved, do not assume an answer exists.** Previously asked (one-click prompt vs. silent resume vs. leave as-is); the reply received was actually about a different, already-resolved question (popup settings persistence). Re-ask before implementing — silently resuming would arguably contradict the "no surprise auto-translate" promise on the master toggle.
+- **Auto-translate resume after reload / extension re-enable — DECIDED 2026-09-26: keep as is (no auto-resume).** Repo owner's answer; the master toggle's "no surprise auto-translate" promise stands. Don't re-ask.
+
+## Done 2026-09-26 (branch feat/text-reading-and-glossary-enforce)
+
+- **"Text reading" select (Translate tab, `#f-text-reading`)** — one control drives the backend's `(translation_mode, ocr_method)` pair: AI reads image = `one-step`+`LLM` (default); manga-ocr / PaddleOCR-VL = `two-step`+that OCR. The backend and the request builders (background + content-script) already carried both fields; only the popup UI was missing. It also drives Select text area's OCR (`/region/ocr` reads `ocr_method`). Verified with real manga-ocr on the sample page: 0 image parts reach the LLM, and the Pro-tab "before translation" rule rewrites the OCR text exactly. Caveats: manga-ocr is Japanese-only; the AI no longer sees bubble images. Not run with real PaddleOCR-VL (untested here) or a real LLM.
+- **Story DB glossary "Enforce exactly"** — `StoryGlossaryTerm(Config).enforce/variants` (stored inline in `glossary_json`, no schema change; old rows default off). `core/text/replacements.py:apply_glossary`: ONE case-insensitive alternation pass, longest match first, the row's own translation as an identity alternative — so replaced text is never rescanned ("Shadow"→"Shadow Style" can't become "Shadow Style Style"); Latin word edges are guarded ("Kage" ≠ inside "Kagerou"), CJK edges aren't. Runs in `core/pipeline.py` after the user's post rules and in `/region/translate`. Excluded from the translation-cache key (post-cache, like the post dictionary). **Limit stated in the UI/README:** it only fixes what the model actually wrote (the term's own spelling or a listed variant), not an unlisted alternative translation. My earlier "names are always right" pitch overstated this.
+
+**Still open / ideas:** QA/proofread view before export; list of a page's manual regions; resize handles for a moved bubble; vertical text in Select text area; `background-image` pages; `/app` gets lettering + dictionary fields (backend ready, UI only).
 
 ## Borrowed from zyddnys/manga-image-translator (items 1-4 DONE 2026-09-26)
 
