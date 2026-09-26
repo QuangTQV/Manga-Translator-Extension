@@ -25,7 +25,7 @@ async function checkToggle(locator: Locator): Promise<void> {
 // "Outside text") — see backend/flux_worker.py and
 // core/image/inpainting.py:FluxKleinInpainter's remote_base_url support.
 test.describe('popup — Flux remote inpainting', () => {
-  test('the inpainting method field is hidden until Outside text is on, and the remote URL row only shows for the remote option', async ({ context, extensionId }) => {
+  test('the inpainting method field is always shown (it also drives the Eraser/Select text area tools), and the remote URL row only shows for the remote option', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
     await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
@@ -33,10 +33,12 @@ test.describe('popup — Flux remote inpainting', () => {
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
 
-    await expect(popup.locator('#inpainting-method-field')).toBeHidden();
-
-    await checkToggle(popup.locator('#f-outside-text'));
+    // Outside text is off in the seed, yet the setting is still reachable.
+    await expect(popup.locator('#f-outside-text')).not.toBeChecked();
     await expect(popup.locator('#inpainting-method-field')).toBeVisible();
+    await expect(popup.locator('#flux-remote-url-row')).toBeHidden();
+
+    await popup.locator('#f-inpainting-method').selectOption('lama');
     await expect(popup.locator('#flux-remote-url-row')).toBeHidden();
 
     await popup.locator('#f-inpainting-method').selectOption('flux_klein_4b_remote');
@@ -236,6 +238,57 @@ test.describe('popup — Flux remote inpainting', () => {
 
     expect(capturedBody).toBeTruthy();
     expect(capturedBody.inpainting_method).toBe('auto');
+    expect(capturedBody.flux_remote_base_url).toBeUndefined();
+  });
+
+  test('the LaMa option is sent as inpainting_method "lama" with no Flux remote fields', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(
+      worker,
+      baseSeed({ config: { outsideTextEnabled: true, inpaintingMethod: 'lama', fluxRemoteBaseUrl: 'https://leftover-from-before.example.com' } }),
+      firstKeyMatches('seed-key'),
+    );
+
+    let capturedBody: any = null;
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64,
+          bubbles: [],
+          processing_time_seconds: 0.1,
+          source_language: 'Japanese',
+          target_language: 'English',
+          provider: 'Google',
+          ocr_texts: [],
+          memory_note: null,
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(TEST_SITE_URL);
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+
+    await mangaPage.bringToFront();
+    await popup.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await mangaPage.waitForTimeout(2000);
+
+    expect(capturedBody).toBeTruthy();
+    expect(capturedBody.inpainting_method).toBe('lama');
     expect(capturedBody.flux_remote_base_url).toBeUndefined();
   });
 

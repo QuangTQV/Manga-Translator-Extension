@@ -15,6 +15,7 @@ from sklearn.cluster import KMeans
 from core.config import MangaTranslatorConfig
 from core.image.image_utils import cv2_to_pil, pil_to_cv2, process_bubble_image_cached
 from core.image.inpainting import FluxKleinInpainter, FluxKontextInpainter
+from core.image.lama_inpainter import LamaInpainter
 from core.image.ocr_detection import OutsideTextDetector, extract_text_with_manga_ocr
 from core.ml.model_manager import get_model_manager
 from utils.logging import log_message
@@ -420,6 +421,16 @@ def process_outside_text(
         inpainting_method = requested_inpainting_method
         auto_inpainting = requested_inpainting_method == "auto"
         inpainter = None
+
+        if inpainting_method == "lama":
+            try:
+                inpainter = LamaInpainter(device=config.device, verbose=verbose)
+                log_message("Using LaMa for inpainting", verbose=verbose)
+            except Exception as e:
+                log_message(
+                    f"LaMa unavailable ({e}), falling back to OpenCV",
+                    always_print=True,
+                )
 
         if inpainting_method == "flux_klein_9b":
             try:
@@ -1187,7 +1198,8 @@ def process_outside_text(
                 log_message("Outside text inpainting completed", verbose=verbose)
                 parts = []
                 if flux_inpaints:
-                    parts.append(f"Flux: {flux_inpaints}")
+                    model_label = "LaMa" if inpainting_method == "lama" else "Flux"
+                    parts.append(f"{model_label}: {flux_inpaints}")
                 parts.append(f"CV2: {cv2_inpaints}")
                 if none_skips:
                     parts.append(f"Skipped (none): {none_skips}")

@@ -67,6 +67,15 @@ const suggestInstructionsBtn = qs<HTMLButtonElement>('btn-suggest-instructions')
 const suggestWebSearchToggle = qs<HTMLInputElement>('f-suggest-web-search');
 const suggestStoryTitleInput = qs<HTMLInputElement>('f-suggest-story-title');
 const llmInstructionsInput = qs<HTMLTextAreaElement>('f-llm-instructions');
+const preReplacementsInput = qs<HTMLTextAreaElement>('f-pre-replacements');
+const letteringUppercaseToggle = qs<HTMLInputElement>('f-lettering-uppercase');
+const letteringAlignSelect = qs<HTMLSelectElement>('f-lettering-align');
+const letteringTextColorMode = qs<HTMLSelectElement>('f-lettering-text-color-mode');
+const letteringTextColorInput = qs<HTMLInputElement>('f-lettering-text-color');
+const letteringOutlineWidthSelect = qs<HTMLSelectElement>('f-lettering-outline-width');
+const letteringOutlineColorMode = qs<HTMLSelectElement>('f-lettering-outline-color-mode');
+const letteringOutlineColorInput = qs<HTMLInputElement>('f-lettering-outline-color');
+const postReplacementsInput = qs<HTMLTextAreaElement>('f-post-replacements');
 const saveLlmBtn = qs<HTMLButtonElement>('btn-save-llm');
 const uiLanguageSelect = qs<HTMLSelectElement>('f-ui-language');
 
@@ -439,6 +448,16 @@ async function loadAndBind(): Promise<void> {
   contextToggle.checked = settings.config.sendFullPageContext;
   instructionsInput.value = settings.config.specialInstructions ?? '';
   llmInstructionsInput.value = settings.config.llmInstructions ?? '';
+  preReplacementsInput.value = settings.config.preReplacements ?? '';
+  postReplacementsInput.value = settings.config.postReplacements ?? '';
+  letteringUppercaseToggle.checked = settings.config.letteringUppercase ?? false;
+  letteringAlignSelect.value = settings.config.letteringAlign ?? 'center';
+  letteringTextColorMode.value = settings.config.letteringTextColor ? 'custom' : 'auto';
+  if (settings.config.letteringTextColor) letteringTextColorInput.value = settings.config.letteringTextColor;
+  letteringOutlineWidthSelect.value = String(settings.config.letteringOutlineWidth ?? 0);
+  letteringOutlineColorMode.value = settings.config.letteringOutlineColor ? 'custom' : 'auto';
+  if (settings.config.letteringOutlineColor) letteringOutlineColorInput.value = settings.config.letteringOutlineColor;
+  updateLetteringVisibility();
   suggestStoryTitleInput.value = settings.config.suggestStoryTitle ?? '';
   suggestWebSearchToggle.checked = settings.config.suggestWebSearch ?? false;
 
@@ -472,6 +491,9 @@ function bind(): void {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
+  for (const el of [letteringUppercaseToggle, letteringAlignSelect, letteringTextColorMode, letteringTextColorInput, letteringOutlineWidthSelect, letteringOutlineColorMode, letteringOutlineColorInput]) {
+    el.addEventListener('change', () => { updateLetteringVisibility(); void autoSave(); });
+  }
 
   outsideTextToggle.addEventListener('change', updateInpaintingMethodVisibility);
   inpaintingMethodSelect.addEventListener('change', updateInpaintingMethodVisibility);
@@ -485,7 +507,7 @@ function bind(): void {
     void autoSave();
   });
 
-  for (const el of [instructionsInput, llmInstructionsInput]) {
+  for (const el of [instructionsInput, llmInstructionsInput, preReplacementsInput, postReplacementsInput]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   reasoningEffortSelect.addEventListener('change', () => { void autoSave(); });
@@ -1128,8 +1150,10 @@ async function runKeyTest(
   }
 }
 
+// Always shown (not only with Outside text on): the Eraser and Select text
+// area tools also use LaMa when it's picked here.
 function updateInpaintingMethodVisibility(): void {
-  inpaintingMethodField.style.display = outsideTextToggle.checked ? '' : 'none';
+  inpaintingMethodField.style.display = '';
   fluxRemoteUrlRow.style.display = inpaintingMethodSelect.value.endsWith('_remote') ? '' : 'none';
 }
 
@@ -1206,11 +1230,27 @@ function collectAllSettings(): AppSettings {
       contextMemorySequential: contextMemorySequentialToggle.checked,
       specialInstructions: instructionsInput.value.trim() || undefined,
       llmInstructions: llmInstructionsInput.value.trim() || undefined,
+      preReplacements: preReplacementsInput.value.trim() || undefined,
+      postReplacements: postReplacementsInput.value.trim() || undefined,
+      letteringUppercase: letteringUppercaseToggle.checked || undefined,
+      letteringAlign: letteringAlignSelect.value === 'center' ? undefined : (letteringAlignSelect.value as TranslateConfig['letteringAlign']),
+      letteringTextColor: letteringTextColorMode.value === 'custom' ? letteringTextColorInput.value : undefined,
+      letteringOutlineWidth: parseInt(letteringOutlineWidthSelect.value, 10) || undefined,
+      letteringOutlineColor: letteringOutlineColorMode.value === 'custom' ? letteringOutlineColorInput.value : undefined,
       suggestStoryTitle: suggestStoryTitleInput.value.trim() || undefined,
       suggestWebSearch: suggestWebSearchToggle.checked,
       providerGroups: collectProviderGroups(),
     },
   };
+}
+
+// Color pickers only show once "Custom" is chosen; the outline color only
+// matters when there is an outline.
+function updateLetteringVisibility(): void {
+  letteringTextColorInput.style.display = letteringTextColorMode.value === 'custom' ? '' : 'none';
+  const hasOutline = letteringOutlineWidthSelect.value !== '0';
+  letteringOutlineColorMode.style.display = hasOutline ? '' : 'none';
+  letteringOutlineColorInput.style.display = hasOutline && letteringOutlineColorMode.value === 'custom' ? '' : 'none';
 }
 
 async function getSettings(): Promise<AppSettings> {

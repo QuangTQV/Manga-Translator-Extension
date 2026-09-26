@@ -125,7 +125,11 @@ Auto-translate left the "ピンポーン" sound effect untouched. Click **✂ Se
 | Translation progress | A small animated marker shows which page(s) are actively being translated right now, distinct from ones still waiting in the auto-translate queue. |
 | Retry indicator | A page that fails auto-translate 3 times in a row shows a small red badge — click it to retry immediately. |
 | Outside-bubble text | Handles SFX/narration outside speech bubbles with lightweight cleanup by default. |
+| LaMa inpainting | A middle option between the lightweight OpenCV cleanup and Flux: pick **LaMa** under *Inpainting quality* (Translate tab) to rebuild panel borders, screentone and hatching behind removed text instead of smearing them. ~200MB, downloaded on first use, runs on CPU in seconds (faster on a GPU). The Eraser and Select text area tools use it too when it's selected. |
 | Optional Flux | Lets advanced users download Flux Klein 4B for heavier inpainting without shipping it in the default release. |
+| Replacement dictionary | In the **Pro** tab: deterministic `find => replace` rules (with `/regex/` support) for the fixes an AI keeps getting wrong. *After translation* rules rewrite every translation before it's drawn — exact, and they apply to already-cached pages without a new AI call. *Before translation* rules rewrite the source text; exact in the Select text area tool, and passed to the AI as instructions when it reads the page image directly. |
+| Lettering options | In the **Pro** tab: ALL CAPS, left/center/right alignment, a fixed text color, and an outline (width + color) for speech-bubble and Select text area text — the usual scanlation lettering choices. Bold/italic from the AI's markers are kept. |
+| Local LLM | Run fully offline with no API cost via Ollama or LM Studio (any vision model) through the `OpenAI-Compatible` provider — see [Local LLM](#local-llm-ollama--lm-studio). |
 | Help chat | Click the **?** button in the popup header to ask how to install, configure, or use the extension — answered by your own configured LLM, grounded in this project's own docs (not a canned FAQ, and not free — it uses your API key/quota like any other AI feature here). Conversation is kept locally across popup reopens; clear it any time. |
 | Resizable popup | Drag the popup's bottom-right corner to resize it (works most of the time — Chrome's own popup sizing can occasionally fight it), or click **⤢** in the header to open the same UI in a normal, freely resizable window instead. |
 | Provider support | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter, and OpenAI-compatible endpoints. |
@@ -214,6 +218,7 @@ Open the extension popup and use the tabs:
 | `Config` | Extension UI language and backend URL. |
 | `Account` | Sign in with email or Google to use optional per-account features (Story DB); also where a centrally-hosted deployment's users see their plan/usage. |
 | `Story DB` | Optional, requires being logged in on `Account`. Per-story character database, relationships, a term glossary, and continuity notes, synced to your account. |
+| `Pro` | Advanced controls kept out of the main tabs: text sharpness (supersampling), lettering (ALL CAPS, alignment, text color, outline), and the before/after-translation replacement dictionary. |
 
 Default backend URL:
 
@@ -228,6 +233,30 @@ GOOGLE_API_KEY
 OPENAI_API_KEY
 ANTHROPIC_API_KEY
 ```
+
+## Local LLM (Ollama / LM Studio)
+
+Translate offline with no API cost by pointing the `OpenAI-Compatible` provider at a model running on your own machine.
+
+**You need a vision model.** The model reads the text straight off the page image, so a text-only model (plain Llama, Qwen 2.5, ...) has nothing to translate. Examples that can see images: Qwen2.5-VL (`qwen2.5vl:7b` in Ollama), Gemma 3 (`gemma3:12b`), or any model LM Studio marks as vision-capable.
+
+**Ollama**
+
+1. Install [Ollama](https://ollama.com), then pull a vision model: `ollama pull qwen2.5vl:7b` (the server starts on port 11434).
+2. Popup → `LLM Config`: Provider `OpenAI-Compatible`, Base URL `http://localhost:11434/v1`, Model `qwen2.5vl:7b`, API key: any text such as `ollama` (the field can't be empty; Ollama ignores it).
+3. Click **Test** next to the key, then translate as usual.
+
+**LM Studio**
+
+1. Download a vision model in [LM Studio](https://lmstudio.ai), then in the Developer tab start the local server (port 1234).
+2. Popup → `LLM Config`: Provider `OpenAI-Compatible`, Base URL `http://localhost:1234/v1`, Model: the model identifier LM Studio shows, API key: any text such as `lm-studio`.
+
+**Good to know**
+
+- The Base URL is called by the **backend**, not the browser. If the backend runs in Docker, use `http://host.docker.internal:11434/v1`; if the model runs on another machine, use that machine's LAN address (for Ollama, start it with `OLLAMA_HOST=0.0.0.0`).
+- A page sends several images at once. Ollama's default context window can be too small for that, which shows up as missing or garbled translations — start it with a bigger one, e.g. `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. **Economy mode** also helps (fewer, smaller images).
+- 7-12B local models are noticeably weaker than large cloud models on small or stylized text, and a page can take tens of seconds without a strong GPU. If a small model breaks the numbered answer format (bubbles show a translation error), try a larger model or a lower temperature.
+- Every other feature (Story DB, replacement dictionary, lettering, manual tools) works the same with a local model.
 
 ## Optional Flux
 
@@ -252,6 +281,8 @@ backend/models/flux/
 ```
 
 Use Flux only when you explicitly configure outside-text inpainting to a Flux mode such as `flux_klein_4b`. For most users, the default `auto` behavior is lighter and faster.
+
+**In between: LaMa.** *Inpainting quality → LaMa* needs no GPU and no manual setup: the ~200MB model ([big-lama TorchScript export](https://huggingface.co/JosephCatrambone/big-lama-torchscript), Apache-2.0) downloads to `backend/models/lama/` the first time it's used and runs on CPU in a couple of seconds per region. It reconstructs panel borders and screentone far better than the default cleanup, though not as well as Flux on large painted areas.
 
 **No GPU? Run Flux on a remote GPU.** The popup's *Inpainting quality* setting also offers `Flux Klein 4B (remote)` and `Flux Klein 9B (remote)`: run `backend/flux_worker.py` on a free Kaggle GPU (or any GPU box), expose it with a `cloudflared` tunnel, and paste the URL into the popup — nothing heavy is installed locally. Protect the worker with `--token` / `FLUX_WORKER_TOKEN` and put the same value in the popup's Token field. If the worker is down or rejects the token, the page still translates (outside-bubble text is left as-is), a warning toast explains why, and the backend stops retrying the dead worker for ~60 seconds. Step-by-step guide (Vietnamese): [docs/HUONG-DAN-CHAY.md](docs/HUONG-DAN-CHAY.md#8-tuỳ-chọn-chạy-flux-từ-xa-trên-gpu-free-của-kaggle).
 

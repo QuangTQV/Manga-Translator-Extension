@@ -72,13 +72,15 @@ def _border_pixels(crop: np.ndarray) -> np.ndarray:
     ])
 
 
-def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
+def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int], use_lama: bool = False) -> Tuple[int, int, int]:
     """Erases the text inside px_box, in place, and returns the resulting
     background colour (BGR) so the caller can pick a readable text colour.
 
     A flat border (speech bubble, caption box) is simply filled with its own
     colour. A busy one (text over artwork) is inpainted from the surroundings
-    around a mask of everything that differs from the local background."""
+    around a mask of everything that differs from the local background — with
+    LaMa when use_lama is set (reconstructs screentone/lines; falls back to
+    OpenCV on any error), otherwise OpenCV."""
     x1, y1, x2, y2 = px_box
     crop = image_bgr[y1:y2, x1:x2]
     border = _border_pixels(crop)
@@ -92,12 +94,30 @@ def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int]) -> Tu
     diff = np.abs(crop.astype(np.int16) - background.astype(np.int16)).max(axis=2)
     mask = (diff > TEXT_DIFF_THRESHOLD).astype(np.uint8) * 255
     mask = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=2)
+    if use_lama:
+        try:
+            full_mask = np.zeros(image_bgr.shape[:2], dtype=bool)
+            full_mask[y1:y2, x1:x2] = mask > 0
+            # Whole image in, so LaMa sees context beyond the box; only
+            # masked pixels come back changed.
+            healed_rgb = _lama_inpaint(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), full_mask)
+            image_bgr[:] = cv2.cvtColor(healed_rgb, cv2.COLOR_RGB2BGR)
+            return tuple(int(c) for c in np.median(image_bgr[y1:y2, x1:x2].reshape(-1, 3), axis=0))
+        except Exception as e:  # noqa: BLE001 — never fail the render over the nicer inpainter
+            log_message(f"LaMa cleanup failed ({e}); using OpenCV", always_print=True)
     healed = cv2.inpaint(crop, mask, 3, cv2.INPAINT_TELEA)
     crop[:] = healed
     return tuple(int(c) for c in np.median(healed.reshape(-1, 3), axis=0))
 
 
-def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2) -> Image.Image:
+def _lama_inpaint(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    # Imported lazily: loading torch/the model manager is only worth it when
+    # LaMa was actually asked for.
+    from core.image.lama_inpainter import lama_inpaint_rgb
+    return lama_inpaint_rgb(rgb, mask)
+
+
+def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2, use_lama: bool = False) -> Image.Image:
     """The "eraser" tool: removes whatever is under an arbitrary hand-drawn
     mask instead of a rectangle — for raw text/SFX baked into complex art
     that a box can't isolate cleanly without also grabbing nearby artwork
@@ -105,8 +125,9 @@ def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2) -> Ima
 
     `mask` is a same-resolution-or-scaled image where any non-black pixel
     marks "erase here" (what a freehand brush stroke on a transparent canvas,
-    composited to black, naturally produces). Inpainted with cv2.inpaint
-    (OpenCV's TELEA), which handles arbitrary mask shapes natively — unlike
+    composited to black, naturally produces). Inpainted with LaMa when
+    use_lama is set (falls back to OpenCV on any error), otherwise cv2.inpaint
+    (OpenCV's TELEA); both handle arbitrary mask shapes natively — unlike
     clean_region()'s box-shaped flat-fill/inpaint heuristic used elsewhere in
     this module, which assumes a rectangular region with a clean border to
     sample a background color/texture from."""
@@ -118,7 +139,13 @@ def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2) -> Ima
         return image.convert("RGB")
     if dilate_px > 0:
         binary_mask = cv2.dilate(binary_mask, np.ones((3, 3), np.uint8), iterations=dilate_px)
-    bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    rgb = np.array(image.convert("RGB"))
+    if use_lama:
+        try:
+            return Image.fromarray(_lama_inpaint(rgb, binary_mask > 0))
+        except Exception as e:  # noqa: BLE001
+            log_message(f"LaMa erase failed ({e}); using OpenCV", always_print=True)
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     healed = cv2.inpaint(bgr, binary_mask, 3, cv2.INPAINT_TELEA)
     return Image.fromarray(cv2.cvtColor(healed, cv2.COLOR_BGR2RGB))
 
@@ -152,6 +179,7 @@ def render_regions(
     regions: List[Tuple[Tuple[float, float, float, float], str]],
     font_dir: str,
     rendering: Optional[RenderingConfig] = None,
+    use_lama: bool = False,
 ) -> Image.Image:
     """Cleans each region of `base` and draws its text there. Regions with
     empty text are cleaned only (useful for "just remove this text")."""
@@ -160,7 +188,7 @@ def render_regions(
     for box, text in regions:
         px_box = box_to_pixels(image.size, box)
         bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        background = clean_region(bgr, px_box)
+        background = clean_region(bgr, px_box, use_lama=use_lama)
         image = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
         if not text.strip():
             continue

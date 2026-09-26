@@ -251,6 +251,8 @@ def _config_for_request(req):
         reasoning_effort=req.reasoning_effort,
         special_instructions=req.special_instructions,
         llm_instructions=req.llm_instructions,
+        pre_replacements=req.pre_replacements,
+        post_replacements=req.post_replacements,
         story_characters=(
             [c.model_dump() for c in req.story_characters] if req.story_characters else None
         ),
@@ -282,6 +284,11 @@ def _config_for_request(req):
         max_font_size=req.max_font_size,
         min_font_size=req.min_font_size,
         supersampling_factor=req.supersampling_factor,
+        lettering_uppercase=req.lettering_uppercase,
+        lettering_align=req.lettering_align,
+        lettering_text_color=req.lettering_text_color,
+        lettering_outline_width=req.lettering_outline_width,
+        lettering_outline_color=req.lettering_outline_color,
         send_full_page_context=req.send_full_page_context,
         image_detail=req.image_detail,
         outside_text_enabled=req.outside_text_enabled,
@@ -369,6 +376,8 @@ def _translate_single_item(
             reasoning_effort=req.reasoning_effort,
             special_instructions=req.special_instructions,
             llm_instructions=req.llm_instructions,
+            pre_replacements=req.pre_replacements,
+            post_replacements=req.post_replacements,
             story_characters=(
                 [c.model_dump() for c in req.story_characters] if req.story_characters else None
             ),
@@ -400,6 +409,11 @@ def _translate_single_item(
             max_font_size=req.max_font_size,
             min_font_size=req.min_font_size,
             supersampling_factor=req.supersampling_factor,
+            lettering_uppercase=req.lettering_uppercase,
+            lettering_align=req.lettering_align,
+            lettering_text_color=req.lettering_text_color,
+            lettering_outline_width=req.lettering_outline_width,
+            lettering_outline_color=req.lettering_outline_color,
             send_full_page_context=req.send_full_page_context,
             image_detail=req.image_detail,
             outside_text_enabled=req.outside_text_enabled,

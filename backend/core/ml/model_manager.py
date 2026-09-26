@@ -46,6 +46,7 @@ class ModelType(Enum):
     FLUX_KONTEXT_SDNQ_PIPELINE = "flux_kontext_sdnq_pipeline"
     FLUX_KLEIN_9B_PIPELINE = "flux_klein_9b_pipeline"
     FLUX_KLEIN_4B_PIPELINE = "flux_klein_4b_pipeline"
+    LAMA = "lama"
 
 
 class ModelManager:
@@ -137,6 +138,7 @@ class ModelManager:
             ),
             ModelType.MANGA_OCR: (model_dir / "manga-ocr-base"),
             ModelType.PADDLE_OCR_VL: (model_dir / "paddleocr-vl"),
+            ModelType.LAMA: (model_dir / "lama" / "big-lama.pt"),
         }
 
     def _init_model_urls(self):
@@ -185,6 +187,13 @@ class ModelManager:
             },
             ModelType.SAM2: {
                 "repo_id": "facebook/sam2.1-hiera-large",
+            },
+            # big-lama (advimman/lama) exported to TorchScript; the repo
+            # declares Apache-2.0. Loads with plain torch.jit.load — no model
+            # code or extra dependency needed.
+            ModelType.LAMA: {
+                "repo_id": "JosephCatrambone/big-lama-torchscript",
+                "filename": "lama.pt",
             },
             ModelType.SAM3: {
                 "repo_id": "facebook/sam3",
@@ -516,6 +525,27 @@ class ModelManager:
             self.models[model_type] = model
             log_message("YOLO model loaded.", verbose=verbose)
             return model
+
+    def load_lama(self, device=None, verbose: bool = False):
+        """Load the big-lama TorchScript inpainting model (~200MB, downloaded
+        on first use). Returns (model, device_actually_used): falls back to
+        CPU if the requested device can't load it."""
+        with self._lock:
+            if self.is_loaded(ModelType.LAMA):
+                return self.models[ModelType.LAMA]
+            path = self.model_paths[ModelType.LAMA]
+            hf_info = self.model_hf_repos[ModelType.LAMA]
+            self._ensure_hf_file(hf_info["repo_id"], hf_info["filename"], path, verbose=verbose)
+            target = torch.device(device) if device is not None else get_best_device()
+            try:
+                model = torch.jit.load(str(path), map_location=target).eval()
+            except Exception as e:
+                log_message(f"LaMa couldn't load on {target} ({e}); using CPU", verbose=verbose)
+                target = torch.device("cpu")
+                model = torch.jit.load(str(path), map_location=target).eval()
+            self.models[ModelType.LAMA] = (model, target)
+            log_message(f"LaMa inpainting model loaded on {target}.", verbose=verbose)
+            return self.models[ModelType.LAMA]
 
     def load_yolo_conjoined_bubble(self, verbose: bool = False):
         """Load YOLO model for conjoined speech bubble detection."""

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -165,6 +165,8 @@ class TranslationConfig:
     osb_min_side_pixels: int = 128
     special_instructions: Optional[str] = None  # per-story notes (glossary, character relationships)
     llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
+    pre_replacements: Optional[str] = None  # user find/replace rules for the source text (core/text/replacements.py)
+    post_replacements: Optional[str] = None  # ... and for the translation, applied after the cache, before rendering
     story_characters: List[StoryCharacterConfig] = field(default_factory=list)  # from a logged-in account's Story DB, resolved server-side (see endpoints/translate.py:_resolve_story_context)
     story_relationships: List[StoryRelationshipConfig] = field(default_factory=list)
     story_glossary: List[StoryGlossaryTermConfig] = field(default_factory=list)
@@ -209,6 +211,12 @@ class RenderingConfig:
     outline_width: float = 0.0
     supersampling_factor: int = 4
     detach_trailing_ellipsis: bool = True
+    # Scanlation lettering options (popup Pro tab). Applied to speech-bubble
+    # and manual-region text; outside-bubble text keeps its own styling.
+    uppercase: bool = False
+    text_align: str = "center"  # "center" | "left" | "right"
+    text_color_rgb: Optional[Tuple[int, int, int]] = None  # None = auto (sampled ink / contrast)
+    outline_color_rgb: Optional[Tuple[int, int, int]] = None  # None = auto contrast with the text color
 
 
 @dataclass

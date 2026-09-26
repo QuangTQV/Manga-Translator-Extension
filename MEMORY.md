@@ -69,37 +69,15 @@ Advanced/pro-translator features must not be scattered onto the main Translate/L
 - **Popup onboarding for a new install** — scope undecided (banner? checklist? doc link?) — ask before building.
 - **Auto-translate resume after reload / extension re-enable** — **explicitly unresolved, do not assume an answer exists.** Previously asked (one-click prompt vs. silent resume vs. leave as-is); the reply received was actually about a different, already-resolved question (popup settings persistence). Re-ask before implementing — silently resuming would arguably contradict the "no surprise auto-translate" promise on the master toggle.
 
-## Roadmap — ideas borrowed from zyddnys/manga-image-translator (PLANNED 2026-09-25, not started)
+## Borrowed from zyddnys/manga-image-translator (items 1-4 DONE 2026-09-26)
 
-Compared at the repo owner's request (README read, not run; ~10.4k stars, last update shown 2025-05-10). Conclusion: not "better or worse" overall. Ours leads on in-browser reading (auto-translate, magnifier, view-original), story-aware LLM translation (full-page/previous-page context, Context Memory, Story DB, Vietnamese pronoun reasoning), interactive manual editing, and API ops (rotation, prompt caching, economy mode). Theirs leads on model breadth (several detectors/inpainters, offline and non-LLM translators) and free/no-API use. Items below are ordered by priority; the repo owner hasn't picked one to start yet.
+Compared at the repo owner's request (README read, not run). Ours leads on in-browser reading, story-aware LLM translation, manual editing and API ops; theirs on model breadth and free/non-LLM use. **License rule:** that project is **GPL-3.0** — take ideas only, never copy its code or pull weights from its releases.
 
-**License rule for all of these:** that project is **GPL-3.0**. Take ideas only — never copy its code or pull model weights from its own releases (their weights' license is unclear). Use upstream sources with clear licenses.
-
-### 1. LaMa inpainting as a middle option (highest value)
-- **Why:** our outside-text choices are OpenCV (light but smears screentone — the known limitation above) or Flux (great, but multi-GB and GPU). LaMa (big-lama, ~200MB, runs on CPU) sits between them.
-- **Where:** add a `"lama"` branch next to `"opencv"`/`"flux_*"` in `backend/core/outside_text_processor.py`, a lazily downloaded model in `core/ml/model_manager.py`, and an option in the popup's *Inpainting quality* select (`popup/index.html`, i18n keys in 5 languages). Consider also using it in `core/manual_region.py` (`clean_region()`/`erase_mask()` currently use `cv2.inpaint`), which would fix the eraser's screentone weakness too.
-- **Before building:** find a big-lama weight source with an explicit license (upstream `advimman/lama` is Apache-2.0) and check CPU speed on a real page. Decide whether `auto` should pick LaMa when available.
-- **Difficulty:** medium.
-
-### 2. Deterministic replacement dictionaries
-- **Why:** Story DB glossary terms are only instructions to the model, which may ignore them. A post-translation dictionary (literal or `/regex/`) guarantees the result and costs no tokens. A pre-OCR dictionary fixes recurring OCR mistakes.
-- **Where:** a textarea in the **Pro** tab (`find => replace` per line), sent per request (new `TranslateOptions` field in `backend/schemas.py`, `shared/types.ts`); applied server-side to translated text before rendering. Pre-dict only works when OCR runs before translation (manga-ocr/PaddleOCR or two-step); in one-step LLM OCR there's no text before the call, so say so in the UI.
-- **Cache:** apply the post-dict AFTER the translation-cache lookup instead of adding it to the cache key, so editing the dictionary doesn't throw away cached LLM results.
-- **Maybe later:** a per-term "enforce exactly" flag on Story DB glossary rows that feeds the same mechanism.
-- **Difficulty:** low.
-
-### 3. Lettering options for scanlators
-- **Why:** English manga lettering is conventionally ALL CAPS (their `manga2eng` renderer), and scanlators want control over alignment, text color and outline.
-- **Where:** Pro tab controls → new `RenderingConfig` fields (`core/config.py`) → `core/text/text_renderer.py`, which already accepts `text_color_rgb` and has `outline_width`. Uppercasing must run before layout and must not touch the `*`/`**` markdown markers.
-- **Difficulty:** low.
-
-### 4. Free/offline translation
-- **Cheap part (docs only):** we already support OpenAI-compatible endpoints, so a local LLM via Ollama (`http://localhost:11434/v1`) or LM Studio works today. Write a guide in README + `docs/HUONG-DAN-CHAY.md`: one-step LLM OCR needs a vision model; otherwise use manga-ocr + a text model.
-- **Expensive part (not planned unless asked):** non-LLM translators (DeepL, Papago, NLLB/Sugoi offline) need a text-only translate path, only work with manga-ocr/PaddleOCR, and lose our context features (full-page image, Story DB, pronoun reasoning).
-
-### Considered and not planned
-- Colorization, upscaling the output image (waifu2x/ESRGAN), translator chaining/per-language routing: niche for this product's reading-first focus.
-- A folder-batch CLI: the `/app` web app already covers translating files from disk.
+- **LaMa** — `core/image/lama_inpainter.py`; weights `JosephCatrambone/big-lama-torchscript` (`lama.pt`, Apache-2.0) → `backend/models/lama/big-lama.pt`. Crops around the mask with context, downscales crops >1536px, writes back only masked pixels; falls back to CPU if the accelerator fails and to OpenCV if loading fails. Opt-in (`inpainting_method="lama"`); `auto` is unchanged so nobody gets a surprise 200MB download. The Inpainting-quality select is now always visible because Eraser/Select text area (`manual_region.clean_region/erase_mask`, `use_lama`) follow it too. Measured: MPS ~0.16s/region after warm-up; on a hatched test pattern LaMa error 45.7 vs OpenCV 55.3.
+- **Replacement dictionaries** — `core/text/replacements.py` (`find => replace`, `/re/i`, `$1`, `#` comments; uses the `regex` module for its per-call timeout against ReDoS). `TranslateOptions.pre_/post_replacements`, Pro tab. Post is applied in `core/pipeline.py` after `call_translation_api_batch` (i.e. after the translation cache, so it's not in the cache key); pre IS in the cache key. Pre is exact in two-step mode and `/region/translate`; in one-step (the extension's only mode — it has no UI for two-step/manga-ocr) literal pre rules become a "SOURCE TEXT CORRECTIONS" prompt section and regex rules are dropped.
+- **Lettering** — `RenderingConfig.uppercase/text_align/text_color_rgb/outline_color_rgb` (+ existing `outline_width`), request fields `lettering_*`, Pro tab. Applied to speech bubbles and manual regions only; OSB text keeps its own styling. Uppercase runs in `render_text_skia` (markers have no case).
+- **Local LLM guide** — README (+vi/zh) "Local LLM" section and `docs/HUONG-DAN-CHAY.md` §6. Needs a vision model because the extension is one-step-only. The API-key field can't be empty (`collectProviderGroups` drops keyless rows), so users type any text. **Not verified against a real Ollama/LM Studio** (none installed here).
+- **Not planned unless asked:** DeepL/Papago/NLLB (need a text-only path, lose context features); colorization, output upscaling, translator chaining; a folder-batch CLI (`/app` covers it). Possible follow-ups: a per-term "enforce exactly" flag on Story DB glossary rows feeding the post dictionary; exposing two-step/manga-ocr in the UI (would make pre rules exact and allow text-only local models).
 
 ## Known pre-existing test flakes (not regressions to chase)
 

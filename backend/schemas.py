@@ -1,7 +1,7 @@
 """Pydantic request/response schemas for the translation endpoints."""
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # Character assets are stored inline as small data URLs (the popup downscales
 # them before upload) — these caps keep a single story document bounded.
@@ -169,15 +169,26 @@ class TranslateOptions(BaseModel):
     reasoning_effort: Optional[str] = None
     special_instructions: Optional[str] = None
     llm_instructions: Optional[str] = None
+    # Pro tab replacement dictionaries, one "find => replace" rule per line
+    # (see core/text/replacements.py).
+    pre_replacements: Optional[str] = Field(default=None, max_length=20000)
+    post_replacements: Optional[str] = Field(default=None, max_length=20000)
     font_dir: Optional[str] = None
     max_font_size: int = 16
     min_font_size: int = 8
     supersampling_factor: int = 4
+    # Scanlation lettering (popup Pro tab) — speech-bubble and manual-region
+    # text only. Colors are "#rrggbb"; unset means the automatic choice.
+    lettering_uppercase: bool = False
+    lettering_align: Literal["center", "left", "right"] = "center"
+    lettering_text_color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    lettering_outline_width: float = Field(default=0.0, ge=0.0, le=8.0)
+    lettering_outline_color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     send_full_page_context: bool = True
     image_detail: str = "auto"
     economy_mode: bool = False  # cut LLM spend: downscale the full-page context image and lower its media resolution (the client also turns off the costlier context options)
     outside_text_enabled: bool = False
-    inpainting_method: Optional[str] = None  # "auto" (default) | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"
+    inpainting_method: Optional[str] = None  # "auto" (default) | "lama" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"; "lama" also makes /region/render and /region/erase use LaMa
     flux_remote_token: Optional[str] = None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one
     flux_remote_base_url: Optional[str] = None  # run Flux on a remote worker (backend/flux_worker.py) instead of loading it locally; only used when inpainting_method is a flux_* variant
     previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
@@ -482,6 +493,7 @@ class EraseRequest(BaseModel):
 
     image: str  # raw base64 of the image to erase from
     mask: str  # raw base64 PNG; any non-black pixel marks "erase here" — what a freehand brush stroke composited to black naturally produces
+    inpainting_method: Optional[str] = None  # "lama" uses LaMa; anything else keeps OpenCV (the extension sends its Inpainting quality setting)
 
 
 class EraseResponse(BaseModel):

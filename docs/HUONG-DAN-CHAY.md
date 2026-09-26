@@ -79,6 +79,20 @@ export OPENAI_API_KEY="..."
 export ANTHROPIC_API_KEY="..."
 ```
 
+### Dùng LLM chạy trên máy (Ollama / LM Studio) — miễn phí, offline
+
+Cần model **nhìn được ảnh** (vd. `qwen2.5vl:7b`, `gemma3:12b`) — model chỉ có chữ sẽ không đọc được trang truyện.
+
+```bash
+# Ollama: cài từ https://ollama.com rồi
+ollama pull qwen2.5vl:7b
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve   # context lớn để chứa nhiều ảnh/trang (nếu Ollama chưa tự chạy)
+```
+
+Trong tab **LLM Config**: Provider `OpenAI-Compatible`, Base URL `http://localhost:11434/v1` (LM Studio: `http://localhost:1234/v1`, bật server ở tab Developer), Model = tên model, **API Key: gõ chữ bất kỳ** như `ollama` (ô không được trống, server local bỏ qua nó) → bấm **Test**.
+
+Lưu ý: Base URL do backend gọi — backend chạy trong Docker thì dùng `http://host.docker.internal:11434/v1`. Model 7-12B chạy local chậm hơn và kém hơn model cloud với chữ nhỏ/cách điệu; bật **Economy mode** để giảm số/kích cỡ ảnh gửi đi. Chi tiết: [README.vi.md](README.vi.md#llm-chạy-local-ollama--lm-studio).
+
 ## 7. Dùng thử
 
 Mở popup extension, việc đầu tiên nhìn thấy là công tắc **Extension Enabled** ở trên cùng — đây là công tắc tổng, tắt đi thì đảm bảo **không có yêu cầu dịch nào được gửi đi** (không tốn API, không tự dịch ngoài ý muốn) bất kể bạn bấm gì bên dưới. Mặc định luôn bật; chỉ tắt khi thật sự muốn chắc chắn extension không hoạt động.
