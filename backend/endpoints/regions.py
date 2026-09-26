@@ -22,7 +22,7 @@ from core.services.translation import (
     _perform_manga_ocr,
     _perform_paddle_ocr_vl,
 )
-from core.text.replacements import apply_rules
+from core.text.replacements import apply_glossary, apply_rules
 from endpoints.translate import (
     _apply_shared_llm_config,
     _config_for_request,
@@ -130,7 +130,9 @@ Output ONLY the translated text — no quotes, notes or explanations.
         raw = await asyncio.to_thread(_call_llm_endpoint, tconf, [], prompt, False, None, "translate_region")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
-    translation = apply_rules(_clean_translation(raw or ""), tconf.post_replacements)
+    translation = apply_glossary(
+        apply_rules(_clean_translation(raw or ""), tconf.post_replacements), tconf.story_glossary
+    )
     if not translation:
         raise HTTPException(status_code=502, detail="The model returned no translation")
     return RegionTranslateResponse(translation=translation)

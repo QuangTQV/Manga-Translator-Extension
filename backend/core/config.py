@@ -60,6 +60,12 @@ class StoryGlossaryTermConfig:
     term: str
     translation: str
     notes: Optional[str] = None
+    # "Enforce exactly": after translation, rewrite `term` (and any of the
+    # comma/newline-separated `variants`) found in the output to `translation`
+    # — see core/text/replacements.py:apply_glossary. Post-cache, so not part
+    # of the translation cache key (core/caching.py leaves these out).
+    enforce: bool = False
+    variants: Optional[str] = None
 
 
 @dataclass

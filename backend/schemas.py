@@ -104,6 +104,8 @@ class StoryGlossaryTerm(BaseModel):
     term: str
     translation: str
     notes: Optional[str] = None
+    enforce: bool = False
+    variants: Optional[str] = Field(default=None, max_length=1000)  # comma/newline-separated alternative spellings to also rewrite
 
 
 class StoryContinuityNote(BaseModel):

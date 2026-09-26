@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.config import MangaTranslatorConfig, PreprocessingConfig, RenderingConfig
 from core.scaling import scale_font_size, scale_length, scale_scalar
-from core.text.replacements import apply_rules, parse_rules
+from core.text.replacements import apply_glossary, apply_rules, parse_rules
 from utils.exceptions import (
     CancellationError,
     CleaningError,
@@ -1334,10 +1334,15 @@ def translate_and_render(
                         # translation cache, so editing them takes effect on
                         # a cached page without a new LLM call.
                         post_rules = parse_rules(config.translation.post_replacements)
-                        if post_rules:
+                        glossary = config.translation.story_glossary
+                        if post_rules or any(g.enforce for g in glossary):
                             valid_set = set(valid_translations)
+                            # The Story DB glossary's "enforce exactly" terms
+                            # get the last word, after the user's own rules.
                             translated_texts = [
-                                apply_rules(t, post_rules) if t in valid_set else t
+                                apply_glossary(apply_rules(t, post_rules), glossary)
+                                if t in valid_set
+                                else t
                                 for t in translated_texts
                             ]
 

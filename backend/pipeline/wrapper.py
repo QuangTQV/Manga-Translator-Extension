@@ -211,6 +211,7 @@ def _build_story_context_configs(
     built_glossary = [
         StoryGlossaryTermConfig(
             term=g["term"], translation=g["translation"], notes=g.get("notes"),
+            enforce=bool(g.get("enforce")), variants=g.get("variants"),
         )
         for g in (glossary or [])
     ]
