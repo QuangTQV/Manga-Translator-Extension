@@ -5,7 +5,7 @@
 // works). The log holds real prompts and translations, so everything from it
 // is rendered with textContent only, never as markup.
 import { normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
-import type { AppSettings, LiveAiLogEntry, LiveAiLogResult } from '../shared/types.js';
+import type { AppSettings, LiveAiImageResult, LiveAiLogEntry, LiveAiLogSettings, LiveAiLogSettingsResult, LiveAiLogResult } from '../shared/types.js';
 
 const POLL_INTERVAL_MS = 2_000;
 const RELATIVE_TIME_TICK_MS = 10_000;
@@ -35,12 +35,20 @@ const summaryEl = qs<HTMLDivElement>('summary');
 const bannerEl = qs<HTMLDivElement>('banner');
 const emptyEl = qs<HTMLDivElement>('empty');
 const listEl = qs<HTMLElement>('list');
+const saveImagesToggle = qs<HTMLInputElement>('save-images');
+const saveImagesLabel = qs<HTMLLabelElement>('save-images-label');
+const imagesNote = qs<HTMLDivElement>('images-note');
+const lightbox = qs<HTMLDivElement>('lightbox');
+const lightboxImg = qs<HTMLImageElement>('lightbox-img');
+const lightboxCaption = qs<HTMLDivElement>('lightbox-caption');
+const lightboxClose = qs<HTMLButtonElement>('lightbox-close');
 
 let lang: UiLanguage = 'en';
 const cards: Card[] = []; // newest first, same order as the DOM
 let newestTimestamp: number | undefined;
 let inFlight = false;
 let lastError: string | null = null;
+let logSettings: LiveAiLogSettings | null = null;
 
 const TYPE_CLASS: Record<string, string> = {
   translate: 't-translate',
@@ -67,6 +75,7 @@ function applyI18n(): void {
     const key = el.dataset.i18nPlaceholder as I18nKey | undefined;
     if (key) el.placeholder = tt(key);
   });
+  saveImagesLabel.title = tt('liveAiSaveImagesHint');
 }
 
 // ── formatting ──────────────────────────────────────────────────────────────
@@ -128,11 +137,105 @@ function textSection(label: string, text: string, isError = false): HTMLElement 
   return section;
 }
 
+// ── images sent to the model (only for calls made with "Save images" on) ────
+
+const imageCache = new Map<string, string>(); // id -> data URL
+const IMAGE_CACHE_LIMIT = 40; // pages can be megabytes; don't keep every one forever
+
+async function loadImage(id: string): Promise<LiveAiImageResult> {
+  const cached = imageCache.get(id);
+  if (cached) return { ok: true, dataUrl: cached };
+  const result = (await chrome.runtime.sendMessage({ type: 'LIVE_AI_IMAGE', id })) as LiveAiImageResult | undefined;
+  if (result?.ok && result.dataUrl) {
+    imageCache.set(id, result.dataUrl);
+    if (imageCache.size > IMAGE_CACHE_LIMIT) imageCache.delete(imageCache.keys().next().value as string);
+  }
+  return result ?? { ok: false, error: 'No response from the extension' };
+}
+
+let lightboxItems: { dataUrl: string; caption: string }[] = [];
+let lightboxIndex = 0;
+
+function showLightbox(items: { dataUrl: string; caption: string }[], index: number): void {
+  lightboxItems = items;
+  lightboxIndex = index;
+  const item = items[index];
+  lightboxImg.src = item.dataUrl;
+  lightboxCaption.textContent = `${item.caption}${items.length > 1 ? `  ·  ${index + 1} / ${items.length}  (← →)` : ''}`;
+  lightbox.hidden = false;
+}
+
+function closeLightbox(): void {
+  lightbox.hidden = true;
+  lightboxImg.removeAttribute('src');
+}
+
+function imagesSection(entry: LiveAiLogEntry): HTMLElement {
+  const refs = entry.images ?? [];
+  const section = document.createElement('div');
+  section.className = 'section';
+  const head = document.createElement('div');
+  head.className = 'section-head';
+  const title = document.createElement('span');
+  title.className = 'section-title';
+  title.textContent = tt('liveAiImagesTitle', { n: refs.length });
+  head.append(title);
+  const grid = document.createElement('div');
+  grid.className = 'thumbs';
+
+  // Filled in as each image arrives; the lightbox pages through the ones that loaded.
+  const loaded: ({ dataUrl: string; caption: string } | null)[] = refs.map(() => null);
+  refs.forEach((ref, i) => {
+    const thumb = document.createElement('button');
+    thumb.type = 'button';
+    thumb.className = 'thumb';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'thumb-ph';
+    placeholder.textContent = '…';
+    const label = document.createElement('div');
+    label.className = 'thumb-label';
+    label.textContent = `#${i + 1} · ${Math.round(ref.kb)} KB`;
+    thumb.append(placeholder, label);
+    grid.append(thumb);
+
+    void loadImage(ref.id).then((result) => {
+      if (!result.ok || !result.dataUrl) {
+        placeholder.textContent = tt('liveAiImageGone');
+        thumb.disabled = true;
+        return;
+      }
+      const img = document.createElement('img');
+      img.alt = `#${i + 1}`;
+      img.addEventListener('load', () => {
+        label.textContent = `#${i + 1} · ${img.naturalWidth}×${img.naturalHeight} · ${Math.round(ref.kb)} KB`;
+        loaded[i] = { dataUrl: result.dataUrl as string, caption: label.textContent ?? '' };
+      });
+      img.src = result.dataUrl;
+      placeholder.replaceWith(img);
+      thumb.addEventListener('click', () => {
+        const items = loaded.filter((item): item is { dataUrl: string; caption: string } => item !== null);
+        const own = loaded[i];
+        showLightbox(items, own ? items.indexOf(own) : 0);
+      });
+    });
+  });
+  section.append(head, grid);
+  return section;
+}
+
 function buildBody(entry: LiveAiLogEntry): HTMLElement {
   const body = document.createElement('div');
   body.className = 'card-body';
   if (entry.system_prompt) body.append(textSection(tt('liveAiSystemPrompt'), entry.system_prompt));
   body.append(textSection(tt('liveAiPrompt'), entry.prompt_text));
+  if (entry.images && entry.images.length > 0) {
+    body.append(imagesSection(entry));
+  } else if (entry.images_count > 0) {
+    const note = document.createElement('div');
+    note.className = 'section note';
+    note.textContent = tt('liveAiImagesNotSaved');
+    body.append(note);
+  }
   if (entry.error) body.append(textSection(tt('liveAiError'), entry.error, true));
   if (entry.response_text) body.append(textSection(tt('liveAiResponse'), entry.response_text));
   return body;
@@ -313,6 +416,36 @@ async function refresh(initial = false): Promise<void> {
   }
 }
 
+// ── "Save images" switch ────────────────────────────────────────────────────
+
+function renderImagesNote(): void {
+  const on = logSettings?.images === true;
+  saveImagesToggle.checked = on;
+  imagesNote.classList.toggle('on', on);
+  imagesNote.textContent = logSettings ? (on ? tt('liveAiImagesOnNote', { mb: logSettings.images_max_mb }) : tt('liveAiImagesOffNote')) : '';
+}
+
+async function loadLogSettings(): Promise<void> {
+  const result = (await chrome.runtime.sendMessage({ type: 'LIVE_AI_LOG_SETTINGS' })) as LiveAiLogSettingsResult | undefined;
+  if (result?.ok && result.settings) logSettings = result.settings;
+  renderImagesNote();
+}
+
+async function changeSaveImages(images: boolean): Promise<void> {
+  saveImagesToggle.disabled = true;
+  try {
+    const result = (await chrome.runtime.sendMessage({ type: 'LIVE_AI_LOG_SETTINGS', images })) as LiveAiLogSettingsResult | undefined;
+    if (result?.ok && result.settings) {
+      logSettings = result.settings;
+    } else {
+      showError(errorMessage({ ok: false, status: result?.status, error: result?.error }));
+    }
+  } finally {
+    saveImagesToggle.disabled = false;
+    renderImagesNote(); // reflects what the backend actually says, also after a failure
+  }
+}
+
 // ── prefs ───────────────────────────────────────────────────────────────────
 
 function loadPrefs(): void {
@@ -340,6 +473,15 @@ async function init(): Promise<void> {
   syncStatus();
 
   refreshBtn.addEventListener('click', () => { void refresh(false); });
+  saveImagesToggle.addEventListener('change', () => { void changeSaveImages(saveImagesToggle.checked); });
+  lightbox.addEventListener('click', closeLightbox); // anywhere, including the image
+  lightboxClose.addEventListener('click', (ev) => { ev.stopPropagation(); closeLightbox(); });
+  document.addEventListener('keydown', (ev) => {
+    if (lightbox.hidden) return;
+    if (ev.key === 'Escape') closeLightbox();
+    else if (ev.key === 'ArrowRight' && lightboxItems.length > 1) showLightbox(lightboxItems, (lightboxIndex + 1) % lightboxItems.length);
+    else if (ev.key === 'ArrowLeft' && lightboxItems.length > 1) showLightbox(lightboxItems, (lightboxIndex - 1 + lightboxItems.length) % lightboxItems.length);
+  });
   autoToggle.addEventListener('change', () => { savePrefs(); syncStatus(); if (autoToggle.checked) void refresh(false); });
   limitSelect.addEventListener('change', () => { savePrefs(); newestTimestamp = undefined; void refresh(true); });
   for (const el of [typeFilter, statusFilter]) el.addEventListener('change', applyFilters);
@@ -364,7 +506,7 @@ async function init(): Promise<void> {
     });
   }, RELATIVE_TIME_TICK_MS);
 
-  await refresh(true);
+  await Promise.all([refresh(true), loadLogSettings()]);
 }
 
 void init();

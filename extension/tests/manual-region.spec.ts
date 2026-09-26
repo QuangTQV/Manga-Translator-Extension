@@ -157,3 +157,95 @@ test('Escape cancels the selection and a too-small drag shows an error, sending 
   await expect(page.locator('#mt-toast')).toContainText('too small');
   expect(calls).toBe(0);
 });
+
+// A manual text area used to be drawn onto the page but not hoverable: the
+// hover-to-magnify crop (with the original text as a caption) and click-to-
+// fix only existed for bubbles the auto-translation detected, so a spot the
+// reader typed or AI-translated by hand couldn't be zoomed or compared with
+// its source.
+test.describe('a manual text area is hoverable like a detected bubble', () => {
+  async function applyRegion(context: any, extensionId: string, original: string, translation: string) {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+    const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    const renders: any[] = [];
+    await context.route('**/region/ocr', async (route) => { await route.fulfill(json({ text: original, warning: null })); });
+    await context.route('**/region/translate', async (route) => { await route.fulfill(json({ translation })); });
+    await context.route('**/region/render', async (route) => { renders.push(route.request().postDataJSON()); await route.fulfill(json({ image: FAKE_TRANSLATED_IMAGE_B64 })); });
+
+    const page = await context.newPage();
+    await page.goto(SINGLE_URL);
+    await startAndDrag(context, page, extensionId);
+    const editor = page.locator('#mt-region-editor');
+    await expect(editor.locator('#orig')).toHaveValue(original, { timeout: 10_000 });
+    await editor.locator('#ai').click();
+    await expect(editor.locator('#trans')).toHaveValue(translation);
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    return { page, editor, renders };
+  }
+
+  test('hovering it shows the zoomed crop with the original text; clicking it opens the editor on that region', async ({ context, extensionId }) => {
+    const { page, editor, renders } = await applyRegion(context, extensionId, 'こんにちは', 'Xin chào');
+
+    const hit = page.locator('.mt-fix-hit');
+    await expect(hit).toHaveCount(1, { timeout: 10_000 });
+    await expect(hit).toHaveAttribute('title', 'Click to edit this text area');
+
+    // The hit target covers the box the reader dragged.
+    const imgBox = (await page.locator('img').first().boundingBox())!;
+    const hitBox = (await hit.boundingBox())!;
+    expect(hitBox.x).toBeCloseTo(imgBox.x + imgBox.width * 0.25, -1);
+    expect(hitBox.width).toBeCloseTo(imgBox.width * 0.3, -1);
+
+    await hit.hover();
+    const magnifier = page.locator('.mt-bubble-magnifier');
+    await expect(magnifier).toBeVisible();
+    await expect(magnifier.locator('.mt-bubble-magnifier-caption')).toHaveText('こんにちは');
+    await page.mouse.move(imgBox.x + 2, imgBox.y + imgBox.height - 2); // leave
+    await expect(magnifier).toBeHidden();
+
+    // Clicking edits this very region: its texts are filled in, no new OCR.
+    await hit.click();
+    await expect(editor.locator('#orig')).toHaveValue('こんにちは', { timeout: 10_000 });
+    await expect(editor.locator('#trans')).toHaveValue('Xin chào');
+    await expect(editor.locator('#del')).toBeVisible();
+    await editor.locator('#trans').fill('Chào bạn');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    expect(renders.at(-1).regions).toHaveLength(1); // edited in place, not duplicated
+    expect(renders.at(-1).regions[0].text).toBe('Chào bạn');
+    await expect(page.locator('.mt-fix-hit')).toHaveCount(1);
+  });
+
+  test('typing the translation by hand works the same, and deleting the region removes its hit target', async ({ context, extensionId }) => {
+    const { page, editor } = await applyRegion(context, extensionId, '手打ち', 'Typed by hand');
+    const hit = page.locator('.mt-fix-hit');
+    await expect(hit).toHaveCount(1, { timeout: 10_000 });
+    await hit.hover();
+    await expect(page.locator('.mt-bubble-magnifier-caption')).toHaveText('手打ち');
+
+    await hit.click();
+    await expect(editor.locator('#del')).toBeVisible({ timeout: 10_000 });
+    await editor.locator('#del').click();
+    await expect(editor).toHaveCount(0);
+    await expect(page.locator('.mt-fix-hit')).toHaveCount(0);
+  });
+
+  test('it is hoverable again after a page reload restores the saved region', async ({ context, extensionId }) => {
+    const { page } = await applyRegion(context, extensionId, 'こんにちは', 'Xin chào');
+    await expect(page.locator('.mt-fix-hit')).toHaveCount(1, { timeout: 10_000 });
+
+    await page.reload();
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await page.bringToFront();
+    await popup2.locator('#btn-region').click(); // injects the content script, which re-applies saved regions
+    await expect(page.locator('#mt-region-select')).toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mt-fix-hit')).toHaveCount(1, { timeout: 15_000 });
+    await page.locator('.mt-fix-hit').hover();
+    await expect(page.locator('.mt-bubble-magnifier-caption')).toHaveText('こんにちは');
+  });
+});

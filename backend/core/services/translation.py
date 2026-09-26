@@ -2576,7 +2576,10 @@ def call_translation_api_batch(
         previous_context_images=previous_context_images,
         previous_context_texts=cleaned_previous_texts,
     )
-    cached_translation, cached_ocr_texts = cache.get_translation(cache_key)
+    if config.bypass_translation_cache:
+        cached_translation, cached_ocr_texts = None, None  # a deliberate redo: don't hand back the old answer
+    else:
+        cached_translation, cached_ocr_texts = cache.get_translation(cache_key)
     if cached_translation is not None:
         log_message("  - Using cached translation", verbose=debug)
         if ocr_texts_output is not None and cached_ocr_texts is not None:

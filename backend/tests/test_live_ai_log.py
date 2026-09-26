@@ -353,3 +353,206 @@ def test_live_ai_log_endpoint_requires_admin_when_require_auth_is_on(monkeypatch
 
     with engine.begin() as conn:
         conn.execute(_accounts_table.delete())
+
+
+# ---------------------------------------------------------------------------
+# "Save images": the images sent to the model kept on disk, off by default
+# ---------------------------------------------------------------------------
+import base64  # noqa: E402
+import io  # noqa: E402
+
+from PIL import Image  # noqa: E402
+
+import core.live_ai_log as live  # noqa: E402
+
+
+def _png_b64(color=(200, 30, 30), size=(8, 8)) -> str:
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _jpeg_b64(size=(8, 8)) -> str:
+    buf = io.BytesIO()
+    Image.new("RGB", size, (10, 120, 200)).save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _log(monkeypatch, parts, **kw):
+    monkeypatch.setattr(settings, "live_ai_log_enabled", True)
+    log_ai_call(
+        provider="Google", model_name="m", call_type="translate", system_prompt=None, prompt_text="p",
+        parts_for_size_estimate=parts, response_text="r", error=None, latency_ms=1.0, **kw,
+    )
+    live.flush_image_writes()
+
+
+@pytest.fixture(autouse=True)
+def _reset_image_switch(monkeypatch):
+    monkeypatch.setattr(settings, "live_ai_log_images", False)
+    monkeypatch.setattr(settings, "live_ai_images_max_mb", 512)
+    live.set_images_enabled(None)
+    yield
+    live.flush_image_writes()
+    live.set_images_enabled(None)
+
+
+def test_images_are_not_stored_by_default_and_nothing_is_queued(monkeypatch):
+    submitted = []
+    monkeypatch.setattr(live, "_get_executor", lambda: submitted.append(1))  # would blow up if used
+    _log(monkeypatch, [{"inline_data": {"mime_type": "image/png", "data": _png_b64()}}])
+    assert submitted == []  # off means no background work at all
+    entry = json.loads(settings.live_ai_log_path.read_text().splitlines()[0])
+    assert entry["images_count"] == 1  # the count is always recorded...
+    assert "images" not in entry  # ...but no image was kept
+    assert not (settings.live_ai_log_path.parent / "live_ai_images").exists()
+
+
+def test_with_the_switch_on_images_are_saved_and_referenced_by_content_id(monkeypatch):
+    live.set_images_enabled(True)
+    png, jpeg = _png_b64(), _jpeg_b64()
+    _log(monkeypatch, [
+        {"inline_data": {"mime_type": "image/png", "data": png}},
+        {"inline_data": {"data": jpeg}},  # no declared mime: sniffed from the bytes
+        {"text": "not an image"},
+    ])
+    entry = json.loads(settings.live_ai_log_path.read_text().splitlines()[0])
+    assert entry["images_count"] == 3
+    assert [i["mime"] for i in entry["images"]] == ["image/png", "image/jpeg"]
+    for ref in entry["images"]:
+        assert len(ref["id"]) == 32 and ref["kb"] > 0
+        stored = live.find_image_file(ref["id"])
+        assert stored is not None and stored.exists()
+    assert live.find_image_file(entry["images"][0]["id"]).read_bytes() == base64.b64decode(png)
+    # The base64 itself never goes into the JSON line.
+    assert png not in settings.live_ai_log_path.read_text()
+
+
+def test_the_same_image_in_two_calls_is_stored_once(monkeypatch):
+    live.set_images_enabled(True)
+    page = _png_b64(size=(20, 20))
+    _log(monkeypatch, [{"inline_data": {"mime_type": "image/png", "data": page}}])
+    _log(monkeypatch, [{"inline_data": {"mime_type": "image/png", "data": page}}])
+    entries = [json.loads(line) for line in settings.live_ai_log_path.read_text().splitlines()]
+    assert entries[0]["images"][0]["id"] == entries[1]["images"][0]["id"]
+    assert len(list((settings.live_ai_log_path.parent / "live_ai_images").iterdir())) == 1
+
+
+def test_an_undecodable_image_is_skipped_without_losing_the_entry(monkeypatch):
+    live.set_images_enabled(True)
+    _log(monkeypatch, [{"inline_data": {"mime_type": "image/png", "data": ""}}, {"inline_data": {"mime_type": "image/png", "data": _png_b64()}}])
+    entry = json.loads(settings.live_ai_log_path.read_text().splitlines()[0])
+    assert entry["images_count"] == 2 and len(entry["images"]) == 1
+
+
+def test_the_configured_default_applies_until_the_runtime_switch_overrides_it(monkeypatch):
+    monkeypatch.setattr(settings, "live_ai_log_images", True)
+    assert live.images_enabled() is True
+    live.set_images_enabled(False)
+    assert live.images_enabled() is False
+    live.set_images_enabled(None)
+    assert live.images_enabled() is True
+
+
+def test_the_llm_call_does_not_wait_for_the_image_writes(monkeypatch):
+    """The whole point of the background writer: a slow disk must not slow the model call."""
+    import threading
+    import time
+
+    live.set_images_enabled(True)
+    monkeypatch.setattr(settings, "live_ai_log_enabled", True)
+    gate = threading.Event()
+    real_save = live._save_image
+
+    def slow_save(data, mime):
+        gate.wait(5)
+        return real_save(data, mime)
+
+    monkeypatch.setattr(live, "_save_image", slow_save)
+    start = time.monotonic()
+    log_ai_call(
+        provider="Google", model_name="m", call_type="translate", system_prompt=None, prompt_text="p",
+        parts_for_size_estimate=[{"inline_data": {"mime_type": "image/png", "data": _png_b64()}}],
+        response_text="r", error=None, latency_ms=1.0,
+    )
+    assert time.monotonic() - start < 0.5  # returned while the write is still blocked
+    assert not settings.live_ai_log_path.exists()  # entry appears only once its images are on disk
+    gate.set()
+    live.flush_image_writes()
+    assert len(settings.live_ai_log_path.read_text().splitlines()) == 1
+
+
+def test_entries_stay_in_call_order_when_image_and_plain_calls_interleave(monkeypatch):
+    live.set_images_enabled(True)
+    for i in range(6):
+        parts = [{"inline_data": {"mime_type": "image/png", "data": _png_b64(color=(i, i, i), size=(30 + i, 30))}}] if i % 2 == 0 else []
+        monkeypatch.setattr(settings, "live_ai_log_enabled", True)
+        log_ai_call(provider="Google", model_name="m", call_type="translate", system_prompt=None, prompt_text=f"p{i}",
+                    parts_for_size_estimate=parts, response_text="r", error=None, latency_ms=1.0)
+    live.flush_image_writes()
+    entries = [json.loads(line) for line in settings.live_ai_log_path.read_text().splitlines()]
+    assert [e["prompt_text"] for e in entries] == [f"p{i}" for i in range(6)]
+    stamps = [e["timestamp"] for e in entries]
+    assert stamps == sorted(stamps)
+
+
+def test_old_images_are_deleted_once_over_the_size_cap(monkeypatch):
+    live.set_images_enabled(True)
+    monkeypatch.setattr(live, "_PRUNE_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(live, "_last_prune", 0.0)
+    directory = settings.live_ai_log_path.parent / "live_ai_images"
+    directory.mkdir(parents=True)
+    import os as _os
+    for n in range(5):  # five old 250 KB files = 1.25 MB, over a 1 MiB cap
+        f = directory / (f"{n:032x}.png")
+        f.write_bytes(b"x" * 250_000)
+        _os.utime(f, (1_000_000 + n, 1_000_000 + n))
+    monkeypatch.setattr(settings, "live_ai_images_max_mb", 1)  # cap: 1 MiB, target 90%
+    _log(monkeypatch, [{"inline_data": {"mime_type": "image/png", "data": _png_b64(size=(400, 400))}}])
+    left = sorted(p.name for p in directory.iterdir())
+    total = sum(p.stat().st_size for p in directory.iterdir())
+    assert total <= 0.9 * 1024 * 1024  # pruned down to 90% of the cap
+    assert f"{0:032x}.png" not in left and f"{1:032x}.png" not in left  # the oldest went first
+    assert f"{4:032x}.png" in left  # the newest old file survived
+    assert any(name not in {f"{n:032x}.png" for n in range(5)} for name in left)  # and so did the new image
+
+
+# --- endpoints -------------------------------------------------------------
+def test_settings_endpoint_reports_and_changes_the_switch(monkeypatch):
+    monkeypatch.setattr(settings, "live_ai_log_enabled", True)
+    monkeypatch.setattr(settings, "live_ai_log_images", False)
+    assert client.get("/admin/live-ai-log/settings").json() == {"images": False, "images_default": False, "images_max_mb": 512}
+    assert client.post("/admin/live-ai-log/settings", json={"images": True}).json()["images"] is True
+    assert live.images_enabled() is True
+    assert client.get("/admin/live-ai-log/settings").json()["images_default"] is False  # the default itself is untouched
+    assert client.post("/admin/live-ai-log/settings", json={"images": False}).json()["images"] is False
+
+
+def test_settings_and_image_endpoints_404_when_the_feature_is_off():
+    assert client.get("/admin/live-ai-log/settings").status_code == 404
+    assert client.post("/admin/live-ai-log/settings", json={"images": True}).status_code == 404
+    assert client.get("/admin/live-ai-log/images/" + "a" * 32).status_code == 404
+
+
+def test_image_endpoint_serves_the_stored_bytes_with_the_right_type(monkeypatch):
+    live.set_images_enabled(True)
+    png, jpeg = _png_b64(), _jpeg_b64()
+    _log(monkeypatch, [{"inline_data": {"data": png}}, {"inline_data": {"data": jpeg}}])
+    entry = json.loads(settings.live_ai_log_path.read_text().splitlines()[0])
+    for ref, data, mime in zip(entry["images"], (png, jpeg), ("image/png", "image/jpeg")):
+        resp = client.get(f"/admin/live-ai-log/images/{ref['id']}")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == mime
+        assert resp.content == base64.b64decode(data)
+    # The entry endpoint carries the references.
+    listed = client.get("/admin/live-ai-log").json()["entries"][0]
+    assert [i["mime"] for i in listed["images"]] == ["image/png", "image/jpeg"]
+
+
+@pytest.mark.parametrize("bad_id", ["../../etc/passwd", "..%2f..%2fsecret", "A" * 32, "a" * 31, "a" * 33, "g" * 32, "a" * 32])
+def test_image_endpoint_rejects_anything_that_is_not_a_known_content_id(monkeypatch, bad_id):
+    monkeypatch.setattr(settings, "live_ai_log_enabled", True)
+    (settings.live_ai_log_path.parent / "secret.txt").write_text("nope")
+    resp = client.get(f"/admin/live-ai-log/images/{bad_id}")
+    assert resp.status_code in (404, 405, 422)
+    assert b"nope" not in resp.content

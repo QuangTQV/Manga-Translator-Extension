@@ -173,6 +173,7 @@ class TranslationConfig:
     llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
     pre_replacements: Optional[str] = None  # user find/replace rules for the source text (core/text/replacements.py)
     post_replacements: Optional[str] = None  # ... and for the translation, applied after the cache, before rendering
+    bypass_translation_cache: bool = False  # don't read the translation cache (the result is still written) — the "re-translate this page" button
     story_characters: List[StoryCharacterConfig] = field(default_factory=list)  # from a logged-in account's Story DB, resolved server-side (see endpoints/translate.py:_resolve_story_context)
     story_relationships: List[StoryRelationshipConfig] = field(default_factory=list)
     story_glossary: List[StoryGlossaryTermConfig] = field(default_factory=list)

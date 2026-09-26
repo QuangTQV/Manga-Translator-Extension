@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
-import type { LiveAiLogEntry, LiveAiLogResult, TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
+import type { LiveAiImageResult, LiveAiLogEntry, LiveAiLogResult, LiveAiLogSettings, LiveAiLogSettingsResult, TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
 import { normalizeUiLanguage, t } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -260,6 +260,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'LIVE_AI_LOG') {
       const { limit, since } = message as { type: string; limit: number; since?: number };
       sendResponse(await fetchLiveAiLog(limit, since));
+      return;
+    }
+
+    if (message.type === 'LIVE_AI_LOG_SETTINGS') {
+      const { images } = message as { type: string; images?: boolean };
+      sendResponse(await liveAiLogSettings(images));
+      return;
+    }
+
+    if (message.type === 'LIVE_AI_IMAGE') {
+      const { id } = message as { type: string; id: string };
+      sendResponse(await fetchLiveAiImage(id));
       return;
     }
 
@@ -790,28 +802,65 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
   }
 }
 
-// The "Live AI" debug log viewer page (extension/src/live-ai/). `since` makes
-// the auto-refresh transfer only what is new. Admin-gated on a hosted
-// backend, so the stored account token rides along like everywhere else.
-async function fetchLiveAiLog(limit: number, since?: number): Promise<LiveAiLogResult> {
+// The "Live AI" debug log viewer page (extension/src/live-ai/). Admin-gated
+// on a hosted backend, so the stored account token rides along like
+// everywhere else.
+async function liveAiRequest(
+  path: string,
+  init: RequestInit = {},
+): Promise<{ ok: true; res: Response } | { ok: false; status?: number; error: string }> {
   const settings = await getSettings();
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
-  const query = new URLSearchParams({ limit: String(limit) });
-  if (since !== undefined) query.set('since', String(since));
   try {
-    const res = await fetch(`${backendUrl.replace(/\/$/, '')}/admin/live-ai-log?${query}`, { headers: authHeaders(settings) });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const errBody = await res.json() as Record<string, unknown>;
-        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
-      } catch { /* ignore */ }
-      return { ok: false, status: res.status, error: detail };
-    }
-    return { ok: true, entries: ((await res.json()) as { entries: LiveAiLogEntry[] }).entries };
+    const res = await fetch(`${backendUrl.replace(/\/$/, '')}/admin/live-ai-log${path}`, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), ...authHeaders(settings) },
+    });
+    if (res.ok) return { ok: true, res };
+    let detail = `HTTP ${res.status}`;
+    try {
+      const errBody = await res.json() as Record<string, unknown>;
+      if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+    } catch { /* ignore */ }
+    return { ok: false, status: res.status, error: detail };
   } catch (e) {
     return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg: e instanceof Error ? e.message : String(e) }) };
   }
+}
+
+// `since` makes the auto-refresh transfer only what is new.
+async function fetchLiveAiLog(limit: number, since?: number): Promise<LiveAiLogResult> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (since !== undefined) query.set('since', String(since));
+  const r = await liveAiRequest(`?${query}`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  return { ok: true, entries: ((await r.res.json()) as { entries: LiveAiLogEntry[] }).entries };
+}
+
+// Read the viewer's switches, or (with `images`) change "Save images".
+async function liveAiLogSettings(images?: boolean): Promise<LiveAiLogSettingsResult> {
+  const r = await liveAiRequest('/settings', images === undefined ? {} : {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ images }),
+  });
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  return { ok: true, settings: (await r.res.json()) as LiveAiLogSettings };
+}
+
+// An image saved with a logged call. The endpoint needs the auth header, so
+// the page can't use it as an <img src>; hand back a data: URL instead.
+async function fetchLiveAiImage(id: string): Promise<LiveAiImageResult> {
+  const r = await liveAiRequest(`/images/${encodeURIComponent(id)}`);
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  const blob = await r.res.blob();
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  return { ok: true, dataUrl };
 }
 
 // Manual region tools (backend /region/*): OCR a boxed area, translate its
