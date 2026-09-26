@@ -18,6 +18,7 @@ from transformers import (
 from ultralytics import YOLO
 
 from core.device import empty_cache, get_best_device, get_best_dtype, get_device_info
+from core.ml.download_status import track_download
 from utils.exceptions import ModelError
 from utils.logging import log_message
 
@@ -248,7 +249,7 @@ class ModelManager:
         log_message(f"Downloading {path.name}...", verbose=verbose)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req) as response, open(path, "wb") as f:
+            with track_download(path.name), urllib.request.urlopen(req) as response, open(path, "wb") as f:
                 shutil.copyfileobj(response, f)
             log_message(f"Downloaded {path.name} successfully.", verbose=verbose)
         except Exception as e:
@@ -281,12 +282,13 @@ class ModelManager:
             verbose=verbose,
         )
         effective_token = token if token else self.hf_token
-        downloaded = hf_hub_download(
-            repo_id=repo_id,
-            filename=filename,
-            local_dir=str(target.parent),
-            token=effective_token,
-        )
+        with track_download(repo_id):
+            downloaded = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                local_dir=str(target.parent),
+                token=effective_token,
+            )
         downloaded_path = Path(downloaded)
         if downloaded_path != target:
             downloaded_parent = downloaded_path.parent
@@ -355,12 +357,13 @@ class ModelManager:
         )
         effective_token = token if token else self.hf_token
         try:
-            snapshot_download(
-                repo_id=repo_id,
-                local_dir=str(target_dir),
-                token=effective_token,
-                revision=revision,
-            )
+            with track_download(repo_id):
+                snapshot_download(
+                    repo_id=repo_id,
+                    local_dir=str(target_dir),
+                    token=effective_token,
+                    revision=revision,
+                )
             log_message(
                 f"Downloaded repository {repo_id} successfully.", verbose=verbose
             )

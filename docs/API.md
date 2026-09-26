@@ -28,9 +28,12 @@ Health check. Returns backend status and GPU availability.
   "backend_version": "1.0.0",
   "gpu_available": true,
   "device": "cuda",
-  "cuda_available": true
+  "cuda_available": true,
+  "downloads": []
 }
 ```
+
+`downloads` lists the model weights the backend is downloading *right now* (they are fetched lazily the first time a feature needs them: LaMa ~0.2 GB, manga-ocr ~0.9 GB, PaddleOCR-VL ~1.9 GB). It is empty in normal operation; each entry is `{"name": "PaddleOCR-VL", "approx_mb": 1930, "elapsed_seconds": 42}` (`approx_mb` is `null` for a model with no known size). The extension polls it while a translation is slow and shows a "first-time setup" notice.
 
 ---
 

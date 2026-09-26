@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A real Postgres so the hosted-account tests (test_accounts.py, the
+    # account cases in test_auth_gate.py, test_google_login.py, Story DB) run
+    # instead of skipping — same image/credentials as backend/docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: manga_translator
+          POSTGRES_PASSWORD: manga_translator
+          POSTGRES_DB: manga_translator
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U manga_translator"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MT_DATABASE_URL: postgresql+psycopg2://manga_translator:manga_translator@localhost:5432/manga_translator
+      MT_REQUIRE_AUTH: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      # Shared libraries opencv / skia-python link against on a bare runner.
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libegl1 libfontconfig1 libglib2.0-0
+
+      # CPU-only torch first: the default PyPI wheel drags in ~2GB of CUDA
+      # libraries the tests never use. `pip install -e` then sees torch as
+      # already satisfied.
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+
+      # No ML weights exist on a fresh checkout (backend/models/ is
+      # gitignored); the tests that need them skip themselves rather than
+      # downloading anything, so this runs in seconds.
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  extension:
+    name: Extension lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      # tsc typecheck + vite build
+      - run: npm run build

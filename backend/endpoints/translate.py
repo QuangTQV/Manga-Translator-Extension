@@ -11,6 +11,7 @@ from PIL import Image
 
 from auth import verify_token
 from core.accounts import Account
+from core.ml.download_status import active_downloads
 from schemas import (
     StoryCharacter,
     StoryContinuityNote,
@@ -696,6 +697,10 @@ async def health_check():
         "gpu_available": torch.cuda.is_available(),
         "device": "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
         "cuda_available": torch.cuda.is_available(),
+        # Model weights being fetched right now (first use of a feature);
+        # the extension polls this while a request is slow. See
+        # core/ml/download_status.py.
+        "downloads": active_downloads(),
     }
 
 
