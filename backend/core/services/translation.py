@@ -17,6 +17,7 @@ from PIL import Image
 from core.caching import get_cache
 from core.config import TranslationConfig, calculate_reasoning_budget
 from core.live_ai_log import log_ai_call
+from core.text.replacements import apply_rules, format_rules_for_prompt, parse_rules
 from core.image.image_utils import cv2_to_pil, pil_to_cv2, process_bubble_image_cached
 from core.image.ocr_detection import (
     extract_text_with_manga_ocr,
@@ -2401,6 +2402,7 @@ def call_translation_api_batch(
     output_language = config.output_language
     reading_direction = config.reading_direction
     translation_mode = config.translation_mode
+    pre_rules = parse_rules(config.pre_replacements)
     previous_context_images = previous_context_images or []
     if not config.send_full_page_context or config.ocr_method != "LLM":
         previous_context_images = []
@@ -2673,7 +2675,9 @@ Apply your OCR transcription rules to each image provided.{special_instructions_
                     formatted_texts.append("[OCR FAILED]")
                     ocr_failed_indices.add(i)
                 else:
-                    formatted_texts.append(text)
+                    # The user's pre rules rewrite only what the model is
+                    # asked to translate; OCR output reported back stays raw.
+                    formatted_texts.append(apply_rules(text, pre_rules))
 
             ocr_input_section = """
 ## INPUT DATA
@@ -2854,7 +2858,11 @@ The target language is {output_language}. Use the appropriate translation approa
                 ),
             )
 
-            special_instructions_section = _format_special_instructions(config) + _format_fix_hint(config)
+            special_instructions_section = (
+                _format_special_instructions(config)
+                + format_rules_for_prompt(pre_rules)
+                + _format_fix_hint(config)
+            )
 
             one_step_prompt = f"""
 ## CONTEXT

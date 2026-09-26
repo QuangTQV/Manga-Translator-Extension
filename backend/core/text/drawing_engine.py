@@ -137,6 +137,8 @@ def draw_layout(
     pre_translate_y: float = 0.0,
     pre_rotate_deg: float = 0.0,
     text_background_color: Optional[int] = None,
+    text_align: str = "center",
+    outline_color: Optional[int] = None,
 ) -> bool:
     """
     Draws the text layout onto a Skia surface.
@@ -158,6 +160,10 @@ def draw_layout(
         use_subpixel_rendering: Whether to use subpixel rendering
         font_hinting: Font hinting level ("none", "slight", "normal", "full")
         outline_width: Width of text outline (0 = no outline)
+        text_align: "center" (default), "left" or "right" — each line's
+            position within the block; the block itself stays centered
+        outline_color: Skia color for the outline (None = black/white by
+            contrast with text_color)
         verbose: Whether to print detailed logs
 
     Returns:
@@ -191,7 +197,8 @@ def draw_layout(
             g = skia.ColorGetG(text_color)
             b = skia.ColorGetB(text_color)
             lum = 0.299 * r + 0.587 * g + 0.114 * b
-            outline_color = skia.ColorBLACK if lum >= 80 else skia.ColorWHITE
+            if outline_color is None:
+                outline_color = skia.ColorBLACK if lum >= 80 else skia.ColorWHITE
 
             outline_paint = skia.Paint(
                 AntiAlias=True,
@@ -244,9 +251,13 @@ def draw_layout(
             for i, line_data in enumerate(final_lines_data):
                 line_width_measured = line_data["width"]
 
-                line_start_x = (
-                    block_start_x + (final_max_line_width - line_width_measured) / 2.0
-                )
+                slack = final_max_line_width - line_width_measured
+                if text_align == "left":
+                    line_start_x = block_start_x
+                elif text_align == "right":
+                    line_start_x = block_start_x + slack
+                else:
+                    line_start_x = block_start_x + slack / 2.0
                 cursor_x = line_start_x
 
                 if bg_paint is not None:

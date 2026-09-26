@@ -22,6 +22,7 @@ from core.services.translation import (
     _perform_manga_ocr,
     _perform_paddle_ocr_vl,
 )
+from core.text.replacements import apply_rules
 from endpoints.translate import (
     _apply_shared_llm_config,
     _config_for_request,
@@ -113,6 +114,9 @@ async def region_translate(req: RegionTranslateRequest, account=Depends(verify_t
     _resolve_story_context(req, account)
     config = _config_for_request(req)
     tconf = config.translation
+    # This route always has the source text, so the user's pre rules apply
+    # exactly here (vs. one-step page translation, where they're a hint).
+    text = apply_rules(text, tconf.pre_replacements)
 
     prompt = f"""
 Translate this text from a manga page into {req.output_language}.
@@ -126,7 +130,7 @@ Output ONLY the translated text — no quotes, notes or explanations.
         raw = await asyncio.to_thread(_call_llm_endpoint, tconf, [], prompt, False, None, "translate_region")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
-    translation = _clean_translation(raw or "")
+    translation = apply_rules(_clean_translation(raw or ""), tconf.post_replacements)
     if not translation:
         raise HTTPException(status_code=502, detail="The model returned no translation")
     return RegionTranslateResponse(translation=translation)
@@ -149,7 +153,10 @@ async def region_render(req: RegionRenderRequest, account=Depends(verify_token))
                 raise ValueError("source_image is required when a region has restore_only set")
             base = restore_regions(base, decode_image(req.source_image), restore_boxes)
         draw_regions = [(_box_tuple(r.box), r.text) for r in req.regions if not r.restore_only]
-        return encode_png(render_regions(base, draw_regions, config.rendering.font_dir, config.rendering))
+        return encode_png(render_regions(
+            base, draw_regions, config.rendering.font_dir, config.rendering,
+            use_lama=req.inpainting_method == "lama",
+        ))
 
     try:
         async with _pipeline_slot(False):
@@ -170,7 +177,9 @@ async def region_erase(req: EraseRequest, account=Depends(verify_token)) -> Eras
     _reject_oversized_image(req.mask)
 
     def work() -> str:
-        return encode_png(erase_mask(decode_image(req.image), decode_image(req.mask)))
+        return encode_png(erase_mask(
+            decode_image(req.image), decode_image(req.mask), use_lama=req.inpainting_method == "lama",
+        ))
 
     try:
         async with _pipeline_slot(False):

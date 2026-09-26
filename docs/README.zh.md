@@ -125,7 +125,11 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | 翻译进度 | 一个小的动态标记会显示当前正在实际翻译中的页面，与仍在自动翻译队列中等待的页面区分开来。 |
 | 重试提示 | 某页连续 3 次自动翻译失败后，会显示一个小红色徽标——点击即可立即重试。 |
 | 气泡外文字 | 默认使用轻量 cleanup 处理 SFX/旁白等气泡外文字。 |
+| LaMa 去字 | 介于轻量 OpenCV cleanup 与 Flux 之间：在 Translate 标签页的 *Inpainting 质量* 中选择 **LaMa**，可在去除文字后重建分格边框、网点和排线，而不是把它们抹糊。约 200MB，首次使用时自动下载，在 CPU 上几秒即可完成（有 GPU 更快）。选中后，橡皮擦和“选择文字区域”工具也会使用它。 |
 | 可选 Flux | 高级用户可下载 Flux Klein 4B 获得更重的 inpainting，而不增加默认 release 体积。 |
+| 替换词典 | 在 **Pro** 标签页：确定性的 `查找 => 替换` 规则（支持 `/正则/`），用于修正 AI 反复译错的地方。*翻译之后* 规则在绘制前改写每条译文——完全精确，且对已缓存页面生效，无需重新调用 AI。*翻译之前* 规则改写原文；在“选择文字区域”工具中完全精确，当 AI 直接读取页面图片时则作为指示发送给 AI。 |
+| 嵌字选项 | 在 **Pro** 标签页：全部大写、左/中/右对齐、固定文字颜色，以及描边（宽度 + 颜色），适用于气泡内和“选择文字区域”中的文字——汉化组常用的嵌字选项。AI 标记的粗体/斜体会保留。 |
+| 本地 LLM | 通过 `OpenAI-Compatible` provider 使用 Ollama 或 LM Studio（任意视觉模型）完全离线翻译，无 API 费用——见 [本地 LLM](#本地-llmollama--lm-studio)。 |
 | 帮助聊天 | 点击弹窗顶部的 **?** 按钮，询问如何安装、配置或使用本扩展——由你自己配置的 LLM 回答，并以本项目自身的文档为依据（不是预设的 FAQ，也不是免费的——会消耗你自己的 API key/额度，和这里的其他 AI 功能一样）。对话记录会在本地保存，跨多次打开弹窗依然存在；可随时清除。 |
 | 弹窗可调整大小 | 拖动弹窗右下角即可调整大小（大多数情况下有效——Chrome 自身有时会重新计算弹窗尺寸，偶尔会"顶"回去），或点击顶部的 **⤢** 在一个普通的、可自由调整大小的窗口中打开同一界面。 |
 | Provider 支持 | Google、OpenAI、Anthropic、xAI、DeepSeek、Z.ai、Moonshot AI、OpenRouter 和 OpenAI-compatible endpoint。 |
@@ -214,6 +218,7 @@ chrome://extensions/
 | `Config` | 扩展 UI 语言和 backend URL。 |
 | `Account` | 使用邮箱或 Google 登录以使用可选的账户级功能（故事数据库）；集中托管部署的用户也在此查看套餐/用量。 |
 | `Story DB` | 可选，需要在 `Account` 标签页登录。管理每个故事的角色数据库、人物关系、术语表和剧情延续笔记，与账户同步。 |
+| `Pro` | 放在主标签页之外的高级选项：文字清晰度（supersampling）、嵌字（全部大写、对齐、文字颜色、描边）以及翻译前/后替换词典。 |
 
 默认 backend URL：
 
@@ -228,6 +233,30 @@ GOOGLE_API_KEY
 OPENAI_API_KEY
 ANTHROPIC_API_KEY
 ```
+
+## 本地 LLM（Ollama / LM Studio）
+
+把 `OpenAI-Compatible` provider 指向你本机运行的模型，即可离线翻译、无 API 费用。
+
+**需要视觉模型。** 模型直接从页面图片读取文字，纯文本模型（普通 Llama、Qwen 2.5 等）看不到任何可翻译的内容。可识图的模型示例：Qwen2.5-VL（Ollama 中为 `qwen2.5vl:7b`）、Gemma 3（`gemma3:12b`），或 LM Studio 标记为视觉能力的任意模型。
+
+**Ollama**
+
+1. 安装 [Ollama](https://ollama.com)，然后拉取视觉模型：`ollama pull qwen2.5vl:7b`（服务运行在 11434 端口）。
+2. 弹窗 → `LLM Config`：Provider 选 `OpenAI-Compatible`，Base URL 填 `http://localhost:11434/v1`，Model 填 `qwen2.5vl:7b`，API key 随便填，例如 `ollama`（该字段不能为空；Ollama 会忽略它）。
+3. 点击 key 旁的 **Test**，然后照常翻译。
+
+**LM Studio**
+
+1. 在 [LM Studio](https://lmstudio.ai) 中下载视觉模型，然后在 Developer 标签页启动本地服务器（端口 1234）。
+2. 弹窗 → `LLM Config`：Provider 选 `OpenAI-Compatible`，Base URL 填 `http://localhost:1234/v1`，Model 填 LM Studio 显示的模型标识，API key 随便填，例如 `lm-studio`。
+
+**注意事项**
+
+- Base URL 由 **后端** 调用，而不是浏览器。如果后端运行在 Docker 中，请用 `http://host.docker.internal:11434/v1`；如果模型在另一台机器上，请用那台机器的局域网地址（Ollama 需以 `OLLAMA_HOST=0.0.0.0` 启动）。
+- 每页会同时发送多张图片。Ollama 默认的上下文窗口可能太小，表现为译文缺失或错乱——请用更大的上下文启动，例如 `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`。开启 **Economy mode** 也有帮助（图片更少、更小）。
+- 7-12B 本地模型在小字或艺术字上明显弱于大型云端模型，没有强力 GPU 时每页可能需要几十秒。如果小模型破坏了编号回答格式（气泡显示翻译错误），可换更大的模型或降低 temperature。
+- 其他所有功能（Story DB、替换词典、嵌字、手动工具）在本地模型下同样可用。
 
 ## 可选 Flux
 
@@ -255,6 +284,8 @@ backend/models/flux/
 
 
 只有在你明确把 outside-text inpainting 配置为 Flux 模式（例如 `flux_klein_4b`）时才使用 Flux。对大多数用户来说，默认 `auto` 更轻、更快。
+
+**折中方案：LaMa。** *Inpainting 质量 → LaMa* 无需 GPU、无需手动安装：约 200MB 的模型（[big-lama TorchScript 导出版](https://huggingface.co/JosephCatrambone/big-lama-torchscript)，Apache-2.0）会在首次使用时下载到 `backend/models/lama/`，在 CPU 上每个区域只需几秒。重建分格边框和网点的效果远好于默认 cleanup，但在大面积绘画区域上不如 Flux。
 
 ## Web 应用（无需扩展）
 

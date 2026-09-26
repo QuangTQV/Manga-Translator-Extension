@@ -373,6 +373,16 @@ def warmup_models(models_dir: Path) -> dict[str, bool]:
     return results
 
 
+def _hex_to_rgb(value: str | None) -> tuple[int, int, int] | None:
+    """'#rrggbb' -> (r, g, b); None/invalid -> None (the automatic color)."""
+    if not value or len(value) != 7 or not value.startswith("#"):
+        return None
+    try:
+        return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))  # type: ignore[return-value]
+    except ValueError:
+        return None
+
+
 def _build_config(
     input_language: str,
     output_language: str,
@@ -398,6 +408,13 @@ def _build_config(
     fonts_base_dir: Path,
     base_url: str | None = None,
     llm_instructions: str | None = None,
+    pre_replacements: str | None = None,
+    lettering_uppercase: bool = False,
+    lettering_align: str = "center",
+    lettering_text_color: str | None = None,
+    lettering_outline_width: float = 0.0,
+    lettering_outline_color: str | None = None,
+    post_replacements: str | None = None,
     context_memory_enabled: bool = False,
     context_memory: str | None = None,
     backup_api_keys: list[str] | None = None,
@@ -503,6 +520,8 @@ def _build_config(
         reasoning_effort=reasoning_effort,
         special_instructions=special_instructions,
         llm_instructions=llm_instructions,
+        pre_replacements=pre_replacements,
+        post_replacements=post_replacements,
         story_characters=resolved_story_characters,
         story_relationships=resolved_story_relationships,
         story_glossary=resolved_story_glossary,
@@ -567,6 +586,11 @@ def _build_config(
         badness_exponent=3.0,
         padding_pixels=5.0,
         detach_trailing_ellipsis=True,
+        uppercase=lettering_uppercase,
+        text_align=lettering_align,
+        text_color_rgb=_hex_to_rgb(lettering_text_color),
+        outline_width=lettering_outline_width,
+        outline_color_rgb=_hex_to_rgb(lettering_outline_color),
     )
 
     output = OutputConfig(

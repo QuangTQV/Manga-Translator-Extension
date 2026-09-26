@@ -176,6 +176,13 @@
        text (Chrome's native field-sizing, no JS resize needed) instead of a
        single-line input that hides everything past its width. */
     .textarea-auto { field-sizing: content; min-height: 0; max-height: 180px; overflow-y: auto; resize: none; transition: none; }
+    .lettering-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; margin-top: 8px; }
+    .lettering-grid .label { margin: 0; }
+    .lettering-color { display: flex; gap: 6px; align-items: center; min-width: 0; }
+    .lettering-color .select { flex: 1; min-width: 0; }
+    .lettering-color input[type=color] { flex: none; width: 34px; height: 30px; padding: 0; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; background: none; cursor: pointer; }
+    /* Pro tab replacement rules: code-like one-rule-per-line lists. */
+    .replacements-textarea { field-sizing: content; min-height: 64px; max-height: 220px; overflow-y: auto; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre; transition: none; }
     .llm-fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .model-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .header-buttons { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
@@ -428,6 +435,7 @@
           <label class="label" data-i18n="labelInpaintingMethod">Inpainting quality</label>
           <select id="f-inpainting-method" class="select">
             <option value="auto" data-i18n="inpaintingMethodAuto">Auto (fast, OpenCV)</option>
+            <option value="lama" data-i18n="inpaintingMethodLama">LaMa (balanced, runs on CPU, ~200MB)</option>
             <option value="flux_klein_4b" data-i18n="inpaintingMethodFluxLocal">Flux Klein 4B (local GPU)</option>
             <option value="flux_klein_4b_remote" data-i18n="inpaintingMethodFluxRemote">Flux Klein 4B (remote)</option>
             <option value="flux_klein_9b_remote" data-i18n="inpaintingMethodFlux9bRemote">Flux Klein 9B (remote)</option>
@@ -841,6 +849,58 @@
           <option value="4">4× — sharpest (default)</option>
         </select>
         <div class="toggle-hint" data-i18n="hintSupersampling">Each bubble's text is rendered at this multiple of its final size, then downscaled — higher looks sharper (especially on the hover-to-magnify crop) but renders slower.</div>
+
+        <label class="label" style="margin-top:14px" data-i18n="labelLettering">Lettering</label>
+        <div class="toggle-hint" data-i18n="hintLettering">How translated text is drawn in speech bubbles and Select text area boxes (text outside bubbles keeps its own style).</div>
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelLetteringUppercase">ALL CAPS</div>
+          </div>
+          <label class="toggle">
+            <input id="f-lettering-uppercase" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="lettering-grid">
+          <label class="label" for="f-lettering-align" data-i18n="labelLetteringAlign">Alignment</label>
+          <select id="f-lettering-align" class="select">
+            <option value="center" data-i18n="letteringAlignCenter">Center</option>
+            <option value="left" data-i18n="letteringAlignLeft">Left</option>
+            <option value="right" data-i18n="letteringAlignRight">Right</option>
+          </select>
+          <label class="label" for="f-lettering-text-color-mode" data-i18n="labelLetteringTextColor">Text color</label>
+          <div class="lettering-color">
+            <select id="f-lettering-text-color-mode" class="select">
+              <option value="auto" data-i18n="letteringColorAuto">Auto</option>
+              <option value="custom" data-i18n="letteringColorCustom">Custom</option>
+            </select>
+            <input id="f-lettering-text-color" type="color" value="#000000" />
+          </div>
+          <label class="label" for="f-lettering-outline-width" data-i18n="labelLetteringOutline">Outline</label>
+          <div class="lettering-color">
+            <select id="f-lettering-outline-width" class="select">
+              <option value="0" data-i18n="letteringOutlineNone">None</option>
+              <option value="1">1 px</option>
+              <option value="2">2 px</option>
+              <option value="3">3 px</option>
+              <option value="4">4 px</option>
+            </select>
+            <select id="f-lettering-outline-color-mode" class="select">
+              <option value="auto" data-i18n="letteringColorAuto">Auto</option>
+              <option value="custom" data-i18n="letteringColorCustom">Custom</option>
+            </select>
+            <input id="f-lettering-outline-color" type="color" value="#ffffff" />
+          </div>
+        </div>
+
+        <label class="label" style="margin-top:14px" data-i18n="labelReplacements">Replacement dictionary</label>
+        <div class="toggle-hint" data-i18n="hintReplacements">One rule per line: find => replace. Use /pattern/ => replace for a regular expression (/pattern/i ignores case, $1 inserts a group). Leave the right side empty to delete. Lines starting with # are comments.</div>
+        <label class="label" style="margin-top:8px" data-i18n="labelPostReplacements">After translation</label>
+        <textarea id="f-post-replacements" class="textarea replacements-textarea" spellcheck="false" placeholder="Akila => Akira&#10;/\s+!/ => !"></textarea>
+        <div class="toggle-hint" data-i18n="hintPostReplacements">Applied to every translation before it's drawn — exact, and works on already-cached pages without a new AI call.</div>
+        <label class="label" style="margin-top:8px" data-i18n="labelPreReplacements">Before translation (source text)</label>
+        <textarea id="f-pre-replacements" class="textarea replacements-textarea" spellcheck="false" placeholder="アキラ => 晃"></textarea>
+        <div class="toggle-hint" data-i18n="hintPreReplacements">Rewrites the source text before the AI translates it. Exact in Select text area and when OCR runs as its own step; when the AI reads the page image directly (the default), the plain rules are passed to it as instructions and regex rules are skipped.</div>
       </div>
     </div>
 

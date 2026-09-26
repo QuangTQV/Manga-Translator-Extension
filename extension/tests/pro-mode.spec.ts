@@ -60,6 +60,130 @@ test.describe('Pro-tab settings', () => {
     expect(capturedBody).toBeTruthy();
     expect(capturedBody.supersampling_factor).toBe(1);
   });
+
+  test('replacement dictionaries persist across reload and are sent as pre_/post_replacements', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Pro' }).click();
+    await popup.locator('#f-post-replacements').fill('Akila => Akira\n/\\s+!/ => !');
+    await popup.locator('#f-post-replacements').blur();
+    await popup.locator('#f-pre-replacements').fill('アキラ => 晃');
+    await popup.locator('#f-pre-replacements').blur();
+    await popup.waitForTimeout(300);
+
+    const reloaded = await context.newPage();
+    await reloaded.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await reloaded.getByRole('button', { name: 'Pro' }).click();
+    await expect(reloaded.locator('#f-post-replacements')).toHaveValue('Akila => Akira\n/\\s+!/ => !');
+    await expect(reloaded.locator('#f-pre-replacements')).toHaveValue('アキラ => 晃');
+
+    let capturedBody: any = null;
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(SINGLE_URL);
+    await mangaPage.bringToFront();
+    await reloaded.locator('.tab-btn[data-tab="translate"]').click();
+    await reloaded.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await mangaPage.waitForTimeout(2000);
+
+    expect(capturedBody).toBeTruthy();
+    expect(capturedBody.post_replacements).toBe('Akila => Akira\n/\\s+!/ => !');
+    expect(capturedBody.pre_replacements).toBe('アキラ => 晃');
+  });
+});
+
+test.describe('Pro-tab lettering', () => {
+  test('lettering options persist, color pickers appear only for Custom, and the choices are sent with a translate request', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.getByRole('button', { name: 'Pro' }).click();
+    await expect(popup.locator('#f-lettering-text-color')).toBeHidden();
+    await expect(popup.locator('#f-lettering-outline-color-mode')).toBeHidden();
+
+    await popup.locator('#f-lettering-uppercase').evaluate((el: HTMLInputElement) => {
+      el.checked = true;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await popup.locator('#f-lettering-align').selectOption('left');
+    await popup.locator('#f-lettering-text-color-mode').selectOption('custom');
+    await expect(popup.locator('#f-lettering-text-color')).toBeVisible();
+    await popup.locator('#f-lettering-text-color').evaluate((el: HTMLInputElement) => {
+      el.value = '#112233';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await popup.locator('#f-lettering-outline-width').selectOption('2');
+    await expect(popup.locator('#f-lettering-outline-color-mode')).toBeVisible();
+    await expect(popup.locator('#f-lettering-outline-color')).toBeHidden();
+    await popup.waitForTimeout(300);
+
+    const reloaded = await context.newPage();
+    await reloaded.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await reloaded.getByRole('button', { name: 'Pro' }).click();
+    await expect(reloaded.locator('#f-lettering-uppercase')).toBeChecked();
+    await expect(reloaded.locator('#f-lettering-align')).toHaveValue('left');
+    await expect(reloaded.locator('#f-lettering-text-color-mode')).toHaveValue('custom');
+    await expect(reloaded.locator('#f-lettering-text-color')).toHaveValue('#112233');
+    await expect(reloaded.locator('#f-lettering-outline-width')).toHaveValue('2');
+    await expect(reloaded.locator('#f-lettering-outline-color-mode')).toHaveValue('auto');
+
+    let capturedBody: any = null;
+    await context.route('**/translate', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      capturedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_TRANSLATED_IMAGE_B64, bubbles: [], processing_time_seconds: 0.1,
+          source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: [], memory_note: null,
+        }),
+      });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(SINGLE_URL);
+    await mangaPage.bringToFront();
+    await reloaded.locator('.tab-btn[data-tab="translate"]').click();
+    await reloaded.locator('#btn-scan').click();
+    await mangaPage.waitForTimeout(1500);
+    const cdp = await context.newCDPSession(mangaPage);
+    await cdp.send('DOM.enable');
+    await clickScannerAction(mangaPage, cdp, 'select-all');
+    await mangaPage.waitForTimeout(150);
+    await clickScannerAction(mangaPage, cdp, 'translate');
+    await mangaPage.waitForTimeout(2000);
+
+    expect(capturedBody).toBeTruthy();
+    expect(capturedBody.lettering_uppercase).toBe(true);
+    expect(capturedBody.lettering_align).toBe('left');
+    expect(capturedBody.lettering_text_color).toBe('#112233');
+    expect(capturedBody.lettering_outline_width).toBe(2);
+    expect(capturedBody.lettering_outline_color).toBeUndefined();
+  });
 });
 
 test.describe('CBZ export', () => {

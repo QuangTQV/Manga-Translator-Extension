@@ -151,6 +151,14 @@ export interface TranslateConfig {
   reasoningEffort?: string;
   specialInstructions?: string; // per-story notes (glossary, character relationships)
   llmInstructions?: string; // persistent, story-independent style/behavior guidance
+  preReplacements?: string; // Pro tab: "find => replace" rules for the source text (backend core/text/replacements.py)
+  postReplacements?: string; // Pro tab: same, for the translation before it's drawn
+  // Pro tab lettering (speech-bubble + manual-region text); unset = backend default/auto
+  letteringUppercase?: boolean;
+  letteringAlign?: 'center' | 'left' | 'right';
+  letteringTextColor?: string; // "#rrggbb"
+  letteringOutlineWidth?: number; // px, 0-4
+  letteringOutlineColor?: string; // "#rrggbb"
   suggestStoryTitle?: string; // optional title typed next to the "Suggest" button, to help its web search — was previously never saved/loaded at all, unlike every other field on this tab
   suggestWebSearch?: boolean; // "Search the internet for this story" checkbox for the Suggest button — same gap as above
   contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
@@ -276,6 +284,13 @@ export interface TranslateRequest {
   reasoning_effort?: string;
   special_instructions?: string;
   llm_instructions?: string;
+  pre_replacements?: string;
+  post_replacements?: string;
+  lettering_uppercase?: boolean;
+  lettering_align?: 'center' | 'left' | 'right';
+  lettering_text_color?: string;
+  lettering_outline_width?: number;
+  lettering_outline_color?: string;
   context_memory_enabled?: boolean;
   context_memory?: string;
   backup_api_keys?: string[];

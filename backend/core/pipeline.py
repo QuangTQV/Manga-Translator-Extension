@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.config import MangaTranslatorConfig, PreprocessingConfig, RenderingConfig
 from core.scaling import scale_font_size, scale_length, scale_scalar
+from core.text.replacements import apply_rules, parse_rules
 from utils.exceptions import (
     CancellationError,
     CleaningError,
@@ -1329,6 +1330,17 @@ def translate_and_render(
                         if bubble_images_b64 and not valid_translations:
                             raise TranslationError("All bubbles failed.")
 
+                        # User post rules (Pro tab). Applied here, after the
+                        # translation cache, so editing them takes effect on
+                        # a cached page without a new LLM call.
+                        post_rules = parse_rules(config.translation.post_replacements)
+                        if post_rules:
+                            valid_set = set(valid_translations)
+                            translated_texts = [
+                                apply_rules(t, post_rules) if t in valid_set else t
+                                for t in translated_texts
+                            ]
+
                 # Render Translations
                 bubble_render_info_map = {
                     _bbox_key(info["bbox"]): {
@@ -1506,11 +1518,18 @@ def translate_and_render(
                             badness_exponent=config.rendering.badness_exponent,
                             padding_pixels=padding_pixels,
                             outline_width=(
-                                osb_outline_width if is_outside_text else 0.0
+                                osb_outline_width
+                                if is_outside_text
+                                else config.rendering.outline_width
                             ),
                             supersampling_factor=config.rendering.supersampling_factor,
                             detach_trailing_ellipsis=config.rendering.detach_trailing_ellipsis,
                         )
+                        if not is_outside_text:
+                            render_config.uppercase = config.rendering.uppercase
+                            render_config.text_align = config.rendering.text_align
+                            render_config.text_color_rgb = config.rendering.text_color_rgb
+                            render_config.outline_color_rgb = config.rendering.outline_color_rgb
                         success = False
                         if is_outside_text:
                             try:

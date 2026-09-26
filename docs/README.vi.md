@@ -125,7 +125,11 @@ Cài đặt mặc định giữ nhẹ: backend tự tải model (không Flux) tr
 | Đang dịch | Một dấu hiệu nhỏ động (3 chấm nhấp nhô) hiện ở trang nào đang thật sự được dịch, phân biệt với các trang còn đang chờ trong hàng đợi auto-translate. |
 | Báo hiệu thử lại | Trang bị lỗi auto-translate 3 lần liên tiếp sẽ hiện badge đỏ nhỏ — bấm vào để thử lại ngay. |
 | Chữ ngoài bubble | Xử lý SFX/lời dẫn ngoài bubble bằng cleanup nhẹ mặc định. |
+| Xoá chữ bằng LaMa | Lựa chọn ở giữa cleanup OpenCV nhẹ và Flux: chọn **LaMa** ở mục *Chất lượng xoá chữ* (tab Translate) để dựng lại viền khung, screentone, nét gạch sau chỗ chữ bị xoá thay vì làm nhoè. ~200MB, tự tải lần đầu dùng, chạy CPU vài giây (nhanh hơn nếu có GPU). Công cụ Tẩy và Chọn vùng chữ cũng dùng LaMa khi bạn chọn nó. |
 | Flux tùy chọn | Cho phép người dùng nâng cao tải Flux Klein 4B để inpainting nặng hơn mà không làm nặng release mặc định. |
+| Từ điển thay thế | Ở tab **Pro**: quy tắc `tìm => thay` cố định (hỗ trợ `/regex/`) cho những lỗi AI cứ dịch sai mãi. Quy tắc *Sau khi dịch* sửa mọi bản dịch trước khi vẽ lên ảnh — chính xác tuyệt đối, và áp dụng cả với trang đã cache mà không cần gọi AI lại. Quy tắc *Trước khi dịch* sửa văn bản gốc; chính xác trong công cụ Chọn vùng chữ, còn khi AI đọc thẳng ảnh trang thì được gửi cho AI như chỉ dẫn. |
+| Tuỳ chọn kiểu chữ | Ở tab **Pro**: VIẾT HOA, căn trái/giữa/phải, màu chữ cố định và viền chữ (độ dày + màu) cho chữ trong bong bóng và vùng Chọn vùng chữ — các lựa chọn lettering quen thuộc của nhóm dịch. Chữ đậm/nghiêng từ AI vẫn được giữ. |
+| LLM chạy local | Dịch hoàn toàn offline, không tốn phí API bằng Ollama hoặc LM Studio (model có khả năng nhìn ảnh) qua provider `OpenAI-Compatible` — xem [LLM Chạy Local](#llm-chạy-local-ollama--lm-studio). |
 | Chatbot hỗ trợ | Bấm nút **?** ở header popup để hỏi về cách cài đặt, cấu hình hoặc sử dụng extension — được trả lời bởi chính LLM bạn đã cấu hình, dựa trên tài liệu thật của dự án (không phải FAQ dựng sẵn, và không miễn phí — tốn API key/quota của bạn như mọi tính năng AI khác). Lịch sử chat được lưu lại trên máy qua các lần mở popup; có thể xoá bất cứ lúc nào. |
 | Popup có thể resize | Kéo góc dưới-phải của popup để đổi kích cỡ (thường hoạt động tốt — đôi khi Chrome tự đo lại kích cỡ popup và có thể "cãi" lại việc kéo), hoặc bấm **⤢** ở header để mở cùng giao diện đó trong 1 cửa sổ bình thường, resize tự do. |
 | Provider | Google, OpenAI, Anthropic, xAI, DeepSeek, Z.ai, Moonshot AI, OpenRouter và endpoint OpenAI-compatible. |
@@ -214,6 +218,7 @@ Mở popup extension và dùng các tab:
 | `Config` | Ngôn ngữ giao diện extension và backend URL. |
 | `Account` | Đăng nhập bằng email hoặc Google để dùng các tính năng tùy chọn theo tài khoản (CSDL truyện); cũng là nơi người dùng backend hosted tập trung xem gói/mức dùng. |
 | `Story DB` | Tùy chọn, cần đăng nhập ở tab `Account`. CSDL nhân vật, mối quan hệ, thuật ngữ, và ghi chú diễn biến cho từng truyện, đồng bộ theo tài khoản. |
+| `Pro` | Các tuỳ chọn nâng cao tách khỏi tab chính: độ nét chữ (supersampling), kiểu chữ (viết hoa, căn lề, màu chữ, viền) và từ điển thay thế trước/sau khi dịch. |
 
 Backend URL mặc định:
 
@@ -228,6 +233,30 @@ GOOGLE_API_KEY
 OPENAI_API_KEY
 ANTHROPIC_API_KEY
 ```
+
+## LLM Chạy Local (Ollama / LM Studio)
+
+Dịch offline, không tốn phí API bằng cách trỏ provider `OpenAI-Compatible` tới model chạy trên chính máy bạn.
+
+**Cần model nhìn được ảnh (vision).** Model đọc chữ thẳng từ ảnh trang, nên model chỉ có chữ (Llama, Qwen 2.5 thường...) không có gì để dịch. Ví dụ model nhìn được ảnh: Qwen2.5-VL (`qwen2.5vl:7b` trong Ollama), Gemma 3 (`gemma3:12b`), hoặc model nào LM Studio đánh dấu là vision.
+
+**Ollama**
+
+1. Cài [Ollama](https://ollama.com), rồi tải model: `ollama pull qwen2.5vl:7b` (server tự chạy ở cổng 11434).
+2. Popup → `LLM Config`: Provider `OpenAI-Compatible`, Base URL `http://localhost:11434/v1`, Model `qwen2.5vl:7b`, API key: gõ chữ bất kỳ như `ollama` (ô này không được để trống; Ollama bỏ qua nó).
+3. Bấm **Test** cạnh key, rồi dịch như bình thường.
+
+**LM Studio**
+
+1. Tải một model vision trong [LM Studio](https://lmstudio.ai), vào tab Developer và bật local server (cổng 1234).
+2. Popup → `LLM Config`: Provider `OpenAI-Compatible`, Base URL `http://localhost:1234/v1`, Model: tên model LM Studio hiển thị, API key: chữ bất kỳ như `lm-studio`.
+
+**Cần biết**
+
+- Base URL do **backend** gọi, không phải trình duyệt. Nếu backend chạy trong Docker, dùng `http://host.docker.internal:11434/v1`; nếu model chạy ở máy khác, dùng địa chỉ LAN của máy đó (với Ollama, chạy kèm `OLLAMA_HOST=0.0.0.0`).
+- Mỗi trang gửi nhiều ảnh cùng lúc. Context mặc định của Ollama có thể quá nhỏ, biểu hiện là bản dịch bị thiếu hoặc lộn xộn — chạy với context lớn hơn, ví dụ `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Bật **Economy mode** cũng giúp (ít ảnh hơn, ảnh nhỏ hơn).
+- Model local 7-12B kém rõ rệt so với model cloud lớn khi gặp chữ nhỏ hoặc chữ cách điệu, và mỗi trang có thể mất vài chục giây nếu không có GPU mạnh. Nếu model nhỏ làm hỏng định dạng trả lời đánh số (bong bóng báo lỗi dịch), thử model lớn hơn hoặc giảm temperature.
+- Mọi tính năng khác (Story DB, từ điển thay thế, kiểu chữ, công cụ thủ công) hoạt động y hệt với model local.
 
 ## Flux Tùy Chọn
 
@@ -252,6 +281,8 @@ backend/models/flux/
 ```
 
 Chỉ dùng Flux khi bạn cấu hình outside-text inpainting sang một mode Flux như `flux_klein_4b`. Với đa số người dùng, mặc định `auto` nhẹ hơn và nhanh hơn.
+
+**Ở giữa: LaMa.** *Chất lượng xoá chữ → LaMa* không cần GPU và không cần cài thủ công: model ~200MB ([bản TorchScript của big-lama](https://huggingface.co/JosephCatrambone/big-lama-torchscript), Apache-2.0) tự tải vào `backend/models/lama/` lần đầu dùng và chạy CPU vài giây mỗi vùng. Dựng lại viền khung và screentone tốt hơn hẳn cleanup mặc định, dù không bằng Flux với vùng tranh lớn.
 
 **Không có GPU? Chạy Flux trên GPU từ xa.** Mục *Inpainting quality* trong popup còn có `Flux Klein 4B (remote)` và `Flux Klein 9B (remote)`: chạy `backend/flux_worker.py` trên GPU free của Kaggle (hoặc máy có GPU khác), mở tunnel `cloudflared` rồi dán URL vào popup — máy bạn không phải cài gì nặng. Nên bảo vệ worker bằng `--token` / `FLUX_WORKER_TOKEN` và điền cùng giá trị vào ô Token trong popup. Nếu worker chết hoặc từ chối token, trang vẫn được dịch (chữ ngoài bubble giữ nguyên), có toast cảnh báo lý do, và backend tạm ngừng gọi worker chết khoảng 60 giây. Hướng dẫn từng bước: [HUONG-DAN-CHAY.md](HUONG-DAN-CHAY.md#8-tuỳ-chọn-chạy-flux-từ-xa-trên-gpu-free-của-kaggle).
 

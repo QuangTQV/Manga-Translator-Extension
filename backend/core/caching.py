@@ -259,6 +259,9 @@ class UnifiedCache:
                 if getattr(config, "llm_instructions", None)
                 else None
             ),
+            # Pre rules change what the model is asked to translate; post
+            # rules are applied after the cache, so they needn't be keyed.
+            "pre_replacements": (getattr(config, "pre_replacements", None) or "").strip() or None,
             "context_memory_enabled": getattr(config, "context_memory_enabled", False),
             "context_memory": (
                 config.context_memory.strip()

@@ -26,6 +26,10 @@ GRAYSCALE_MIDPOINT = 128  # Threshold for determining text color
 FALLBACK_PADDING_RATIO = 0.08  # 8% padding ratio when safe area calculation fails
 
 
+def _skia_color(rgb: Optional[Tuple[int, int, int]]) -> Optional[int]:
+    return None if rgb is None else skia.Color(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+
 def render_text_skia(
     pil_image: Image.Image,
     text: str,
@@ -117,6 +121,9 @@ def render_text_skia(
     # Initialize config with defaults if not provided
     if config is None:
         config = RenderingConfig()
+    if config.uppercase:
+        # Style markers (*, **) have no case, so they survive untouched.
+        layout_text = layout_text.upper()
 
     layout_box_top_left = None
     safe_area_result = None
@@ -266,6 +273,8 @@ def render_text_skia(
                 )
 
     # Determine text color contrast based on sampled background brightness
+    if config.text_color_rgb is not None:  # the user's lettering choice wins
+        text_color_rgb = config.text_color_rgb
     text_color = skia.ColorBLACK
     if text_color_rgb is not None:
         text_color = skia.Color(text_color_rgb[0], text_color_rgb[1], text_color_rgb[2])
@@ -384,6 +393,8 @@ def render_text_skia(
             config.font_hinting,
             config.outline_width * factor,  # Scale outline width too
             verbose,
+            text_align=config.text_align,
+            outline_color=_skia_color(config.outline_color_rgb),
             pre_translate_x=(
                 float(scaled_target_center_x)
                 if (rotation_deg and abs(rotation_deg) > 0.01)
@@ -453,6 +464,8 @@ def render_text_skia(
             config.font_hinting,
             config.outline_width,
             verbose,
+            text_align=config.text_align,
+            outline_color=_skia_color(config.outline_color_rgb),
             pre_translate_x=(
                 float(target_center_x)
                 if (rotation_deg and abs(rotation_deg) > 0.01)
