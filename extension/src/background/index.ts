@@ -1,6 +1,5 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
 import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
-import { effectiveConfig } from '../shared/economy.js';
 import { normalizeUiLanguage, t } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -59,7 +58,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void (async () => {
     if (message.type === 'GET_SETTINGS') {
       sendResponse({ settings: await getSettings() });
@@ -156,20 +155,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
-    if (message.type === 'TRANSLATE_IMAGE') {
-      const { imageUrl, pageUrl } = message as { type: string; imageUrl: string; pageUrl?: string };
-      console.log('[BG] TRANSLATE_IMAGE:', imageUrl, 'pageUrl:', pageUrl);
-      try {
-        const result = await fetchAndTranslate(imageUrl, pageUrl);
-        console.log('[BG] fetchAndTranslate result:', result);
-        sendResponse(result);
-      } catch (error) {
-        console.log('[BG] fetchAndTranslate error:', error);
-        sendResponse({ error: error instanceof Error ? error.message : String(error) });
-      }
-      return;
-    }
-
     if (message.type === 'LIST_MODELS') {
       const { baseUrl, apiKey, provider } = message as { type: string; baseUrl: string; apiKey: string; provider?: string };
       console.log('[BG] LIST_MODELS:', baseUrl);
@@ -188,7 +173,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const { imageUrl, pageUrl, body } = message as { type: string; imageUrl: string; pageUrl?: string; body: TranslateRequest };
       console.log('[BG] TRANSLATE_IMAGE_WITH_BODY:', imageUrl, 'pageUrl:', pageUrl);
       try {
-        const result = await fetchAndTranslateWithBody(imageUrl, pageUrl, body);
+        const result = await fetchAndTranslateWithBody(imageUrl, pageUrl, body, sender.tab?.id);
         console.log('[BG] fetchAndTranslateWithBody result:', result);
         sendResponse(result);
       } catch (error) {
@@ -274,7 +259,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message.type === 'REGION_API') {
       const { path, body } = message as { type: string; path: string; body: Record<string, unknown> };
-      sendResponse(await regionApiCall(path, body));
+      sendResponse(await regionApiCall(path, body, sender.tab?.id));
       return;
     }
 
@@ -390,7 +375,7 @@ function authHeaders(settings: AppSettings): Record<string, string> {
 // Fetch image + translate via backend (runs in background — no CORS)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | undefined, body: TranslateRequest): Promise<TranslateResult> {
+async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | undefined, body: TranslateRequest, tabId?: number): Promise<TranslateResult> {
   // Image is already fetched and base64-encoded by content script (with page cookies/auth).
   // Background only calls the backend API — no image fetching here.
   void imageUrl;
@@ -410,6 +395,7 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
   const endpoint = `${backendUrl.replace(/\/$/, '')}/translate`;
 
+  const stopDownloadWatch = watchModelDownloads(tabId, backendUrl);
   try {
     console.log('[BG] fetchAndTranslateWithBody calling backend:', endpoint);
     const res = await fetch(endpoint, {
@@ -441,6 +427,8 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
     const msg = e instanceof Error ? e.message : String(e);
     console.log('[BG] fetchAndTranslateWithBody backend exception:', msg);
     return { error: `Translate error: ${msg}` };
+  } finally {
+    stopDownloadWatch();
   }
 }
 
@@ -800,10 +788,11 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
 // text, render text over it. Only these three paths are proxied.
 const REGION_PATHS = new Set(['/region/ocr', '/region/translate', '/region/render', '/region/erase']);
 
-async function regionApiCall(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+async function regionApiCall(path: string, body: Record<string, unknown>, tabId?: number): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   if (!REGION_PATHS.has(path)) return { ok: false, error: 'Unsupported region endpoint' };
   const settings = await getSettings();
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const stopDownloadWatch = watchModelDownloads(tabId, backendUrl);
   try {
     const res = await fetch(`${backendUrl.replace(/\/$/, '')}${path}`, {
       method: 'POST',
@@ -821,7 +810,66 @@ async function regionApiCall(path: string, body: Record<string, unknown>): Promi
     return { ok: true, data: await res.json() };
   } catch (e) {
     return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg: e instanceof Error ? e.message : String(e) }) };
+  } finally {
+    stopDownloadWatch();
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// First-use model downloads
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The backend fetches ML weights lazily the first time a feature needs them
+// (LaMa ~0.2 GB, manga-ocr ~0.9 GB, PaddleOCR-VL ~1.9 GB). From the page that
+// just looks like a translation that never finishes, so while a backend
+// request to a tab is slow we ask GET /health whether the backend is
+// downloading something and tell that tab (content-script MODEL_DOWNLOADS
+// toast). One poller per tab no matter how many requests it has in flight
+// (auto-translate runs several pages at once).
+
+const DOWNLOAD_WATCH_DELAY_MS = 4_000; // quick requests never poll at all
+const DOWNLOAD_WATCH_INTERVAL_MS = 2_500;
+const DOWNLOAD_NOTICE_REPEAT_MS = 20_000; // the toast is short-lived; refresh it while the download runs
+
+interface ModelDownload { name: string; approx_mb: number | null; elapsed_seconds: number }
+interface DownloadWatcher { count: number; timer?: ReturnType<typeof setTimeout>; lastNoticeAt: number; lastNames: string }
+const downloadWatchers = new Map<number, DownloadWatcher>();
+
+// Returns the function that ends this request's watch. A no-op without a tab
+// (requests made from the popup have nobody to tell).
+function watchModelDownloads(tabId: number | undefined, backendUrl: string): () => void {
+  if (tabId === undefined) return () => {};
+  let watcher = downloadWatchers.get(tabId);
+  if (!watcher) {
+    watcher = { count: 0, lastNoticeAt: 0, lastNames: '' };
+    downloadWatchers.set(tabId, watcher);
+    const w = watcher;
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch(`${backendUrl.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(3_000) });
+        const downloads = ((await res.json()) as { downloads?: ModelDownload[] }).downloads ?? [];
+        const names = downloads.map((d) => d.name).join('|');
+        if (downloads.length > 0 && (names !== w.lastNames || Date.now() - w.lastNoticeAt >= DOWNLOAD_NOTICE_REPEAT_MS)) {
+          w.lastNames = names;
+          w.lastNoticeAt = Date.now();
+          await chrome.tabs.sendMessage(tabId, { type: 'MODEL_DOWNLOADS', downloads });
+        } else if (downloads.length === 0) {
+          w.lastNames = '';
+        }
+      } catch { /* backend busy/unreachable or tab gone: this is only a courtesy notice */ }
+      if (downloadWatchers.get(tabId) === w) w.timer = setTimeout(() => { void poll(); }, DOWNLOAD_WATCH_INTERVAL_MS);
+    };
+    w.timer = setTimeout(() => { void poll(); }, DOWNLOAD_WATCH_DELAY_MS);
+  }
+  watcher.count += 1;
+  const mine = watcher;
+  return () => {
+    mine.count -= 1;
+    if (mine.count <= 0 && downloadWatchers.get(tabId) === mine) {
+      clearTimeout(mine.timer);
+      downloadWatchers.delete(tabId);
+    }
+  };
 }
 
 async function storiesList(): Promise<StoryListResult> {
@@ -929,100 +977,6 @@ interface TranslateResult {
   memory_note?: string;
   warnings?: string[];
   error?: string;
-}
-
-async function fetchAndTranslate(imageUrl: string, pageUrl: string | undefined): Promise<TranslateResult> {
-  const settings = await getSettings();
-  if (settings.extensionEnabled === false) {
-    console.log('[BG] fetchAndTranslate skipped: extension disabled');
-    return { error: 'Extension is disabled' };
-  }
-  const referer = pageUrl ? pageUrl.split('/').slice(0, 3).join('/') : '';
-  console.log('[BG] fetchAndTranslate url:', imageUrl, 'referer:', referer);
-  // 1. Fetch image
-  let base64: string;
-  try {
-    const res = await fetch(imageUrl, {
-      headers: {
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': referer,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
-    console.log('[BG] fetchAndTranslate image status:', res.status, res.statusText);
-    if (!res.ok) return { error: `Image fetch failed: HTTP ${res.status} for ${imageUrl}` };
-    const blob = await res.blob();
-    base64 = await new Promise<string>((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onloadend = () => resolve((fr.result as string).replace(/^data:image\/\w+;base64,/, ''));
-      fr.onerror = reject;
-      fr.readAsDataURL(blob);
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log('[BG] fetchAndTranslate image exception:', msg);
-    return { error: `Image fetch error: ${msg}` };
-  }
-
-  // 2. Translate
-  const backendUrl = settings.backendUrl || 'http://localhost:7677';
-  const endpoint = `${backendUrl.replace(/\/$/, '')}/translate`;
-
-  const body: TranslateRequest = {
-    image: base64,
-    input_language: settings.config.inputLanguage,
-    output_language: settings.config.outputLanguage,
-    provider: settings.config.providerGroups[0]?.provider ?? 'Google',
-    base_url: settings.config.providerGroups[0]?.baseUrl,
-    model_name: settings.config.providerGroups[0]?.modelName,
-    api_key: settings.config.providerGroups[0]?.apiKeys.find((k) => k.enabled)?.key,
-    temperature: settings.config.temperature,
-    top_p: settings.config.topP,
-    top_k: settings.config.topK,
-    translation_mode: settings.config.translationMode,
-    ocr_method: settings.config.ocrMethod,
-    font_dir: settings.config.fontDir || undefined,
-    max_font_size: settings.config.maxFontSize,
-    min_font_size: settings.config.minFontSize,
-    supersampling_factor: settings.config.supersamplingFactor,
-    send_full_page_context: effectiveConfig(settings.config).sendFullPageContext,
-    image_detail: effectiveConfig(settings.config).imageDetail,
-    economy_mode: settings.config.economyMode ? true : undefined,
-    outside_text_enabled: settings.config.outsideTextEnabled ?? false,
-  };
-
-  try {
-    console.log('[BG] fetchAndTranslate calling backend:', endpoint);
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const errBody = await res.json() as Record<string, unknown>;
-        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
-        else detail = JSON.stringify(errBody).slice(0, 200);
-      } catch { /* ignore */ }
-      console.log('[BG] fetchAndTranslate backend error:', detail);
-      return { error: `Translate failed: ${detail}` };
-    }
-
-    const data = (await res.json()) as TranslateResponse;
-    console.log('[BG] fetchAndTranslate success');
-    return {
-      translated_image: data.translated_image,
-      bubbles: data.bubbles,
-      processing_time_seconds: data.processing_time_seconds,
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log('[BG] fetchAndTranslate backend exception:', msg);
-    return { error: `Translate error: ${msg}` };
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -78,6 +78,7 @@ const EN_MESSAGES = {
   networkError: 'Network error',
   fluxRemoteUnreachable: 'Flux remote worker is unreachable — outside-bubble text was left as-is on this page. Check that your Kaggle session/tunnel is still running and the URL is current.',
   fluxRemoteUnauthorized: 'Flux remote worker rejected the token — outside-bubble text was left as-is. Check the Token field in the popup.',
+  modelDownloading: "First-time setup: downloading {name}{size}. This page will translate once it finishes (a few minutes on a slow connection).",
   extensionDisabled: 'Extension is disabled',
   suggestInstructions: 'Suggest Notes',
   suggestInstructionsHint: 'Analyze selected pages and draft Story Notes (cast, relationships, tone)',
@@ -180,6 +181,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     networkError: 'Loi mang',
     fluxRemoteUnreachable: 'Khong ket noi duoc Flux worker tu xa — chu ngoai bong bong thoai duoc giu nguyen o trang nay. Kiem tra session Kaggle/tunnel con chay va URL con moi khong.',
     fluxRemoteUnauthorized: 'Flux worker tu xa tu choi token — chu ngoai bong bong thoai duoc giu nguyen. Kiem tra o Token trong popup.',
+    modelDownloading: "Cai dat lan dau: dang tai {name}{size}. Trang nay se duoc dich xong khi tai xong (co the mat vai phut neu mang cham).",
     extensionDisabled: 'Tien ich dang tat',
     suggestInstructions: 'Goi y ghi chu',
     suggestInstructionsHint: 'Phan tich cac trang da chon va soan Ghi chu truyen (nhan vat, quan he, van phong)',
@@ -277,6 +279,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     networkError: '网络错误',
     fluxRemoteUnreachable: '无法连接远程 Flux worker——本页气泡外文字保持原样。请检查 Kaggle 会话/隧道是否仍在运行，URL 是否为最新。',
     fluxRemoteUnauthorized: '远程 Flux worker 拒绝了令牌——气泡外文字保持原样。请检查弹窗中的 Token 字段。',
+    modelDownloading: "首次设置：正在下载 {name}{size}。下载完成后本页才会翻译（网速慢时可能需要几分钟）。",
     extensionDisabled: '扩展已停用',
     suggestInstructions: '生成建议',
     suggestInstructionsHint: '分析已选页面并起草故事笔记（角色、关系、语气）',
@@ -374,6 +377,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     networkError: 'ネットワークエラー',
     fluxRemoteUnreachable: 'リモート Flux worker に接続できません——このページの吹き出し外の文字はそのままです。Kaggle セッション/トンネルが動いているか、URL が最新か確認してください。',
     fluxRemoteUnauthorized: 'リモート Flux worker がトークンを拒否しました——吹き出し外の文字はそのままです。ポップアップの Token 欄を確認してください。',
+    modelDownloading: "初回セットアップ：{name}{size} をダウンロード中です。完了するとこのページが翻訳されます（回線が遅い場合は数分かかります）。",
     extensionDisabled: '拡張機能は無効です',
     suggestInstructions: 'ノートを提案',
     suggestInstructionsHint: '選択したページを分析し、ストーリーメモ（登場人物・関係・トーン）を作成します',
@@ -471,6 +475,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     networkError: '네트워크 오류',
     fluxRemoteUnreachable: '원격 Flux worker에 연결할 수 없습니다 — 이 페이지의 말풍선 밖 글자는 그대로 남았습니다. Kaggle 세션/터널이 실행 중인지, URL이 최신인지 확인하세요.',
     fluxRemoteUnauthorized: '원격 Flux worker가 토큰을 거부했습니다 — 말풍선 밖 글자는 그대로 남았습니다. 팝업의 Token 필드를 확인하세요.',
+    modelDownloading: "최초 설정: {name}{size} 다운로드 중입니다. 완료되면 이 페이지가 번역됩니다 (연결이 느리면 몇 분 걸릴 수 있습니다).",
     extensionDisabled: '확장 프로그램이 꺼져 있습니다',
     suggestInstructions: '메모 제안',
     suggestInstructionsHint: '선택한 페이지를 분석해 스토리 메모(등장인물, 관계, 어조)를 작성합니다',
@@ -516,6 +521,11 @@ function normalizeUiLanguage(language: unknown): UiLanguage {
 
 chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   if (msg.type === 'PING') { send({ ok: true }); return false; }
+  if (msg.type === 'MODEL_DOWNLOADS') {
+    notifyModelDownloads((msg as { downloads?: { name: string; approx_mb: number | null }[] }).downloads ?? []);
+    send({ ok: true });
+    return false;
+  }
   if (msg.type === 'OPEN_SCANNER') {
     void openScanner().then(() => send({ ok: true })).catch((e) => send({ ok: false, error: String(e) }));
     return true;
@@ -3574,6 +3584,16 @@ function notifyBackendWarnings(warnings: string[] | undefined): void {
   }
 }
 
+// The backend is fetching model weights (first use of LaMa / manga-ocr /
+// PaddleOCR-VL — up to ~2 GB) and the page being translated has to wait for
+// it; say so instead of leaving a spinner with no explanation.
+function notifyModelDownloads(downloads: { name: string; approx_mb: number | null }[]): void {
+  if (downloads.length === 0) return;
+  const only = downloads.length === 1 ? downloads[0].approx_mb : null;
+  const size = only ? ` (~${only >= 1000 ? `${(only / 1000).toFixed(1)} GB` : `${only} MB`})` : '';
+  toast(tr('modelDownloading', { name: downloads.map((d) => d.name).join(', '), size }), false, 12_000);
+}
+
 function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; warnings?: string[]; error?: string }> {
   return new Promise((resolve) => {
     const tid = setTimeout(() => resolve({ error: 'Backend timeout after 5 minutes' }), 300_000);
@@ -4856,7 +4876,7 @@ function applyScannerRootStyles(container: HTMLElement): void {
   container.style.pointerEvents = 'auto';
 }
 
-function toast(message: string, isError = false): void {
+function toast(message: string, isError = false, durationMs = 5000): void {
   const existing = document.getElementById('mt-toast');
   if (existing) existing.remove();
   const el = document.createElement('div');
@@ -4864,7 +4884,7 @@ function toast(message: string, isError = false): void {
   el.className = `mt-toast${isError ? ' error' : ''}`;
   el.textContent = message;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 5000);
+  setTimeout(() => el.remove(), durationMs);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
