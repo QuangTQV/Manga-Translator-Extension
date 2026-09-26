@@ -504,6 +504,12 @@ export interface StoredRegion {
 // One recorded LLM call from the backend's optional "Live AI" debug log
 // (GET /admin/live-ai-log; backend schemas.py LiveAiLogEntry). Image bytes are
 // never included, only a count and approximate size.
+export interface LiveAiLogImage {
+  id: string; // content hash; fetch through the LIVE_AI_IMAGE message
+  mime: string;
+  kb: number;
+}
+
 export interface LiveAiLogEntry {
   timestamp: number; // unix seconds
   provider: string;
@@ -513,6 +519,7 @@ export interface LiveAiLogEntry {
   prompt_text: string;
   images_count: number;
   images_kb: number;
+  images?: LiveAiLogImage[]; // only for calls made while the viewer's "Save images" switch was on
   response_text?: string | null;
   error?: string | null;
   latency_ms: number;
@@ -522,5 +529,25 @@ export interface LiveAiLogResult {
   ok: boolean;
   entries?: LiveAiLogEntry[]; // newest first
   status?: number; // HTTP status when the backend answered with an error (404 = logging off, 401/403 = admin only)
+  error?: string;
+}
+
+export interface LiveAiLogSettings {
+  images: boolean; // is "Save images" on right now
+  images_default: boolean; // MT_LIVE_AI_LOG_IMAGES (what applies after a backend restart)
+  images_max_mb: number;
+}
+
+export interface LiveAiLogSettingsResult {
+  ok: boolean;
+  settings?: LiveAiLogSettings;
+  status?: number;
+  error?: string;
+}
+
+export interface LiveAiImageResult {
+  ok: boolean;
+  dataUrl?: string;
+  status?: number;
   error?: string;
 }

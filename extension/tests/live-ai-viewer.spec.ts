@@ -34,7 +34,19 @@ async function openViewer(context: any, extensionId: string, seed: Record<string
   return page;
 }
 
+// 1x1 PNGs, served as "saved images" (blue-ish transparent one and a red one).
+const PNG_A = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const PNG_B = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
+
 test.describe('Live AI log viewer', () => {
+  // Every test gets a default "Save images is off" answer; a test's own
+  // route (registered later, so it wins) overrides it.
+  test.beforeEach(async ({ context }) => {
+    await context.route('**/admin/live-ai-log/settings', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images: false, images_default: false, images_max_mb: 512 }) });
+    });
+  });
+
   test('lists calls newest first with type, model, latency and an error highlight, and expands a call to its full text', async ({ context, extensionId }) => {
     await context.route('**/admin/live-ai-log*', async (route) => {
       await route.fulfill({
@@ -227,5 +239,146 @@ test.describe('Live AI log viewer', () => {
     await expect(viewer.locator('h1')).toHaveText('Nhật ký Live AI');
     await expect(viewer.locator('#empty')).toContainText('Chưa có lệnh gọi nào');
     await expect.poll(() => auth).toBe('Bearer admin-token-123');
+  });
+
+  test('the Save images switch reflects the backend, changes it, and explains what it does', async ({ context, extensionId }) => {
+    let images = false;
+    const posts: any[] = [];
+    let auth: string | undefined;
+    await context.route('**/admin/live-ai-log?*', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [] }) });
+    });
+    await context.route('**/admin/live-ai-log/settings', async (route) => {
+      auth = route.request().headers()['authorization'];
+      if (route.request().method() === 'POST') {
+        posts.push(route.request().postDataJSON());
+        images = posts.at(-1).images;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images, images_default: false, images_max_mb: 256 }) });
+    });
+
+    const page = await openViewer(context, extensionId, { accountToken: 'admin-token-9', accountEmail: 'a@example.com' });
+    const toggle = page.locator('#save-images');
+    await expect(page.locator('#images-note')).toContainText('Images are not saved');
+    await expect(toggle).not.toBeChecked();
+    await expect(page.locator('#save-images-label')).toHaveAttribute('title', /disk space/);
+
+    await toggle.check();
+    await expect(page.locator('#images-note')).toContainText('up to 256 MB');
+    await expect(page.locator('#images-note')).toHaveClass(/on/);
+    expect(posts).toEqual([{ images: true }]);
+    expect(auth).toBe('Bearer admin-token-9');
+
+    await toggle.uncheck();
+    await expect(page.locator('#images-note')).toContainText('Images are not saved');
+    expect(posts).toEqual([{ images: true }, { images: false }]);
+  });
+
+  test('a rejected switch change goes back to what the backend says and shows the reason', async ({ context, extensionId }) => {
+    await context.route('**/admin/live-ai-log?*', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [] }) });
+    });
+    await context.route('**/admin/live-ai-log/settings', async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ detail: 'This account is not the configured admin' }) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ images: false, images_default: false, images_max_mb: 512 }) });
+    });
+    const page = await openViewer(context, extensionId);
+    await page.locator('#save-images').check();
+    await expect(page.locator('#banner')).toContainText('not the configured admin');
+    await expect(page.locator('#save-images')).not.toBeChecked();
+    await expect(page.locator('#save-images')).toBeEnabled();
+  });
+
+  test('a call with saved images shows them; a click opens a lightbox that pages with the arrow keys and closes with Escape', async ({ context, extensionId }) => {
+    const imageRequests: { id: string; auth?: string }[] = [];
+    await context.route('**/admin/live-ai-log?*', async (route) => {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ entries: [entry(1, { images_count: 2, images_kb: 1, images: [{ id: 'a'.repeat(32), mime: 'image/png', kb: 0.1 }, { id: 'b'.repeat(32), mime: 'image/png', kb: 0.2 }] })] }),
+      });
+    });
+    await context.route('**/admin/live-ai-log/images/*', async (route) => {
+      const id = route.request().url().split('/').pop()!;
+      imageRequests.push({ id, auth: route.request().headers()['authorization'] });
+      await route.fulfill({ status: 200, contentType: 'image/png', body: id.startsWith('a') ? PNG_A : PNG_B });
+    });
+
+    const page = await openViewer(context, extensionId, { accountToken: 'tok-img', accountEmail: 'a@example.com' });
+    const card = page.locator('.card').first();
+    expect(imageRequests).toHaveLength(0); // nothing is fetched until the call is opened
+    await card.locator('.card-head').click();
+
+    await expect(card.locator('.section-title', { hasText: 'Images sent to the AI (2)' })).toBeVisible();
+    const thumbs = card.locator('.thumb img');
+    await expect(thumbs).toHaveCount(2, { timeout: 10_000 });
+    await expect(card.locator('.thumb-label').first()).toContainText('1×1');
+    expect(imageRequests.map((r) => r.id).sort()).toEqual(['a'.repeat(32), 'b'.repeat(32)]);
+    expect(imageRequests.every((r) => r.auth === 'Bearer tok-img')).toBe(true);
+
+    const lightbox = page.locator('#lightbox');
+    await expect(lightbox).toBeHidden();
+    const firstSrc = await thumbs.nth(0).getAttribute('src');
+    await thumbs.nth(0).click();
+    await expect(lightbox).toBeVisible();
+    await expect(page.locator('#lightbox-img')).toHaveAttribute('src', firstSrc!);
+    await expect(page.locator('#lightbox-caption')).toContainText('1 / 2');
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('#lightbox-img')).toHaveAttribute('src', (await thumbs.nth(1).getAttribute('src'))!);
+    await expect(page.locator('#lightbox-caption')).toContainText('2 / 2');
+    await page.keyboard.press('ArrowRight'); // wraps around
+    await expect(page.locator('#lightbox-caption')).toContainText('1 / 2');
+
+    await page.keyboard.press('Escape');
+    await expect(lightbox).toBeHidden();
+    await thumbs.nth(1).click();
+    await page.locator('#lightbox-close').click();
+    await expect(lightbox).toBeHidden();
+
+    // Re-opening the call reuses what was already fetched.
+    const fetched = imageRequests.length;
+    await card.locator('.card-head').click();
+    await card.locator('.card-head').click();
+    expect(imageRequests.length).toBe(fetched);
+  });
+
+  test('a call whose images were not saved says how to keep them next time; a pruned image is reported', async ({ context, extensionId }) => {
+    await context.route('**/admin/live-ai-log?*', async (route) => {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          entries: [
+            entry(2, { images_count: 1, images_kb: 5, images: [{ id: 'c'.repeat(32), mime: 'image/png', kb: 4.9 }] }),
+            entry(1, { images_count: 3, images_kb: 900 }), // sent 3 images, but "Save images" was off
+          ],
+        }),
+      });
+    });
+    await context.route('**/admin/live-ai-log/images/*', async (route) => {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Image not found' }) });
+    });
+    const page = await openViewer(context, extensionId);
+    const cards = page.locator('.card');
+    await cards.nth(1).locator('.card-head').click();
+    await expect(cards.nth(1).locator('.note')).toContainText('Images were not saved for this call');
+    await expect(cards.nth(1).locator('.thumb')).toHaveCount(0);
+
+    await cards.nth(0).locator('.card-head').click();
+    await expect(cards.nth(0).locator('.thumb-ph')).toContainText('No longer available');
+    await expect(cards.nth(0).locator('.thumb')).toBeDisabled();
+  });
+
+  test('a call that sent no images shows no images section at all', async ({ context, extensionId }) => {
+    await context.route('**/admin/live-ai-log?*', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ entries: [entry(1)] }) });
+    });
+    const page = await openViewer(context, extensionId);
+    await page.locator('.card-head').click();
+    await expect(page.locator('.card-body pre').first()).toBeVisible();
+    await expect(page.locator('.thumbs')).toHaveCount(0);
+    await expect(page.locator('.card-body .note')).toHaveCount(0);
   });
 });

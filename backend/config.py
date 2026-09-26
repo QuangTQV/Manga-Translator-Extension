@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # (auth.py:require_live_ai_log_access) to view recent entries.
     live_ai_log_enabled: bool = False
     live_ai_log_path: Path = backend_dir / "logs" / "live_ai.jsonl"
+    # Also keep the images sent to the model, so the viewer can show them
+    # (default for the viewer's "Save images" switch, which overrides it at
+    # runtime). Off by default because it costs disk and background CPU for
+    # every call: images go to <logs>/live_ai_images/, de-duplicated by
+    # content, oldest deleted once they exceed live_ai_images_max_mb.
+    live_ai_log_images: bool = False
+    live_ai_images_max_mb: int = 512
 
     # CORS
     cors_origins: list[str] = [

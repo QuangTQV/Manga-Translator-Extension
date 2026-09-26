@@ -415,6 +415,26 @@ class SharedLlmConfigResponse(BaseModel):
     base_url: Optional[str] = None
 
 
+class LiveAiLogImage(BaseModel):
+    """An image that was sent to the model, kept on disk (only when "Save
+    images" was on for that call) — fetch it via GET
+    /admin/live-ai-log/images/{id}."""
+
+    id: str
+    mime: str
+    kb: float
+
+
+class LiveAiLogSettings(BaseModel):
+    images: bool  # is the "Save images" switch on right now
+    images_default: bool  # what MT_LIVE_AI_LOG_IMAGES says (the value after a restart)
+    images_max_mb: int
+
+
+class LiveAiLogSettingsUpdate(BaseModel):
+    images: bool
+
+
 class LiveAiLogEntry(BaseModel):
     """One recorded LLM call — see core/live_ai_log.py. Image data is
     deliberately excluded (just a count + approximate KB)."""
@@ -427,6 +447,7 @@ class LiveAiLogEntry(BaseModel):
     prompt_text: str
     images_count: int
     images_kb: float
+    images: List[LiveAiLogImage] = []  # only calls made while "Save images" was on
     response_text: Optional[str] = None
     error: Optional[str] = None
     latency_ms: float

@@ -424,6 +424,7 @@ The optional "Live AI" debug log: every LLM call this backend made (any provider
       "prompt_text": "## CONTEXT …",
       "images_count": 5,
       "images_kb": 812.4,
+      "images": [{ "id": "3f9c…(32 hex chars)", "mime": "image/png", "kb": 17.2 }],
       "response_text": "1: …",
       "error": null,
       "latency_ms": 4210.5
@@ -433,6 +434,22 @@ The optional "Live AI" debug log: every LLM call this backend made (any provider
 ```
 
 `call_type` is one of `translate`, `ocr_region`, `translate_region`, `suggest_instructions`, `story_db_update`, `support_chat`, `test_key`. The same entries are appended as JSON lines to `backend/logs/live_ai.jsonl` (rotated at 20 MB).
+
+`images` is only present for calls made while **Save images** was on (see below); otherwise just `images_count`/`images_kb` describe what was sent.
+
+### `GET /admin/live-ai-log/settings` and `POST /admin/live-ai-log/settings`
+
+Same access rules and `404`-when-off behaviour as the log itself. `GET` returns the viewer's switches; `POST {"images": true|false}` changes **Save images** at runtime (no restart; it applies to calls made from then on, lasts until the backend restarts, and is per backend process).
+
+```json
+{ "images": false, "images_default": false, "images_max_mb": 512 }
+```
+
+`images_default` is what `MT_LIVE_AI_LOG_IMAGES` says (the value after a restart). Saving images is off by default because it costs disk space and work on every call: when on, the images are decoded and written by a background thread (the model call never waits for it) to `backend/logs/live_ai_images/`, named by content hash so a full-page image repeated across calls is stored once, and the oldest files are deleted once the directory exceeds `MT_LIVE_AI_IMAGES_MAX_MB`.
+
+### `GET /admin/live-ai-log/images/{id}`
+
+The image with that content id (from an entry's `images[].id`), with its real `Content-Type` and long-lived caching headers. `404` if the id is unknown or the image was deleted to stay under the size limit; the id must be 32 lowercase hex characters, anything else is rejected without touching the filesystem.
 
 ---
 

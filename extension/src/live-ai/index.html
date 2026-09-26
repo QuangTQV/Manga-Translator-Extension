@@ -85,6 +85,20 @@
     }
     pre.tall { max-height: none; }
     pre.err { color: #fca5a5; }
+    #images-note { font-size: 12px; color: #6b7fa8; margin-top: 8px; }
+    #images-note.on { color: #4ade80; }
+    .thumbs { display: flex; flex-wrap: wrap; gap: 10px; }
+    .thumb { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; background: #080c18; border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; max-width: 200px; }
+    .thumb:hover { border-color: rgba(59,130,246,0.6); background: #0b1428; }
+    .thumb img { display: block; max-width: 180px; max-height: 150px; object-fit: contain; background: repeating-conic-gradient(#141b2e 0% 25%, #0e1424 0% 50%) 50% / 12px 12px; border-radius: 4px; }
+    .thumb .thumb-ph { width: 90px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #6b7fa8; text-align: center; }
+    .thumb .thumb-label { font-size: 11px; color: #6b7fa8; }
+    .note { font-size: 12px; color: #6b7fa8; font-style: italic; }
+    #lightbox { position: fixed; inset: 0; z-index: 20; background: rgba(4,7,14,0.94); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; }
+    #lightbox[hidden] { display: none; }
+    #lightbox img { max-width: 96vw; max-height: 84vh; object-fit: contain; background: repeating-conic-gradient(#141b2e 0% 25%, #0e1424 0% 50%) 50% / 16px 16px; border-radius: 6px; cursor: zoom-out; }
+    #lightbox-close { position: absolute; top: 14px; right: 18px; }
+    #lightbox-caption { font-size: 12px; color: #93a7cf; }
     footer { margin-top: 24px; font-size: 11px; color: #4a5e80; text-align: center; }
     @media (max-width: 720px) {
       .who, .meta .imgs { display: none; }
@@ -106,6 +120,7 @@
     <div class="toolbar">
       <button id="btn-refresh" type="button" data-i18n="liveAiRefresh">Refresh</button>
       <label class="check"><input id="auto" type="checkbox" checked /><span data-i18n="liveAiAuto">Auto-refresh</span></label>
+      <label class="check" id="save-images-label"><input id="save-images" type="checkbox" /><span data-i18n="liveAiSaveImages">Save images</span></label>
       <label class="field-label" for="limit" data-i18n="liveAiLimit">Show last</label>
       <select id="limit">
         <option value="50">50</option>
@@ -123,10 +138,17 @@
       <button id="btn-clear" type="button" data-i18n="liveAiClear">Clear view</button>
     </div>
 
+    <div id="images-note"></div>
     <div id="summary"></div>
     <div id="banner" role="alert"></div>
     <div id="empty"></div>
     <main id="list"></main>
+
+    <div id="lightbox" role="dialog" aria-modal="true" hidden>
+      <button id="lightbox-close" type="button" data-i18n="liveAiClose">Close</button>
+      <img id="lightbox-img" alt="" />
+      <div id="lightbox-caption"></div>
+    </div>
 
     <footer data-i18n="liveAiPrivacy">Contains real prompts and translations — don't share screenshots of it.</footer>
   </div>

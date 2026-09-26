@@ -211,6 +211,8 @@ export MT_LIVE_AI_LOG_ENABLED=true
 
 **Xem bằng giao diện (dễ nhất):** bấm icon extension → tab **Config** → **Live AI log viewer** → **Open viewer**. Trang mở ra trong một tab riêng, tự làm mới mỗi 2 giây, cho phép lọc theo loại lệnh gọi / chỉ lỗi / tìm chữ, bấm vào một dòng để xem đủ system prompt, prompt và phản hồi (có nút Copy). Nếu backend bật `MT_REQUIRE_AUTH`, hãy đăng nhập ở tab **Account** bằng tài khoản có email là `MT_ADMIN_EMAIL` — trang tự dùng token đó, không cần dán gì. Nếu trang báo "Live AI đang tắt", đặt `MT_LIVE_AI_LOG_ENABLED=true` trong `backend/.env` rồi chạy lại backend.
 
+**Xem cả ảnh gửi cho AI:** trong trang xem, bật ô **Save images** (Lưu ảnh). Từ lúc đó, các lệnh gọi mới sẽ giữ lại ảnh; bấm một dòng để xem ảnh thu nhỏ, bấm vào ảnh để phóng to (dùng ← → để chuyển ảnh, Esc để đóng). Mặc định **tắt** vì mỗi lệnh gọi phải giải mã và ghi vài MB ra ổ đĩa; khi bật, việc này chạy ở luồng nền nên không làm chậm lệnh gọi AI, nhưng vẫn tốn dung lượng — ảnh nằm ở `backend/logs/live_ai_images/`, giống nhau chỉ lưu một lần, và tự xoá ảnh cũ nhất khi vượt `MT_LIVE_AI_IMAGES_MAX_MB` (mặc định 512). Công tắc chỉ có hiệu lực tới khi chạy lại backend; muốn bật cố định, đặt `MT_LIVE_AI_LOG_IMAGES=true` trong `backend/.env`. Các lệnh gọi từ trước khi bật sẽ không có ảnh. Lưu ý: đó là ảnh trang truyện thật ở dạng file thường trên máy bạn.
+
 Hoặc xem qua API (không cần đăng nhập nếu chưa bật `MT_REQUIRE_AUTH`; nếu đã bật thì cần header `Authorization: Bearer <token của admin>`):
 
 ```bash
