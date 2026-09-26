@@ -16,10 +16,11 @@ human-readable prompt/response trace, not a full request replay dump.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from config import settings
 
@@ -85,23 +86,56 @@ def log_ai_call(
         pass
 
 
-def read_recent_live_ai_log(limit: int = 200) -> list[dict[str, Any]]:
+_TAIL_CHUNK = 256 * 1024
+
+
+def _iter_lines_newest_first(path: Path) -> Iterator[str]:
+    """Yields the file's non-empty lines from the end, reading it backwards in
+    chunks — so asking for the latest few entries of a log that has grown to
+    the rotation cap (20 MB) doesn't read all of it, which matters when the
+    viewer polls every couple of seconds. Every entry is exactly one physical
+    line (json.dumps escapes newlines), and 0x0A never occurs inside a UTF-8
+    multi-byte sequence, so splitting the raw bytes is safe."""
+    with path.open("rb") as f:
+        pos = f.seek(0, os.SEEK_END)
+        carry = b""
+        while pos > 0:
+            step = min(_TAIL_CHUNK, pos)
+            pos -= step
+            f.seek(pos)
+            lines = (f.read(step) + carry).split(b"\n")
+            if pos > 0:
+                carry, lines = lines[0], lines[1:]  # the first line may be cut off; finish it with the next chunk
+            else:
+                carry = b""
+            for raw in reversed(lines):
+                if raw.strip():
+                    yield raw.decode("utf-8", errors="replace")
+
+
+def read_recent_live_ai_log(limit: int = 200, since: Optional[float] = None) -> list[dict[str, Any]]:
     """Returns up to `limit` most recent log entries, newest first. Empty
     list if nothing has been logged yet (file missing); unreadable/corrupt
-    lines are skipped individually rather than failing the whole read."""
+    lines are skipped individually rather than failing the whole read.
+
+    `since` (a `timestamp` from a previous read) returns only entries newer
+    than it, so a viewer that keeps polling transfers just what's new."""
     path = settings.live_ai_log_path
     if not path.exists():
         return []
+    entries: list[dict[str, Any]] = []
     with _lock:
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            for line in _iter_lines_newest_first(path):
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if since is not None and entry.get("timestamp", 0) <= since:
+                    break  # newest first: everything after this is older still
+                entries.append(entry)
+                if len(entries) >= limit:
+                    break
         except OSError:
             return []
-    entries = []
-    for line in lines[-limit:]:
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    entries.reverse()
     return entries

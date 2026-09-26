@@ -16,28 +16,33 @@ function copyManifestPlugin() {
         fs.copyFileSync(manifestSrc, manifestDest);
       }
 
-      const popupHtml = path.resolve(distDir, 'src', 'popup', 'index.html');
-      const popupDir = path.resolve(distDir, 'popup');
-      const popupHtmlOut = path.resolve(popupDir, 'index.html');
-      const popupJs = path.resolve(distDir, 'src', 'popup', 'index.js');
-      const popupJsOut = path.resolve(popupDir, 'index.js');
+      // Every HTML page (popup, Live AI viewer) is emitted under dist/src/<page>/
+      // by Vite; move each to dist/<page>/ and fix its asset paths so it works
+      // from chrome-extension://<id>/<page>/index.html.
+      for (const page of ['popup', 'live-ai']) {
+        const pageHtml = path.resolve(distDir, 'src', page, 'index.html');
+        const pageDir = path.resolve(distDir, page);
+        const pageHtmlOut = path.resolve(pageDir, 'index.html');
+        const pageJs = path.resolve(distDir, 'src', page, 'index.js');
+        const pageJsOut = path.resolve(pageDir, 'index.js');
 
-      if (fs.existsSync(popupHtml)) {
-        fs.mkdirSync(popupDir, { recursive: true });
-        fs.renameSync(popupHtml, popupHtmlOut);
-      }
-      if (fs.existsSync(popupJs)) {
-        fs.mkdirSync(popupDir, { recursive: true });
-        fs.renameSync(popupJs, popupJsOut);
-      }
+        if (fs.existsSync(pageHtml)) {
+          fs.mkdirSync(pageDir, { recursive: true });
+          fs.renameSync(pageHtml, pageHtmlOut);
+        }
+        if (fs.existsSync(pageJs)) {
+          fs.mkdirSync(pageDir, { recursive: true });
+          fs.renameSync(pageJs, pageJsOut);
+        }
 
-      if (fs.existsSync(popupHtmlOut)) {
-        let html = fs.readFileSync(popupHtmlOut, 'utf-8');
-        html = html.replace(/href="\/assets\//g, 'href="../assets/');
-        html = html.replace(/src="\/assets\//g, 'src="../assets/');
-        html = html.replace(/src="\/popup\//g, 'src="./');
-        html = html.replace(/src="\.\.\/src\/popup\/([^"]+)"/g, 'src="../popup/$1"');
-        fs.writeFileSync(popupHtmlOut, html);
+        if (fs.existsSync(pageHtmlOut)) {
+          let html = fs.readFileSync(pageHtmlOut, 'utf-8');
+          html = html.replace(/href="\/assets\//g, 'href="../assets/');
+          html = html.replace(/src="\/assets\//g, 'src="../assets/');
+          html = html.replace(new RegExp(`src="/${page}/`, 'g'), 'src="./');
+          html = html.replace(new RegExp(`src="\\.\\./src/${page}/([^"]+)"`, 'g'), `src="../${page}/$1"`);
+          fs.writeFileSync(pageHtmlOut, html);
+        }
       }
 
       const srcDir = path.resolve(distDir, 'src');
@@ -62,12 +67,14 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'src/popup/index.html'),
+        'live-ai': resolve(__dirname, 'src/live-ai/index.html'),
         background: resolve(__dirname, 'src/background/index.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'background') return 'background/index.js';
           if (chunkInfo.name === 'popup') return 'popup/index.js';
+          if (chunkInfo.name === 'live-ai') return 'live-ai/index.js';
           return 'assets/[name]-[hash].js';
         },
         assetFileNames: 'assets/[name]-[hash][extname]',

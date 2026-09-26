@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
-import type { TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
+import type { LiveAiLogEntry, LiveAiLogResult, TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
 import { normalizeUiLanguage, t } from '../shared/i18n.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
@@ -254,6 +254,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'ADMIN_SET_LLM_CONFIG') {
       const { body } = message as { type: string; body: { provider: string; model_name?: string; api_key?: string; base_url?: string } };
       sendResponse(await adminSetLlmConfig(body));
+      return;
+    }
+
+    if (message.type === 'LIVE_AI_LOG') {
+      const { limit, since } = message as { type: string; limit: number; since?: number };
+      sendResponse(await fetchLiveAiLog(limit, since));
       return;
     }
 
@@ -781,6 +787,30 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg }) };
+  }
+}
+
+// The "Live AI" debug log viewer page (extension/src/live-ai/). `since` makes
+// the auto-refresh transfer only what is new. Admin-gated on a hosted
+// backend, so the stored account token rides along like everywhere else.
+async function fetchLiveAiLog(limit: number, since?: number): Promise<LiveAiLogResult> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (since !== undefined) query.set('since', String(since));
+  try {
+    const res = await fetch(`${backendUrl.replace(/\/$/, '')}/admin/live-ai-log?${query}`, { headers: authHeaders(settings) });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json() as Record<string, unknown>;
+        if (typeof errBody['detail'] === 'string') detail = errBody['detail'];
+      } catch { /* ignore */ }
+      return { ok: false, status: res.status, error: detail };
+    }
+    return { ok: true, entries: ((await res.json()) as { entries: LiveAiLogEntry[] }).entries };
+  } catch (e) {
+    return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg: e instanceof Error ? e.message : String(e) }) };
   }
 }
 

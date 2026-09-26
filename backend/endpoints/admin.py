@@ -68,12 +68,15 @@ async def set_llm_config(
 
 @router.get("/live-ai-log", response_model=LiveAiLogResponse)
 async def get_live_ai_log(
-    limit: int = 200, _access: Account | None = Depends(require_live_ai_log_access),
+    limit: int = 200,
+    since: float | None = None,
+    _access: Account | None = Depends(require_live_ai_log_access),
 ) -> LiveAiLogResponse:
     """Recent entries from the optional "Live AI" debug log (every LLM
     call this backend has made, any provider — see core/live_ai_log.py),
     for an operator to inspect without SSH-ing in to tail the file
-    directly. 404s when the feature itself is off (MT_LIVE_AI_LOG_ENABLED)
+    directly. `since` (a timestamp from an earlier response) returns only
+    newer entries, for the extension's auto-refreshing viewer. 404s when the feature itself is off (MT_LIVE_AI_LOG_ENABLED)
     rather than silently returning an empty list, so "disabled" and "no
     calls logged yet" aren't indistinguishable."""
     if not settings.live_ai_log_enabled:
@@ -81,5 +84,5 @@ async def get_live_ai_log(
             status_code=404,
             detail="Live AI logging is disabled (set MT_LIVE_AI_LOG_ENABLED=true)",
         )
-    entries = read_recent_live_ai_log(min(max(limit, 1), 1000))
+    entries = read_recent_live_ai_log(min(max(limit, 1), 1000), since)
     return LiveAiLogResponse(entries=entries)

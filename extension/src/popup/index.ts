@@ -45,6 +45,7 @@ const eraserBtn = qs<HTMLButtonElement>('btn-eraser');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
 const saveConfigBtn = qs<HTMLButtonElement>('btn-save-config');
+const openLiveAiBtn = qs<HTMLButtonElement>('btn-open-live-ai');
 const clearCacheBtn = qs<HTMLButtonElement>('btn-clear-cache');
 
 const providerGroupsList = qs<HTMLDivElement>('provider-groups-list');
@@ -493,6 +494,12 @@ function bind(): void {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
+  // The Live AI log viewer is a full extension page in its own tab (the popup
+  // is far too small to read prompts in); it reads the backend URL and account
+  // token itself, so nothing needs passing along.
+  openLiveAiBtn.addEventListener('click', () => {
+    void chrome.tabs.create({ url: chrome.runtime.getURL('live-ai/index.html') });
+  });
   for (const el of [letteringUppercaseToggle, letteringAlignSelect, letteringTextColorMode, letteringTextColorInput, letteringOutlineWidthSelect, letteringOutlineColorMode, letteringOutlineColorInput]) {
     el.addEventListener('change', () => { updateLetteringVisibility(); void autoSave(); });
   }

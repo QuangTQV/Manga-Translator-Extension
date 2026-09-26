@@ -405,6 +405,37 @@ An empty/omitted `api_key` means "don't change the currently-stored key" (since 
 
 ---
 
+### `GET /admin/live-ai-log`
+
+The optional "Live AI" debug log: every LLM call this backend made (any provider, any feature) with its prompt, response and timing. Off unless `MT_LIVE_AI_LOG_ENABLED=true` (`404` otherwise, so "off" isn't mistaken for "nothing logged yet"). With `MT_REQUIRE_AUTH` off it needs no authentication; with it on, only the `MT_ADMIN_EMAIL` account may read it (`401`/`403`), since the log can hold other users' prompts and translations. The extension's Config tab opens a viewer for it.
+
+**Query parameters:** `limit` (default `200`, clamped to `1`–`1000`) and `since` (optional unix timestamp: only entries strictly newer than it are returned — how the viewer polls cheaply).
+
+**Response `200 OK`** (newest first; image bytes are never logged, only a count and size):
+```json
+{
+  "entries": [
+    {
+      "timestamp": 1790422294.118,
+      "provider": "Google",
+      "model": "gemini-3.1-flash-lite-preview",
+      "call_type": "translate",
+      "system_prompt": "You are a professional manga localization translator…",
+      "prompt_text": "## CONTEXT …",
+      "images_count": 5,
+      "images_kb": 812.4,
+      "response_text": "1: …",
+      "error": null,
+      "latency_ms": 4210.5
+    }
+  ]
+}
+```
+
+`call_type` is one of `translate`, `ocr_region`, `translate_region`, `suggest_instructions`, `story_db_update`, `support_chat`, `test_key`. The same entries are appended as JSON lines to `backend/logs/live_ai.jsonl` (rotated at 20 MB).
+
+---
+
 ## CORS
 
 The backend allows requests from:

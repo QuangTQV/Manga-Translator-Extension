@@ -84,6 +84,13 @@ Advanced/pro-translator features must not be scattered onto the main Translate/L
 - **Correction:** my "Text reading" hint had said "a model of a few hundred MB" — wrong for PaddleOCR-VL (~1.9 GB). Fixed in all 5 languages.
 - **Ideas found, not done:** `_ensure_hf_repo` pulls BOTH `pytorch_model.bin` and `model.safetensors` for manga-ocr (~890 MB; ~445 MB would do — restrict with `ignore_patterns` after verifying a clean download loads). The content script gives up on a translate request after 5 minutes (`bgTranslateImageWithBody`), so a very slow first download can fail that page once (the download itself continues; a retry then works).
 
+## Done 2026-09-26 (branch feat/live-ai-viewer)
+
+- **Live AI log viewer** — extension page `extension/src/live-ai/` (own Vite HTML entry → `dist/live-ai/index.html`), opened by the popup Config tab's "Open viewer" (`chrome.tabs.create`). Chosen over a backend-served `/app` page because a hosted backend needs the admin Bearer token and the extension already holds it (a token in a URL fragment would land in browser history). Talks to the backend only through the service worker (`LIVE_AI_LOG`). Features: auto-refresh every 2 s using `since=<newest timestamp>` (only new entries transfer; new ones flash and go on top; pauses when the tab is hidden), limit 50–1000, filters by call type / errors only / search text (matches even never-opened cards), collapsed rows (body DOM built lazily on first open), per-section Expand + Copy, "Clear view" (client-side; polling continues from the newest seen), explained states for 404 (logging off) / 401 / 403 / other, 5 UI languages, relative times via `Intl.RelativeTimeFormat`.
+- **Backend:** `read_recent_live_ai_log(limit, since)` now reads the file backwards in 256 KB chunks (was: read + split the whole file, up to the 20 MB rotation cap, per poll); `limit` now counts valid entries, not raw lines.
+- Verified against the owner's real log (279 calls, 1.5 MB): 8 translate / 27 support_chat / 22 story_db_update / 222 test_key rendered, filter and expand fine. Tests: 5 new backend, 9 new Playwright.
+- **Gotcha:** a limit of 200 can hide rare call types entirely (the real log's newest 200 had no `translate`) — the type filter only lists types present in the loaded window, so raise "Show last".
+
 ## Borrowed from zyddnys/manga-image-translator (items 1-4 DONE 2026-09-26)
 
 Compared at the repo owner's request (README read, not run). Ours leads on in-browser reading, story-aware LLM translation, manual editing and API ops; theirs on model breadth and free/non-LLM use. **License rule:** that project is **GPL-3.0** — take ideas only, never copy its code or pull weights from its releases.

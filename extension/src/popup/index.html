@@ -679,6 +679,11 @@
           <label class="label" data-i18n="labelBackendUrl">Backend URL</label>
           <input id="f-backend" class="input" type="url" />
         </div>
+        <div class="field">
+          <label class="label" data-i18n="labelLiveAiViewer">Live AI log viewer</label>
+          <button id="btn-open-live-ai" class="btn btn-secondary" type="button" data-i18n="btnOpenLiveAi">Open viewer</button>
+          <div class="toggle-hint" data-i18n="hintLiveAiViewer">Debug tool: see every prompt and response the backend exchanges with the AI, as it happens. Needs MT_LIVE_AI_LOG_ENABLED=true on the backend.</div>
+        </div>
       </div>
       <div class="actions">
         <button id="btn-save-config" class="btn btn-primary" data-i18n="btnSave">Save</button>
