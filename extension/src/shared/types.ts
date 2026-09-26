@@ -499,3 +499,27 @@ export interface StoredRegion {
   // "erase the old spot" half of moving one (see region-tool.ts).
   restoreOnly?: boolean;
 }
+
+// One recorded LLM call from the backend's optional "Live AI" debug log
+// (GET /admin/live-ai-log; backend schemas.py LiveAiLogEntry). Image bytes are
+// never included, only a count and approximate size.
+export interface LiveAiLogEntry {
+  timestamp: number; // unix seconds
+  provider: string;
+  model?: string | null;
+  call_type: string; // "translate" | "ocr_region" | "translate_region" | "suggest_instructions" | "support_chat" | "test_key" | ...
+  system_prompt?: string | null;
+  prompt_text: string;
+  images_count: number;
+  images_kb: number;
+  response_text?: string | null;
+  error?: string | null;
+  latency_ms: number;
+}
+
+export interface LiveAiLogResult {
+  ok: boolean;
+  entries?: LiveAiLogEntry[]; // newest first
+  status?: number; // HTTP status when the backend answered with an error (404 = logging off, 401/403 = admin only)
+  error?: string;
+}

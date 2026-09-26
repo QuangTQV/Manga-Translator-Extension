@@ -126,6 +126,68 @@ def test_read_recent_live_ai_log_skips_corrupt_lines(monkeypatch):
     assert entries[0]["prompt_text"] == "ok"
 
 
+def _write_entries(path, entries):
+    with path.open("w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+
+def _entry(i, ts=None, text="x"):
+    return {
+        "timestamp": float(i if ts is None else ts), "provider": "Google", "model": "m", "call_type": "translate",
+        "system_prompt": None, "prompt_text": f"p{i}", "images_count": 0, "images_kb": 0.0,
+        "response_text": text, "error": None, "latency_ms": 1.0,
+    }
+
+
+def test_since_returns_only_entries_newer_than_it_newest_first():
+    _write_entries(settings.live_ai_log_path, [_entry(i) for i in range(1, 8)])
+    assert [e["prompt_text"] for e in read_recent_live_ai_log(since=5)] == ["p7", "p6"]
+    assert read_recent_live_ai_log(since=7) == []
+    assert read_recent_live_ai_log(since=999) == []
+    assert len(read_recent_live_ai_log(since=0, limit=3)) == 3  # limit still applies
+
+
+def test_tail_reading_is_correct_across_chunk_boundaries_with_multibyte_text(monkeypatch):
+    import core.live_ai_log as live
+
+    # Tiny chunks so entries (with multi-byte characters) straddle many
+    # boundaries; the result must still match a plain full read.
+    monkeypatch.setattr(live, "_TAIL_CHUNK", 37)
+    entries = [_entry(i, text="漫画 ✓ " * (i % 5 + 1) + "é" * i) for i in range(1, 40)]
+    _write_entries(settings.live_ai_log_path, entries)
+    got = read_recent_live_ai_log(limit=1000)
+    assert got == list(reversed(entries))
+    assert read_recent_live_ai_log(limit=3) == list(reversed(entries))[:3]
+
+
+def test_tail_reading_handles_a_missing_final_newline_and_an_empty_file():
+    path = settings.live_ai_log_path
+    path.write_text("")
+    assert read_recent_live_ai_log() == []
+    path.write_text(json.dumps(_entry(1)) + "\n" + json.dumps(_entry(2)))  # no trailing newline
+    assert [e["prompt_text"] for e in read_recent_live_ai_log()] == ["p2", "p1"]
+
+
+def test_a_large_log_is_read_from_the_tail_not_in_full(monkeypatch):
+    import core.live_ai_log as live
+
+    _write_entries(settings.live_ai_log_path, [_entry(i, text="y" * 2000) for i in range(1, 2001)])  # ~4 MB
+    reads = []
+    real_open = live.Path.open
+
+    def counting_open(self, *a, **k):
+        f = real_open(self, *a, **k)
+        real_read = f.read
+        f.read = lambda n=-1: (reads.append(n), real_read(n))[1]
+        return f
+
+    monkeypatch.setattr(live.Path, "open", counting_open)
+    got = read_recent_live_ai_log(limit=5)
+    assert [e["prompt_text"] for e in got] == ["p2000", "p1999", "p1998", "p1997", "p1996"]
+    assert sum(n for n in reads if n > 0) < 1024 * 1024  # a small tail, not the whole ~4 MB
+
+
 def test_rotation_moves_oversized_log_to_backup_file(monkeypatch):
     monkeypatch.setattr(settings, "live_ai_log_enabled", True)
     import core.live_ai_log as live_ai_log_module
@@ -249,6 +311,15 @@ def test_live_ai_log_endpoint_respects_limit_query_param(monkeypatch):
     resp = client.get("/admin/live-ai-log?limit=1")
     assert resp.status_code == 200
     assert len(resp.json()["entries"]) == 1
+
+
+def test_live_ai_log_endpoint_since_returns_only_newer_entries(monkeypatch):
+    monkeypatch.setattr(settings, "live_ai_log_enabled", True)
+    _write_entries(settings.live_ai_log_path, [_entry(i) for i in range(1, 6)])
+    resp = client.get("/admin/live-ai-log?since=3")
+    assert resp.status_code == 200
+    assert [e["prompt_text"] for e in resp.json()["entries"]] == ["p5", "p4"]
+    assert client.get("/admin/live-ai-log?since=5").json() == {"entries": []}
 
 
 @pytest.mark.skipif(

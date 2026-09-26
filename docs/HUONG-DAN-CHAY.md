@@ -209,7 +209,9 @@ Công cụ debug: ghi lại prompt gửi đi và response nhận về của mọ
 export MT_LIVE_AI_LOG_ENABLED=true
 ```
 
-Xem các lệnh gọi gần nhất qua API (không cần đăng nhập nếu chưa bật `MT_REQUIRE_AUTH`):
+**Xem bằng giao diện (dễ nhất):** bấm icon extension → tab **Config** → **Live AI log viewer** → **Open viewer**. Trang mở ra trong một tab riêng, tự làm mới mỗi 2 giây, cho phép lọc theo loại lệnh gọi / chỉ lỗi / tìm chữ, bấm vào một dòng để xem đủ system prompt, prompt và phản hồi (có nút Copy). Nếu backend bật `MT_REQUIRE_AUTH`, hãy đăng nhập ở tab **Account** bằng tài khoản có email là `MT_ADMIN_EMAIL` — trang tự dùng token đó, không cần dán gì. Nếu trang báo "Live AI đang tắt", đặt `MT_LIVE_AI_LOG_ENABLED=true` trong `backend/.env` rồi chạy lại backend.
+
+Hoặc xem qua API (không cần đăng nhập nếu chưa bật `MT_REQUIRE_AUTH`; nếu đã bật thì cần header `Authorization: Bearer <token của admin>`):
 
 ```bash
 curl http://localhost:7677/admin/live-ai-log

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live AI log</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      background: #080c18; color: #dde6f5;
+      min-height: 100vh; font-size: 14px; line-height: 1.45;
+    }
+    .page { max-width: 1100px; margin: 0 auto; padding: 20px 20px 40px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+    h1 {
+      font-size: 22px; font-weight: 800;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .subtitle { font-size: 12px; color: #6b7fa8; margin-top: 4px; max-width: 640px; }
+    .pill { font-size: 11px; font-weight: 700; padding: 5px 11px; border-radius: 99px; white-space: nowrap; background: #1a2a3a; color: #6b7fa8; }
+    .pill.live { background: #0d3320; color: #4ade80; }
+    .pill.live::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #4ade80; margin-right: 6px; animation: pulse 1.6s ease-in-out infinite; }
+    .pill.error { background: #2d0d0d; color: #f87171; }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+
+    .toolbar {
+      position: sticky; top: 0; z-index: 5; background: #080c18;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0;
+      border-bottom: 1px solid rgba(59,130,246,0.15);
+    }
+    .toolbar .spacer { flex: 1 1 8px; }
+    button, select, input[type=search] {
+      font: inherit; font-size: 13px; color: #dde6f5;
+      background: #0d1424; border: 1px solid rgba(59,130,246,0.25); border-radius: 8px; padding: 6px 10px;
+    }
+    button { cursor: pointer; }
+    button:hover { background: #142036; }
+    input[type=search] { min-width: 200px; flex: 1 1 200px; max-width: 340px; }
+    input[type=search]::placeholder { color: #4a5e80; }
+    .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #b8c6e3; cursor: pointer; }
+    .check input { accent-color: #60a5fa; }
+    .field-label { font-size: 12px; color: #6b7fa8; }
+
+    #summary { font-size: 12px; color: #6b7fa8; margin: 10px 0; min-height: 18px; }
+    #banner { display: none; margin: 10px 0; padding: 12px 14px; border-radius: 10px; background: #2d0d0d; border: 1px solid rgba(248,113,113,0.35); color: #fca5a5; }
+    #banner.show { display: block; }
+    #empty { display: none; padding: 40px 10px; text-align: center; color: #6b7fa8; }
+    #empty.show { display: block; }
+
+    .card { background: #0d1424; border: 1px solid rgba(59,130,246,0.15); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+    .card.error { border-color: rgba(248,113,113,0.4); }
+    .card.fresh { animation: fresh 1.8s ease-out; }
+    @keyframes fresh { from { background: #15305a; } to { background: #0d1424; } }
+    .card[hidden] { display: none; }
+    .card-head {
+      width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+      background: none; border: 0; border-radius: 0; padding: 10px 12px;
+    }
+    .card-head:hover { background: rgba(59,130,246,0.07); }
+    .chev { flex: none; width: 12px; color: #6b7fa8; transition: transform 0.12s; }
+    .card.open .chev { transform: rotate(90deg); }
+    .badge { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: #1a2a3a; color: #93a7cf; }
+    .t-translate { background: #10284d; color: #7cb2ff; }
+    .t-region { background: #2a1d4a; color: #c4a8ff; }
+    .t-suggest { background: #3a2b0e; color: #fbbf24; }
+    .t-chat { background: #0d3320; color: #4ade80; }
+    .t-test { background: #232b38; color: #94a3b8; }
+    .who { flex: none; font-size: 12px; color: #b8c6e3; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview { flex: 1 1 0; min-width: 0; font-size: 12px; color: #6b7fa8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card.error .preview { color: #f87171; }
+    .meta { flex: none; display: flex; align-items: center; gap: 10px; font-size: 11px; color: #6b7fa8; white-space: nowrap; }
+    .lat { font-weight: 700; color: #b8c6e3; }
+    .card-body { padding: 4px 14px 14px; border-top: 1px solid rgba(59,130,246,0.1); }
+    .section { margin-top: 12px; }
+    .section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7fa8; flex: 1; }
+    .section-title.err { color: #f87171; }
+    .section-head button { font-size: 11px; padding: 2px 8px; }
+    pre {
+      font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word; background: #080c18; border-radius: 8px;
+      padding: 10px 12px; max-height: 320px; overflow: auto; color: #dde6f5;
+    }
+    pre.tall { max-height: none; }
+    pre.err { color: #fca5a5; }
+    footer { margin-top: 24px; font-size: 11px; color: #4a5e80; text-align: center; }
+    @media (max-width: 720px) {
+      .who, .meta .imgs { display: none; }
+      .card-head { flex-wrap: wrap; }
+      .preview { flex-basis: 100%; order: 5; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <h1 data-i18n="liveAiTitle">Live AI log</h1>
+        <p class="subtitle" data-i18n="liveAiSubtitle">Every call this backend made to an AI model: the prompt sent, the answer received, and how long it took.</p>
+      </div>
+      <span id="status" class="pill">…</span>
+    </header>
+
+    <div class="toolbar">
+      <button id="btn-refresh" type="button" data-i18n="liveAiRefresh">Refresh</button>
+      <label class="check"><input id="auto" type="checkbox" checked /><span data-i18n="liveAiAuto">Auto-refresh</span></label>
+      <label class="field-label" for="limit" data-i18n="liveAiLimit">Show last</label>
+      <select id="limit">
+        <option value="50">50</option>
+        <option value="200" selected>200</option>
+        <option value="500">500</option>
+        <option value="1000">1000</option>
+      </select>
+      <select id="type-filter"></select>
+      <select id="status-filter">
+        <option value="all" data-i18n="liveAiAllCalls">All calls</option>
+        <option value="errors" data-i18n="liveAiOnlyErrors">Errors only</option>
+      </select>
+      <input id="search" type="search" data-i18n-placeholder="liveAiSearch" placeholder="Search prompts and responses…" />
+      <span class="spacer"></span>
+      <button id="btn-clear" type="button" data-i18n="liveAiClear">Clear view</button>
+    </div>
+
+    <div id="summary"></div>
+    <div id="banner" role="alert"></div>
+    <div id="empty"></div>
+    <main id="list"></main>
+
+    <footer data-i18n="liveAiPrivacy">Contains real prompts and translations — don't share screenshots of it.</footer>
+  </div>
+
+  <script type="module" src="./index.ts"></script>
+</body>
+</html>
