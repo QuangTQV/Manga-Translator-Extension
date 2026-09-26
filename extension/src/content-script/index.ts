@@ -1,8 +1,8 @@
-import type { AppSettings, BubbleInfo, RegionBoxNorm, TranslateRequest } from '../shared/types.js';
+import type { AppSettings, BubbleInfo, RegionBoxNorm, StoredRegion, TranslateRequest } from '../shared/types.js';
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
 import { withEffectiveConfig } from '../shared/economy.js';
 import { initEraserTool, startEraserSelect } from './eraser-tool.js';
-import { deleteBubbleRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect } from './region-tool.js';
+import { deleteBubbleRegion, editManualRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect } from './region-tool.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -90,6 +90,7 @@ const EN_MESSAGES = {
   suggestNoImagesReady: 'Selected pages are still loading, wait a moment and try again',
   retryBadgeTitle: 'Translation failed after several retries — click to try again',
   fixHintTooltip: "Click to fix this bubble's translation",
+  manualRegionTooltip: "Click to edit this text area",
   zoomTooltip: 'Click to view full size',
   fixHintCurrentLabel: 'Current:',
   fixMoveBtn: '⇔ Move',
@@ -196,6 +197,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: 'Trang da chon van dang tai, doi chut roi thu lai',
     retryBadgeTitle: 'Dich that bai sau nhieu lan thu - bam de thu lai',
     fixHintTooltip: 'Bam de sua ban dich o bubble nay',
+    manualRegionTooltip: "Bam de sua vung chu nay",
     zoomTooltip: 'Bam de xem anh phong to',
     fixHintCurrentLabel: 'Hien tai:',
     fixMoveBtn: '⇔ Di chuyen',
@@ -297,6 +299,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: '所选页面仍在加载，请稍后重试',
     retryBadgeTitle: '多次重试后翻译失败——点击重试',
     fixHintTooltip: '点击修正这个气泡的翻译',
+    manualRegionTooltip: "点击编辑此文字区域",
     zoomTooltip: '点击查看大图',
     fixHintCurrentLabel: '当前:',
     fixMoveBtn: '⇔ 移动',
@@ -398,6 +401,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: '選択したページがまだ読み込み中です。しばらくしてから再試行してください',
     retryBadgeTitle: '数回再試行しましたが翻訳に失敗しました。クリックして再試行',
     fixHintTooltip: 'クリックしてこの吹き出しの翻訳を修正',
+    manualRegionTooltip: "クリックでこのテキスト範囲を編集",
     zoomTooltip: 'クリックして拡大表示',
     fixHintCurrentLabel: '現在の訳:',
     fixMoveBtn: '⇔ 移動',
@@ -499,6 +503,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     suggestNoImagesReady: '선택한 페이지를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요',
     retryBadgeTitle: '여러 번 재시도했지만 번역에 실패했습니다 - 클릭하여 다시 시도',
     fixHintTooltip: '클릭하여 이 말풍선의 번역 수정',
+    manualRegionTooltip: "클릭하여 이 텍스트 영역 편집",
     zoomTooltip: '클릭하여 크게 보기',
     fixHintCurrentLabel: '현재:',
     fixMoveBtn: '⇔ 이동',
@@ -2789,8 +2794,42 @@ function removeBubbleFromFixTargets(img: HTMLImageElement, bubbleIndex: number):
   renderBubbleFixTargets(img, bubbles);
 }
 
-function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): void {
+// The reader's manual text areas (Select text area), made hoverable/clickable
+// like detected bubbles: hovering shows the magnified crop with the original
+// text, clicking opens the region editor. Set by region-tool through
+// onRegionsChanged, and appended to every hit layer render below so an
+// auto-translation landing (which re-renders the layer from the detected
+// bubbles alone) can't wipe them.
+interface ManualRegionTarget { regionId: string; rawUrl: string; bubble: BubbleInfo }
+const manualRegionTargets = new WeakMap<HTMLImageElement, ManualRegionTarget[]>();
+
+function setManualRegionTargets(img: HTMLImageElement, rawUrl: string, regions: StoredRegion[]): void {
+  const width = img.naturalWidth || 1;
+  const height = img.naturalHeight || 1;
+  manualRegionTargets.set(
+    img,
+    regions
+      .filter((r) => !r.restoreOnly && r.translation.trim() !== '')
+      .map((r) => ({
+        regionId: r.id,
+        rawUrl,
+        bubble: {
+          bbox: [r.box.x1 * width, r.box.y1 * height, r.box.x2 * width, r.box.y2 * height] as [number, number, number, number],
+          confidence: 1,
+          originalText: r.text.trim() || undefined,
+          translatedText: r.translation,
+        },
+      })),
+  );
+  renderBubbleFixTargets(img, lastTranslateInfo.get(img)?.bubbles ?? []);
+}
+
+// `detectedBubbles` are the ones the backend returned (their index is what a
+// fix-hint sends back, so they stay first); manual text areas follow.
+function renderBubbleFixTargets(img: HTMLImageElement, detectedBubbles: BubbleInfo[]): void {
   ensureBubbleMagnifierScrollHandler();
+  const manualTargets = manualRegionTargets.get(img) ?? [];
+  const bubbles = [...detectedBubbles, ...manualTargets.map((target) => target.bubble)];
 
   const parent = img.parentElement;
   if (!parent) return;
@@ -2837,7 +2876,8 @@ function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): v
     hit.style.borderRadius = '4px';
     hit.style.transition = 'background 0.1s ease, outline 0.1s ease';
     hit.style.boxSizing = 'border-box';
-    hit.title = tr('fixHintTooltip');
+    const manualTarget = index >= detectedBubbles.length ? manualTargets[index - detectedBubbles.length] : undefined;
+    hit.title = tr(manualTarget ? 'manualRegionTooltip' : 'fixHintTooltip');
 
     hit.onmouseenter = () => {
       hit.style.background = 'rgba(59,130,246,0.18)';
@@ -2853,7 +2893,9 @@ function renderBubbleFixTargets(img: HTMLImageElement, bubbles: BubbleInfo[]): v
     hit.onclick = (ev) => {
       ev.stopPropagation();
       ev.preventDefault();
-      openFixHintPopover(img, index, bubble, hit);
+      hideBubbleMagnifier();
+      if (manualTarget) void editManualRegion(img, manualTarget.rawUrl, manualTarget.regionId);
+      else openFixHintPopover(img, index, bubble, hit);
     };
 
     activeLayer.appendChild(hit);
@@ -5274,6 +5316,7 @@ initRegionTool({
   applyImage: (rawUrl, dataUrl) => { applyTranslatedImageToPage(rawUrl, dataUrl); },
   restoreOriginal: (img) => { resetRecycledTranslatedImage(img); },
   resolveUrl: resolveMangaUrl,
+  onRegionsChanged: (img, rawUrl, regions) => { setManualRegionTargets(img, rawUrl, regions); },
   tr: (key) => tr(key as ContentMessageKey),
   toast,
 });

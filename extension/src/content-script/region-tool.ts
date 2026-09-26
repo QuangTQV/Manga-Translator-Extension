@@ -20,6 +20,9 @@ export interface RegionToolDeps {
   applyImage(rawUrl: string, dataUrl: string): void;
   restoreOriginal(img: HTMLImageElement): void;
   resolveUrl(img: HTMLImageElement): string | null;
+  /** Called every time a page's manual regions have been (re)drawn, with the regions now on it —
+   * so the page can make each one hoverable/clickable like a detected bubble. */
+  onRegionsChanged(img: HTMLImageElement, rawUrl: string, regions: StoredRegion[]): void;
   tr(key: string): string;
   toast(message: string, isError?: boolean): void;
 }
@@ -132,6 +135,7 @@ async function renderPage(img: HTMLImageElement, rawUrl: string, regions: Stored
   if (!regions.length && !eraseMask) {
     if (translated) deps.applyImage(rawUrl, `data:image/png;base64,${translated}`);
     else deps.restoreOriginal(img);
+    deps.onRegionsChanged(img, rawUrl, []);
     return;
   }
   let base = translated ?? (await deps.fetchSource(rawUrl));
@@ -156,6 +160,21 @@ async function renderPage(img: HTMLImageElement, rawUrl: string, regions: Stored
     })).image;
   }
   deps.applyImage(rawUrl, `data:image/png;base64,${base}`);
+  deps.onRegionsChanged(img, rawUrl, regions);
+}
+
+/** Opens the editor on an existing manual region (from clicking its hit target on the page). */
+export async function editManualRegion(img: HTMLImageElement, rawUrl: string, regionId: string): Promise<void> {
+  const region = (await regionsFor(rawUrl)).find((r) => r.id === regionId);
+  if (!region) return;
+  const rect = img.getBoundingClientRect();
+  const sel: Rect = {
+    left: rect.left + region.box.x1 * rect.width,
+    top: rect.top + region.box.y1 * rect.height,
+    right: rect.left + region.box.x2 * rect.width,
+    bottom: rect.top + region.box.y2 * rect.height,
+  };
+  await openEditor(img, rawUrl, sel, undefined, regionId);
 }
 
 /** Re-applies a page's saved regions/eraser mask (after an auto-translation replaced the overlay, or on load). */
@@ -392,14 +411,15 @@ interface EditorSeed {
   extraCommit: StoredRegion[];
 }
 
-async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed?: EditorSeed): Promise<void> {
+async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed?: EditorSeed, editRegionId?: string): Promise<void> {
   closeEditor?.();
   const box = toNormBox(sel, img);
   const all = await regionsFor(rawUrl);
   // A seeded open (moving a bubble) always creates a fresh region at the new
   // spot — it's never "editing" whatever manual region happens to already
   // overlap the drop point.
-  const existing = seed ? null : overlapsExisting(box, all);
+  // Opened from a region's own hit target: that exact region, even where several overlap.
+  const existing = seed ? null : (editRegionId ? all.find((r) => r.id === editRegionId) ?? null : overlapsExisting(box, all));
   const region: StoredRegion = existing ?? { id: crypto.randomUUID(), box, text: seed?.text ?? '', translation: seed?.translation ?? '' };
 
   const outline = document.createElement('div');
