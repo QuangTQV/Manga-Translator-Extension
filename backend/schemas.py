@@ -175,6 +175,11 @@ class TranslateOptions(BaseModel):
     # (see core/text/replacements.py).
     pre_replacements: Optional[str] = Field(default=None, max_length=20000)
     post_replacements: Optional[str] = Field(default=None, max_length=20000)
+    # The reader's per-page "re-translate" button: skip reading the LLM
+    # translation cache (the fresh result is still stored). Without this a
+    # deterministic config (temperature 0 / top_k 1) would hand back the very
+    # same translation the reader just asked to redo.
+    bypass_translation_cache: bool = False
     font_dir: Optional[str] = None
     max_font_size: int = 16
     min_font_size: int = 8

@@ -21,6 +21,9 @@ const EN_MESSAGES = {
   translatedBadgeTitle: 'Translated by MangaTranslator',
   translatingBadgeTitle: 'Translating this page…',
   viewOriginalTitle: 'View original (untranslated) page',
+  retranslateTitle: "Re-translate this page",
+  retranslateBusyTitle: "Re-translating…",
+  retranslateFailed: "Could not re-translate this page. Try again.",
   viewTranslatedTitle: 'View translated page',
   noMangaImagesPage: 'No manga images found on this page.',
   pageAlt: 'Page {page}',
@@ -124,6 +127,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     translatedBadgeTitle: 'Da dich bang MangaTranslator',
     translatingBadgeTitle: 'Dang dich trang nay...',
     viewOriginalTitle: 'Xem anh goc (chua dich)',
+    retranslateTitle: "Dich lai trang nay",
+    retranslateBusyTitle: "Dang dich lai…",
+    retranslateFailed: "Khong dich lai duoc trang nay. Hay thu lai.",
     viewTranslatedTitle: 'Xem anh da dich',
     noMangaImagesPage: 'Khong tim thay anh manga tren trang nay.',
     pageAlt: 'Trang {page}',
@@ -222,6 +228,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     translatedBadgeTitle: '由 MangaTranslator 翻译',
     translatingBadgeTitle: '正在翻译此页…',
     viewOriginalTitle: '查看原图（未翻译）',
+    retranslateTitle: "重新翻译此页",
+    retranslateBusyTitle: "正在重新翻译…",
+    retranslateFailed: "无法重新翻译此页，请重试。",
     viewTranslatedTitle: '查看翻译后的页面',
     noMangaImagesPage: '此页面没有找到漫画图片。',
     pageAlt: '第 {page} 页',
@@ -320,6 +329,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     translatedBadgeTitle: 'MangaTranslator で翻訳済み',
     translatingBadgeTitle: 'このページを翻訳中…',
     viewOriginalTitle: '原文（未翻訳）を表示',
+    retranslateTitle: "このページを再翻訳",
+    retranslateBusyTitle: "再翻訳中…",
+    retranslateFailed: "このページを再翻訳できませんでした。もう一度お試しください。",
     viewTranslatedTitle: '翻訳済みページを表示',
     noMangaImagesPage: 'このページに漫画画像が見つかりません。',
     pageAlt: 'ページ {page}',
@@ -418,6 +430,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     translatedBadgeTitle: 'MangaTranslator로 번역됨',
     translatingBadgeTitle: '이 페이지 번역 중…',
     viewOriginalTitle: '원본(번역 전) 페이지 보기',
+    retranslateTitle: "이 페이지 다시 번역",
+    retranslateBusyTitle: "다시 번역 중…",
+    retranslateFailed: "이 페이지를 다시 번역하지 못했습니다. 다시 시도하세요.",
     viewTranslatedTitle: '번역된 페이지 보기',
     noMangaImagesPage: '이 페이지에서 만화 이미지를 찾지 못했습니다.',
     pageAlt: '페이지 {page}',
@@ -1213,6 +1228,7 @@ function resetRecycledTranslatedImage(img: HTMLImageElement): void {
     findFixHitLayer(parent, overlayId)?.remove();
     findExportButton(parent, overlayId)?.remove();
     findOriginalToggleButton(parent, overlayId)?.remove();
+    findRetranslateButton(parent, overlayId)?.remove();
   }
   img.removeAttribute('data-mt-translated');
   img.removeAttribute('data-mt-raw');
@@ -1737,7 +1753,8 @@ function removeOrphanedOverlayFor(url: string, currentOverlayId: string): void {
         + `.mt-fix-hit-layer[data-mt-for="${previousOverlayId}"], `
         + `.mt-retry-badge[data-mt-for="${previousOverlayId}"], `
         + `.mt-progress-badge[data-mt-for="${previousOverlayId}"], `
-        + `.mt-original-toggle-btn[data-mt-for="${previousOverlayId}"]`,
+        + `.mt-original-toggle-btn[data-mt-for="${previousOverlayId}"], `
+        + `.mt-retranslate-btn[data-mt-for="${previousOverlayId}"]`,
       )
       .forEach((el) => el.remove());
   }
@@ -1762,6 +1779,7 @@ function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: s
   addTranslatedBadge(img);
   addExportButton(img);
   addOriginalToggleButton(img);
+  addRetranslateButton(img);
   setOriginalViewActive(img, false);
 }
 
@@ -2071,6 +2089,169 @@ function setOriginalViewActive(img: HTMLImageElement, showOriginal: boolean): vo
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-page "re-translate" button: the reader isn't happy with (or wants a
+// fresh attempt at) one page. Stacked under the "MT" badge / download / eye
+// buttons in the same right-aligned column.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function findRetranslateButton(parent: HTMLElement, overlayId: string): HTMLElement | null {
+  for (const child of Array.from(parent.children)) {
+    if (
+      child instanceof HTMLElement
+      && child.classList.contains('mt-retranslate-btn')
+      && child.getAttribute('data-mt-for') === overlayId
+    ) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function syncRetranslateButtonLayout(img: HTMLImageElement, btn?: HTMLElement | null, precomputedPos?: DOMRect): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const overlayId = getTranslatedOverlayId(img);
+  const targetBtn = btn ?? findRetranslateButton(parent, overlayId);
+  if (!targetBtn) return;
+
+  const pos = precomputedPos ?? getImagePositionWithinParent(img, parent);
+  // Below the view-original button (+40), one button-height further down.
+  targetBtn.style.left = `${pos.x + pos.width - 4}px`;
+  targetBtn.style.top = `${pos.y + 58}px`;
+  targetBtn.style.right = 'auto';
+  targetBtn.style.transform = 'translateX(-100%)';
+}
+
+// Images with a re-translation in flight: a second click is ignored until it
+// finishes, so a double-click can't fire (and pay for) two requests.
+const retranslatingImages = new WeakSet<HTMLImageElement>();
+
+function setRetranslateButtonBusy(img: HTMLImageElement, busy: boolean): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+  const btn = findRetranslateButton(parent, getTranslatedOverlayId(img));
+  if (!btn) return;
+  btn.classList.toggle('busy', busy);
+  btn.textContent = busy ? '…' : '↻';
+  btn.title = tr(busy ? 'retranslateBusyTitle' : 'retranslateTitle');
+  btn.style.opacity = busy ? '0.6' : '1';
+  btn.style.cursor = busy ? 'progress' : 'pointer';
+}
+
+function addRetranslateButton(img: HTMLImageElement): void {
+  const parent = img.parentElement;
+  if (!parent) return;
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') parent.style.position = 'relative';
+
+  const overlayId = getTranslatedOverlayId(img);
+  let btn = findRetranslateButton(parent, overlayId);
+  if (!btn) {
+    btn = document.createElement('div');
+    btn.className = 'mt-retranslate-btn';
+    btn.setAttribute('data-mt-for', overlayId);
+    parent.appendChild(btn);
+  }
+
+  btn.textContent = retranslatingImages.has(img) ? '…' : '↻';
+  btn.title = tr(retranslatingImages.has(img) ? 'retranslateBusyTitle' : 'retranslateTitle');
+  btn.style.position = 'absolute';
+  btn.style.background = 'rgba(15,23,42,0.85)';
+  btn.style.color = 'white';
+  btn.style.fontSize = '10px';
+  btn.style.lineHeight = '1';
+  btn.style.padding = '2px 5px';
+  btn.style.borderRadius = '4px';
+  btn.style.cursor = retranslatingImages.has(img) ? 'progress' : 'pointer';
+  btn.style.pointerEvents = 'auto';
+  btn.style.zIndex = '2147483001';
+  btn.style.fontFamily = 'Inter, system-ui, sans-serif';
+
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    void retranslatePage(img);
+  };
+
+  syncRetranslateButtonLayout(img, btn);
+  scheduleTranslatedDecorationSync(img);
+}
+
+// Translates this page again with the CURRENT settings (the reader may have
+// changed model, language, Story DB or instructions since the first pass) and
+// swaps the result in. The old translation stays on screen until a new one
+// actually arrives, so a failed attempt loses nothing. Corrections made with
+// click-to-fix are baked into the old image, so a re-translation starts over
+// without them (manual regions are re-applied on top, as after any translate).
+async function retranslatePage(img: HTMLImageElement): Promise<void> {
+  if (retranslatingImages.has(img)) return;
+  const url = img.getAttribute('data-mt-raw') ?? resolveMangaUrl(img);
+  if (!url) return;
+
+  retranslatingImages.add(img);
+  setRetranslateButtonBusy(img, true);
+  try {
+    const pageUrl = window.location.href;
+    const imgData = await fetchImageData(url, pageUrl);
+    if (!imgData) {
+      toast(tr('retranslateFailed'), true);
+      return;
+    }
+
+    const settings = await loadSettings();
+    const contextMemoryEnabled = settings.config.contextMemoryEnabled ?? false;
+    const storyKey = contextMemoryEnabled ? contextMemoryStoryKey(pageUrl) : '';
+    const contextMemoryText = contextMemoryEnabled ? await loadContextMemoryText(storyKey) : '';
+    const body: TranslateRequest = {
+      ...buildTranslateRequest(
+        imgData,
+        settings,
+        withEffectiveConfig(settings).config.previousContextEnabled ?? false ? orderedPreviousContextTexts(img) : undefined,
+        contextMemoryText,
+      ),
+      bypass_translation_cache: true,
+    };
+
+    const result = await bgTranslateImageWithBody(url, pageUrl, body);
+    if (result.error || !result.translated_image) {
+      toast(tr('retranslateFailed'), true);
+      return;
+    }
+
+    // The reader may have recycled or removed this element while we waited;
+    // a result for a page that is no longer here must not land on another one.
+    if (!img.isConnected || img.getAttribute('data-mt-raw') !== url) return;
+
+    const translatedB64 = result.translated_image;
+    const bubbles = normalizeBubbles(result.bubbles);
+    const contentKey = await contentCacheKey(imgData, settings.config.outputLanguage);
+    lastTranslateInfo.set(img, { bubbles, body, url });
+    rememberTranslated(url, translatedB64);
+    rememberTranslatedContent(contentKey, translatedB64);
+    rememberTranslatedThumbnail(img, translatedB64, settings.config.outputLanguage);
+    await saveTranslatedCacheEntry(url, translatedB64);
+    await saveTranslatedContentCacheEntry(contentKey, translatedB64);
+
+    // Later pages take their "previous pages" context from this one's text.
+    if (result.ocr_texts?.length) {
+      autoTranslatePreviousPages = autoTranslatePreviousPages.filter((entry) => entry.img !== img);
+      autoTranslatePreviousPages.push({ img, ocrTexts: result.ocr_texts });
+      if (autoTranslatePreviousPages.length > PREVIOUS_CONTEXT_STORE_LIMIT) autoTranslatePreviousPages.shift();
+    }
+
+    applyTranslatedOverlay(img, `data:image/png;base64,${translatedB64}`);
+    setOriginalViewActive(img, false);
+    renderBubbleFixTargets(img, bubbles);
+    void reapplyManualRegions(img, url);
+  } finally {
+    retranslatingImages.delete(img);
+    setRetranslateButtonBusy(img, false);
+  }
+}
+
 // Each of these six sync*Layout calls used to independently re-derive the
 // image's position via getImagePositionWithinParent() — two
 // getBoundingClientRect() calls (image + parent) apiece, so a single
@@ -2088,6 +2269,7 @@ function syncTranslatedDecorations(img: HTMLImageElement): void {
   syncFixHitLayerLayout(img, undefined, pos);
   syncExportButtonLayout(img, undefined, pos);
   syncOriginalToggleButtonLayout(img, undefined, pos);
+  syncRetranslateButtonLayout(img, undefined, pos);
 }
 
 // Several decorations (overlay, badge, export button, toggle button, ...)

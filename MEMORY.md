@@ -91,6 +91,10 @@ Advanced/pro-translator features must not be scattered onto the main Translate/L
 - Verified against the owner's real log (279 calls, 1.5 MB): 8 translate / 27 support_chat / 22 story_db_update / 222 test_key rendered, filter and expand fine. Tests: 5 new backend, 9 new Playwright.
 - **Gotcha:** a limit of 200 can hide rare call types entirely (the real log's newest 200 had no `translate`) — the type filter only lists types present in the loaded window, so raise "Show last".
 
+## Done 2026-09-26 (branch feat/retranslate-button)
+
+- **Per-page re-translate button (`↻`)** under the MT / download / eye buttons, requested by the repo owner ("cải thiện trải nghiệm nếu người dùng muốn dịch lại trang đó"). Rebuilds the request with current settings, `bypass_translation_cache: true` (new `TranslateOptions` field → `TranslationConfig` → skips only the cache read in `call_translation_api_batch`), keeps the old translation until a result arrives, busy state `…` + ignores double clicks, toast on failure. **Known trade-off:** click-to-fix corrections are baked into the old image and are lost on a re-translate; no confirmation dialog (a mis-click on the small button costs one API call and those corrections). Ideas if that bites: confirm only when the page has manual regions/fixes, or keep an undo of the previous translation.
+
 ## Borrowed from zyddnys/manga-image-translator (items 1-4 DONE 2026-09-26)
 
 Compared at the repo owner's request (README read, not run). Ours leads on in-browser reading, story-aware LLM translation, manual editing and API ops; theirs on model breadth and free/non-LLM use. **License rule:** that project is **GPL-3.0** — take ideas only, never copy its code or pull weights from its releases.

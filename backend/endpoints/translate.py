@@ -254,6 +254,7 @@ def _config_for_request(req):
         llm_instructions=req.llm_instructions,
         pre_replacements=req.pre_replacements,
         post_replacements=req.post_replacements,
+        bypass_translation_cache=req.bypass_translation_cache,
         story_characters=(
             [c.model_dump() for c in req.story_characters] if req.story_characters else None
         ),
@@ -379,6 +380,7 @@ def _translate_single_item(
             llm_instructions=req.llm_instructions,
             pre_replacements=req.pre_replacements,
             post_replacements=req.post_replacements,
+            bypass_translation_cache=req.bypass_translation_cache,
             story_characters=(
                 [c.model_dump() for c in req.story_characters] if req.story_characters else None
             ),

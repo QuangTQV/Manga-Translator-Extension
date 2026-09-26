@@ -286,6 +286,7 @@ export interface TranslateRequest {
   llm_instructions?: string;
   pre_replacements?: string;
   post_replacements?: string;
+  bypass_translation_cache?: boolean; // the per-page "re-translate" button: don't answer from the backend's translation cache
   lettering_uppercase?: boolean;
   lettering_align?: 'center' | 'left' | 'right';
   lettering_text_color?: string;
