@@ -161,6 +161,7 @@ export interface TranslateConfig {
   letteringOutlineColor?: string; // "#rrggbb"
   suggestStoryTitle?: string; // optional title typed next to the "Suggest" button, to help its web search — was previously never saved/loaded at all, unlike every other field on this tab
   suggestWebSearch?: boolean; // "Search the internet for this story" checkbox for the Suggest button — same gap as above
+  webSearchProvider?: 'provider' | 'searxng'; // source used by the opt-in Story Notes and Story DB web-search helpers
   contextMemoryEnabled?: boolean; // ask the model for a one-sentence page summary and accumulate it as context for later pages
   contextMemorySequential?: boolean; // translate one page at a time instead of in parallel while Context Memory is on, so a later page always sees the immediately preceding page's note (parallel workers would otherwise often start before it's written) — default false (parallel speed by default; a page missing recent context is a soft cost, not a correctness one)
   providerGroups: ProviderGroupConfig[]; // every provider tried in rotation, in list order — no entry is distinguished as "primary"; the backend round-robins the starting candidate across all of them (and all their keys) equally
@@ -446,6 +447,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     previousContextEnabled: false,
     contextMemoryEnabled: false,
     contextMemorySequential: false,
+    webSearchProvider: 'provider',
     rotationStrategy: 'round_robin',
     cooldownSeconds: 15,
   },

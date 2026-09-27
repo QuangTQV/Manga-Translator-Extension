@@ -2,14 +2,22 @@
 structured update (core/story_context.py:merge_story_update parses/applies
 the LLM's reply) plus the /stories/update-from-description route. Pure
 logic where possible; the LLM call is monkeypatched in the route tests."""
-import pytest
-from fastapi.testclient import TestClient
+
+from unittest.mock import patch
 
 import main
+import pytest
+from core.config import TranslationConfig
+from core.services.translation import generate_story_update
 from core.story_context import StoryUpdateParseError, merge_story_update
+from fastapi.testclient import TestClient
 
 client = TestClient(main.app, raise_server_exceptions=False)
-OPTS = {"provider": "Google", "input_language": "Japanese", "output_language": "Vietnamese"}
+OPTS = {
+    "provider": "Google",
+    "input_language": "Japanese",
+    "output_language": "Vietnamese",
+}
 
 EXAMPLE_REPLY = """
 {
@@ -43,25 +51,60 @@ def test_new_characters_and_relationship_are_created_from_an_empty_story():
 
 
 def test_existing_character_is_updated_in_place_not_duplicated():
-    existing = [{"id": "c-akira", "name": "akira", "gender": "unknown", "role": None, "voice_notes": None}]
+    existing = [
+        {
+            "id": "c-akira",
+            "name": "akira",
+            "gender": "unknown",
+            "role": None,
+            "voice_notes": None,
+        }
+    ]
     characters, _, _ = merge_story_update(existing, [], EXAMPLE_REPLY)
     assert len(characters) == 2  # Akira updated, Hina added — not 3
     akira = next(c for c in characters if c["id"] == "c-akira")
-    assert akira["name"] == "akira"  # existing spelling/casing is kept, only fields are updated
+    assert (
+        akira["name"] == "akira"
+    )  # existing spelling/casing is kept, only fields are updated
     assert akira["gender"] == "male"
     assert akira["role"] == "protagonist"
 
 
 def test_existing_relationship_between_the_same_pair_is_updated_not_duplicated():
     existing_chars = [
-        {"id": "c-a", "name": "Akira", "gender": "male", "role": None, "voice_notes": None},
-        {"id": "c-h", "name": "Hina", "gender": "female", "role": None, "voice_notes": None},
+        {
+            "id": "c-a",
+            "name": "Akira",
+            "gender": "male",
+            "role": None,
+            "voice_notes": None,
+        },
+        {
+            "id": "c-h",
+            "name": "Hina",
+            "gender": "female",
+            "role": None,
+            "voice_notes": None,
+        },
     ]
-    existing_rels = [{"id": "r1", "character_a_id": "c-h", "character_b_id": "c-a", "surface_relation": "childhood friends", "address_notes": "casual tớ/cậu"}]
-    characters, relationships, _ = merge_story_update(existing_chars, existing_rels, EXAMPLE_REPLY)
+    existing_rels = [
+        {
+            "id": "r1",
+            "character_a_id": "c-h",
+            "character_b_id": "c-a",
+            "surface_relation": "childhood friends",
+            "address_notes": "casual tớ/cậu",
+        }
+    ]
+    characters, relationships, _ = merge_story_update(
+        existing_chars, existing_rels, EXAMPLE_REPLY
+    )
     assert len(relationships) == 1
     assert relationships[0]["id"] == "r1"  # same relationship row, not a new one
-    assert relationships[0]["surface_relation"] == "secret enemies (former childhood friends)"
+    assert (
+        relationships[0]["surface_relation"]
+        == "secret enemies (former childhood friends)"
+    )
     assert len(characters) == 2  # no duplicates
 
 
@@ -74,7 +117,15 @@ def test_a_relationship_naming_an_unknown_character_is_dropped_not_a_dangling_re
 
 
 def test_omitted_fields_do_not_blank_out_existing_values():
-    existing = [{"id": "c1", "name": "Akira", "gender": "male", "role": "protagonist", "voice_notes": "blunt"}]
+    existing = [
+        {
+            "id": "c1",
+            "name": "Akira",
+            "gender": "male",
+            "role": "protagonist",
+            "voice_notes": "blunt",
+        }
+    ]
     reply = '{"characters": [{"name": "Akira", "role": "reluctant hero"}]}'  # no gender/voice_notes given
     characters, _, _ = merge_story_update(existing, [], reply)
     assert characters[0]["gender"] == "male"
@@ -88,11 +139,14 @@ def test_a_pure_style_note_with_no_continuity_note_returns_none():
     assert note is None
 
 
-@pytest.mark.parametrize("bad_reply", [
-    "not json at all",
-    '{"characters": [}',
-    "[]",  # valid JSON but not an object
-])
+@pytest.mark.parametrize(
+    "bad_reply",
+    [
+        "not json at all",
+        '{"characters": [}',
+        "[]",  # valid JSON but not an object
+    ],
+)
 def test_unparsable_or_wrongly_shaped_replies_raise(bad_reply):
     with pytest.raises(StoryUpdateParseError):
         merge_story_update([], [], bad_reply)
@@ -104,22 +158,68 @@ def test_a_fenced_code_block_reply_is_still_parsed():
     assert len(characters) == 2
 
 
+def test_searxng_results_are_prompted_as_untrusted_and_provider_search_is_not_requested():
+    captured = {}
+
+    def fake_call(
+        config, parts, prompt_text, debug=False, system_prompt=None, **kwargs
+    ):
+        captured["prompt"] = prompt_text
+        captured["web_search_provider"] = config.web_search_provider
+        return EXAMPLE_REPLY
+
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    with patch("core.services.translation._call_llm_endpoint", side_effect=fake_call):
+        generate_story_update(
+            config,
+            "Update up to chapter 39.",
+            [],
+            [],
+            "Vietnamese",
+            story_title="My Manga",
+            web_search_results="URL: https://example.org",
+        )
+    assert captured["web_search_provider"] == "searxng"
+    assert "UNTRUSTED SEARCH RESULTS" in captured["prompt"]
+    assert "chapter boundary above" in captured["prompt"]
+    assert "https://example.org" in captured["prompt"]
+    assert "web search tool available" not in captured["prompt"]
+
+
 # ---------------------------------------------------------------------------
 # POST /stories/update-from-description
 # ---------------------------------------------------------------------------
 def test_route_merges_and_returns_the_update(monkeypatch):
     import endpoints.stories as stories_module
 
-    def fake_generate(config, description, characters, relationships, output_language, story_title=None):
+    def fake_generate(
+        config,
+        description,
+        characters,
+        relationships,
+        output_language,
+        story_title=None,
+        web_search_results=None,
+    ):
         assert "childhood friend" in description
         assert output_language == "Vietnamese"
         return EXAMPLE_REPLY
 
     monkeypatch.setattr(stories_module, "generate_story_update", fake_generate)
-    resp = client.post("/stories/update-from-description", json={
-        **OPTS, "description": "Chapter 39: the villain turns out to be Akira's childhood friend Hina.",
-        "characters": [], "relationships": [],
-    })
+    resp = client.post(
+        "/stories/update-from-description",
+        json={
+            **OPTS,
+            "description": "Chapter 39: the villain turns out to be Akira's childhood friend Hina.",
+            "characters": [],
+            "relationships": [],
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert {c["name"] for c in data["characters"]} == {"Akira", "Hina"}
@@ -127,22 +227,38 @@ def test_route_merges_and_returns_the_update(monkeypatch):
 
 
 def test_route_rejects_a_blank_description():
-    resp = client.post("/stories/update-from-description", json={**OPTS, "description": "   ", "characters": [], "relationships": []})
+    resp = client.post(
+        "/stories/update-from-description",
+        json={**OPTS, "description": "   ", "characters": [], "relationships": []},
+    )
     assert resp.status_code == 400
 
 
 def test_route_surfaces_a_bad_llm_reply_as_502(monkeypatch):
     import endpoints.stories as stories_module
 
-    monkeypatch.setattr(stories_module, "generate_story_update", lambda *a, **k: "not json")
-    resp = client.post("/stories/update-from-description", json={**OPTS, "description": "something happened", "characters": [], "relationships": []})
+    monkeypatch.setattr(
+        stories_module, "generate_story_update", lambda *a, **k: "not json"
+    )
+    resp = client.post(
+        "/stories/update-from-description",
+        json={
+            **OPTS,
+            "description": "something happened",
+            "characters": [],
+            "relationships": [],
+        },
+    )
     assert resp.status_code == 502
 
 
 def test_route_does_not_require_login_only_a_token_when_auth_is_enabled():
     # Same gating family as /suggest-instructions and /region/translate — a
     # local/self-hosted setup with MT_REQUIRE_AUTH off needs no token at all.
-    resp = client.post("/stories/update-from-description", json={**OPTS, "description": "x", "characters": [], "relationships": []})
+    resp = client.post(
+        "/stories/update-from-description",
+        json={**OPTS, "description": "x", "characters": [], "relationships": []},
+    )
     assert resp.status_code != 401
 
 
@@ -151,16 +267,31 @@ def test_route_enables_web_search_and_forwards_the_story_title(monkeypatch):
 
     seen = {}
 
-    def fake_generate(config, description, characters, relationships, output_language, story_title=None):
+    def fake_generate(
+        config,
+        description,
+        characters,
+        relationships,
+        output_language,
+        story_title=None,
+        web_search_results=None,
+    ):
         seen["enable_web_search"] = config.enable_web_search
         seen["story_title"] = story_title
         return EXAMPLE_REPLY
 
     monkeypatch.setattr(stories_module, "generate_story_update", fake_generate)
-    resp = client.post("/stories/update-from-description", json={
-        **OPTS, "description": "Update up to chapter 39.", "characters": [], "relationships": [],
-        "enable_web_search": True, "story_title": "My Manga",
-    })
+    resp = client.post(
+        "/stories/update-from-description",
+        json={
+            **OPTS,
+            "description": "Update up to chapter 39.",
+            "characters": [],
+            "relationships": [],
+            "enable_web_search": True,
+            "story_title": "My Manga",
+        },
+    )
     assert resp.status_code == 200
     assert seen == {"enable_web_search": True, "story_title": "My Manga"}
 
@@ -170,12 +301,65 @@ def test_web_search_off_by_default_and_does_not_require_a_title(monkeypatch):
 
     seen = {}
 
-    def fake_generate(config, description, characters, relationships, output_language, story_title=None):
+    def fake_generate(
+        config,
+        description,
+        characters,
+        relationships,
+        output_language,
+        story_title=None,
+        web_search_results=None,
+    ):
         seen["enable_web_search"] = config.enable_web_search
         seen["story_title"] = story_title
         return EXAMPLE_REPLY
 
     monkeypatch.setattr(stories_module, "generate_story_update", fake_generate)
-    resp = client.post("/stories/update-from-description", json={**OPTS, "description": "x", "characters": [], "relationships": []})
+    resp = client.post(
+        "/stories/update-from-description",
+        json={**OPTS, "description": "x", "characters": [], "relationships": []},
+    )
     assert resp.status_code == 200
     assert seen == {"enable_web_search": False, "story_title": None}
+
+
+def test_local_search_uses_title_and_description_and_forwards_results(monkeypatch):
+    import endpoints.stories as stories_module
+
+    seen = {}
+    monkeypatch.setattr(
+        stories_module,
+        "search_searxng",
+        lambda query: seen.setdefault("query", query) or "",
+    )
+
+    def fake_generate(
+        config,
+        description,
+        characters,
+        relationships,
+        output_language,
+        story_title=None,
+        web_search_results=None,
+    ):
+        seen["source"] = config.web_search_provider
+        seen["results"] = web_search_results
+        return EXAMPLE_REPLY
+
+    monkeypatch.setattr(stories_module, "generate_story_update", fake_generate)
+    resp = client.post(
+        "/stories/update-from-description",
+        json={
+            **OPTS,
+            "description": "Update up to chapter 39.",
+            "characters": [],
+            "relationships": [],
+            "enable_web_search": True,
+            "web_search_provider": "searxng",
+            "story_title": "My Manga",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert "My Manga" in seen["query"] and "chapter 39" in seen["query"]
+    assert seen["source"] == "searxng"
+    assert seen["results"] == seen["query"]

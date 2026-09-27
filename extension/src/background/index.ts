@@ -1,6 +1,6 @@
-import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
-import type { LiveAiImageResult, LiveAiLogEntry, LiveAiLogResult, LiveAiLogSettings, LiveAiLogSettingsResult, TranslateRequest, TranslateResponse, StoryDetail, StorySummary, StoryCharacter, StoryRelationship, StoryContinuityNote } from '../shared/types.js';
 import { normalizeUiLanguage, t } from '../shared/i18n.js';
+import type { LiveAiImageResult, LiveAiLogEntry, LiveAiLogResult, LiveAiLogSettings, LiveAiLogSettingsResult, StoryCharacter, StoryContinuityNote, StoryDetail, StoryRelationship, StorySummary, TranslateRequest, TranslateResponse } from '../shared/types.js';
+import { DEFAULT_SETTINGS, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings } from '../shared/types.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
 
@@ -58,8 +58,28 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
+// Keep in sync with the message.type branches below: unrelated extension
+// messages must not hold their response channel open while this worker does
+// nothing with them.
+const BACKGROUND_MESSAGE_TYPES = new Set([
+  'GET_SETTINGS', 'SAVE_SETTINGS', 'CHECK_HEALTH', 'OPEN_SCANNER', 'OPEN_POPUP',
+  'FETCH_IMAGE', 'FETCH_CHAPTER', 'LIST_MODELS', 'TRANSLATE_IMAGE_WITH_BODY',
+  'SUGGEST_INSTRUCTIONS', 'TEST_WEB_SEARCH', 'SUPPORT_CHAT', 'TEST_API_KEY',
+  'TEST_FLUX_REMOTE', 'ACCOUNT_REGISTER', 'ACCOUNT_ME', 'ACCOUNT_SET_PLAN',
+  'ACCOUNT_LOGOUT', 'ACCOUNT_GOOGLE_LOGIN', 'ADMIN_GET_LLM_CONFIG',
+  'ADMIN_SET_LLM_CONFIG', 'LIST_FONTS', 'LIVE_AI_LOG', 'LIVE_AI_LOG_SETTINGS',
+  'LIVE_AI_IMAGE', 'REGION_API', 'STORY_LIST', 'STORY_GET', 'STORY_CREATE',
+  'STORY_SAVE', 'STORY_DELETE', 'STORY_UPDATE_FROM_DESCRIPTION',
+  'ENSURE_SEARXNG',
+]);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message.type !== 'string' || !BACKGROUND_MESSAGE_TYPES.has(message.type)) {
+    return false;
+  }
+
   void (async () => {
+    try {
     if (message.type === 'GET_SETTINGS') {
       sendResponse({ settings: await getSettings() });
       return;
@@ -194,6 +214,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'TEST_WEB_SEARCH') {
+      const { query } = message as { type: string; query: string };
+      sendResponse(await fetchTestWebSearch(query));
+      return;
+    }
+
+    if (message.type === 'ENSURE_SEARXNG') {
+      sendResponse(await fetchEnsureSearxng());
+      return;
+    }
+
     if (message.type === 'SUPPORT_CHAT') {
       const { body } = message as { type: string; body: SupportChatBody };
       try {
@@ -319,6 +350,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { body } = message as { type: string; body: Record<string, unknown> };
       sendResponse(await storyUpdateFromDescription(body));
       return;
+    }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('[BG] Message handler failed:', message.type, detail);
+      sendResponse({ error: detail });
     }
   })();
 
@@ -471,6 +507,7 @@ interface SuggestInstructionsBody {
   rotation_strategy?: string;
   cooldown_seconds?: number;
   enable_web_search?: boolean;
+  web_search_provider?: 'provider' | 'searxng';
   story_title?: string;
 }
 
@@ -502,6 +539,39 @@ async function fetchSuggestInstructions(body: SuggestInstructionsBody): Promise<
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { error: `Suggest instructions error: ${msg}` };
+  }
+}
+
+async function fetchTestWebSearch(query: string): Promise<{ query?: string; result_count?: number; results?: string; error?: string }> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  try {
+    const response = await fetch(`${backendUrl.replace(/\/$/, '')}/web-search/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
+      body: JSON.stringify({ query }),
+    });
+    const data = await response.json() as { query?: string; result_count?: number; results?: string; detail?: string };
+    if (!response.ok) return { error: data.detail || `Search test failed: HTTP ${response.status}` };
+    return data;
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function fetchEnsureSearxng(): Promise<{ ready?: boolean; started?: boolean; url?: string; error?: string }> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  try {
+    const response = await fetch(`${backendUrl.replace(/\/$/, '')}/web-search/ensure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(settings) },
+    });
+    const data = await response.json() as { ready?: boolean; started?: boolean; url?: string; detail?: string };
+    if (!response.ok) return { error: data.detail || `Ensure SearXNG failed: HTTP ${response.status}` };
+    return data;
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 

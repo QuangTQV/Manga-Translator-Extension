@@ -1,17 +1,31 @@
 """FastAPI translation endpoints."""
+
 import asyncio
 import base64
 import io
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-
-from fastapi import APIRouter, Depends, HTTPException
-from PIL import Image
+from urllib.parse import urlsplit
 
 from auth import verify_token
+from config import settings
 from core.accounts import Account
 from core.ml.download_status import active_downloads
+from core.services.translation import (
+    generate_character_notes,
+    generate_support_chat_reply,
+    test_api_key,
+)
+from core.websearch import WebSearchError, ensure_searxng_running, search_searxng
+from fastapi import APIRouter, Depends, HTTPException, Request
+from PIL import Image
+from pipeline.wrapper import (
+    _build_config,
+    build_test_key_config,
+    image_to_base64_raw,
+    translate_image_base64,
+)
 from schemas import (
     StoryCharacter,
     StoryContinuityNote,
@@ -29,25 +43,17 @@ from schemas import (
     TranslateBatchResponse,
     TranslateRequest,
     TranslateResponse,
+    WebSearchEnsureResponse,
+    WebSearchTestRequest,
+    WebSearchTestResponse,
 )
-from core.services.translation import (
-    generate_character_notes,
-    generate_support_chat_reply,
-    test_api_key,
-)
-from pipeline.wrapper import (
-    _build_config,
-    build_test_key_config,
-    image_to_base64_raw,
-    translate_image_base64,
-)
-from config import settings
 
 # Sample images for /suggest-instructions are for a cast/tone overview, not
 # pixel-perfect reading — cap count and resolution so this stays a cheap,
 # one-off call regardless of how many/how large the pages the user selected.
 SUGGEST_INSTRUCTIONS_MAX_IMAGES = 8
 SUGGEST_INSTRUCTIONS_MAX_DIMENSION = 1024
+NO_WEB_SEARCH_RESULTS = "No usable results were returned."
 
 router = APIRouter(prefix="", tags=["translate"])
 
@@ -114,6 +120,7 @@ def _resolve_story_context(req, account: "Account | None") -> None:
     if not isinstance(account, Account) or not req.story_id:
         return
     from core.story_context import StoryNotFoundError, get_story
+
     try:
         story = get_story(req.story_id, account.email)
     except StoryNotFoundError:
@@ -132,7 +139,9 @@ def _resolve_story_context(req, account: "Account | None") -> None:
     req.story_relationships = [StoryRelationship(**r) for r in story.relationships]
     req.story_glossary = [StoryGlossaryTerm(**g) for g in story.glossary]
     if story.continuity_notes_enabled:
-        req.story_continuity_notes = [StoryContinuityNote(**n) for n in story.continuity_notes]
+        req.story_continuity_notes = [
+            StoryContinuityNote(**n) for n in story.continuity_notes
+        ]
 
 
 def _run_with_warnings(fn, *args):
@@ -169,6 +178,7 @@ def _apply_shared_llm_config(req, account: "Account | None") -> None:
     if not isinstance(account, Account) or req.api_key:
         return
     from core.server_config import SecretKeyMismatchError, get_shared_llm_config
+
     try:
         shared = get_shared_llm_config()
     except SecretKeyMismatchError:
@@ -256,16 +266,22 @@ def _config_for_request(req):
         post_replacements=req.post_replacements,
         bypass_translation_cache=req.bypass_translation_cache,
         story_characters=(
-            [c.model_dump() for c in req.story_characters] if req.story_characters else None
+            [c.model_dump() for c in req.story_characters]
+            if req.story_characters
+            else None
         ),
         story_relationships=(
-            [r.model_dump() for r in req.story_relationships] if req.story_relationships else None
+            [r.model_dump() for r in req.story_relationships]
+            if req.story_relationships
+            else None
         ),
         story_glossary=(
             [g.model_dump() for g in req.story_glossary] if req.story_glossary else None
         ),
         story_continuity_notes=(
-            [n.model_dump() for n in req.story_continuity_notes] if req.story_continuity_notes else None
+            [n.model_dump() for n in req.story_continuity_notes]
+            if req.story_continuity_notes
+            else None
         ),
         context_memory_enabled=req.context_memory_enabled,
         context_memory=req.context_memory,
@@ -305,7 +321,9 @@ def _config_for_request(req):
 
 
 @router.post("/translate", response_model=TranslateResponse)
-async def translate_single(req: TranslateRequest, account=Depends(verify_token)) -> TranslateResponse:
+async def translate_single(
+    req: TranslateRequest, account=Depends(verify_token)
+) -> TranslateResponse:
     """Translate a single image.
 
     Accepts a base64-encoded image and returns the translated image
@@ -319,10 +337,16 @@ async def translate_single(req: TranslateRequest, account=Depends(verify_token))
     start = time.time()
     try:
         async with _pipeline_slot(req.fix_hint is not None):
-            (result_image, bubbles, elapsed, ocr_texts, memory_note), warnings = await asyncio.wait_for(
+            (
+                (result_image, bubbles, elapsed, ocr_texts, memory_note),
+                warnings,
+            ) = await asyncio.wait_for(
                 asyncio.to_thread(
                     _run_with_warnings,
-                    translate_image_base64, req.image, config, req.previous_context_texts,
+                    translate_image_base64,
+                    req.image,
+                    config,
+                    req.previous_context_texts,
                 ),
                 timeout=settings.request_timeout_seconds,
             )
@@ -382,16 +406,24 @@ def _translate_single_item(
             post_replacements=req.post_replacements,
             bypass_translation_cache=req.bypass_translation_cache,
             story_characters=(
-                [c.model_dump() for c in req.story_characters] if req.story_characters else None
+                [c.model_dump() for c in req.story_characters]
+                if req.story_characters
+                else None
             ),
             story_relationships=(
-                [r.model_dump() for r in req.story_relationships] if req.story_relationships else None
+                [r.model_dump() for r in req.story_relationships]
+                if req.story_relationships
+                else None
             ),
             story_glossary=(
-                [g.model_dump() for g in req.story_glossary] if req.story_glossary else None
+                [g.model_dump() for g in req.story_glossary]
+                if req.story_glossary
+                else None
             ),
             story_continuity_notes=(
-                [n.model_dump() for n in req.story_continuity_notes] if req.story_continuity_notes else None
+                [n.model_dump() for n in req.story_continuity_notes]
+                if req.story_continuity_notes
+                else None
             ),
             context_memory_enabled=req.context_memory_enabled,
             context_memory=req.context_memory,
@@ -428,8 +460,10 @@ def _translate_single_item(
             fonts_base_dir=fonts_dir,
         )
 
-        (result_image, bubbles, _, ocr_texts, memory_note), warnings = _run_with_warnings(
-            translate_image_base64, item.image, config, req.previous_context_texts
+        (result_image, bubbles, _, ocr_texts, memory_note), warnings = (
+            _run_with_warnings(
+                translate_image_base64, item.image, config, req.previous_context_texts
+            )
         )
         translated_b64 = image_to_base64_raw(result_image)
         return TranslateBatchItemResponse(
@@ -476,7 +510,9 @@ async def _run_batch_item(
 
 
 @router.post("/translate/batch", response_model=TranslateBatchResponse)
-async def translate_batch(req: TranslateBatchRequest, account=Depends(verify_token)) -> TranslateBatchResponse:
+async def translate_batch(
+    req: TranslateBatchRequest, account=Depends(verify_token)
+) -> TranslateBatchResponse:
     """Translate multiple images concurrently.
 
     Processes up to 20 images in parallel using a thread pool.
@@ -490,9 +526,7 @@ async def translate_batch(req: TranslateBatchRequest, account=Depends(verify_tok
     _apply_shared_llm_config(req, account)
     _resolve_story_context(req, account)
     if len(req.images) > 20:
-        raise HTTPException(
-            status_code=400, detail="Maximum 20 images per batch"
-        )
+        raise HTTPException(status_code=400, detail="Maximum 20 images per batch")
 
     start = time.time()
     results = await asyncio.gather(*(_run_batch_item(item, req) for item in req.images))
@@ -520,13 +554,18 @@ def _downscale_and_reencode_jpeg(raw_b64: str, max_dimension: int) -> str:
         image = image.convert("RGB")
     if max(image.size) > max_dimension:
         scale = max_dimension / max(image.size)
-        new_size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+        new_size = (
+            max(1, round(image.width * scale)),
+            max(1, round(image.height * scale)),
+        )
         image = image.resize(new_size, Image.LANCZOS)
     return image_to_base64_raw(image, fmt="JPEG")
 
 
 @router.post("/suggest-instructions", response_model=SuggestInstructionsResponse)
-async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(verify_token)) -> SuggestInstructionsResponse:
+async def suggest_instructions(
+    req: SuggestInstructionsRequest, account=Depends(verify_token)
+) -> SuggestInstructionsResponse:
     """Draft Special Instructions text from a handful of sample pages.
 
     A single explicit, user-triggered LLM call — not part of the
@@ -539,7 +578,9 @@ async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(
     results.
     """
     _apply_shared_llm_config(req, account)
-    can_search_without_images = req.enable_web_search and bool((req.story_title or "").strip())
+    can_search_without_images = req.enable_web_search and bool(
+        (req.story_title or "").strip()
+    )
     if not req.images and not can_search_without_images:
         raise HTTPException(status_code=400, detail="No sample images provided.")
 
@@ -591,6 +632,21 @@ async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(
         fonts_base_dir=settings.fonts_base_dir,
         enable_web_search=req.enable_web_search,
     )
+    config.translation.web_search_provider = req.web_search_provider
+
+    web_search_results = None
+    if req.enable_web_search and req.web_search_provider == "searxng":
+        if not (req.story_title or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="A story title is required when using local SearXNG search.",
+            )
+        try:
+            web_search_results = await asyncio.to_thread(
+                search_searxng, req.story_title
+            )
+        except WebSearchError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
 
     try:
         suggestion = await asyncio.to_thread(
@@ -599,15 +655,65 @@ async def suggest_instructions(req: SuggestInstructionsRequest, account=Depends(
             prepared_images,
             req.output_language,
             story_title=req.story_title,
+            web_search_results=web_search_results,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate suggestion: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate suggestion: {e}"
+        )
 
     return SuggestInstructionsResponse(suggestion=suggestion)
 
 
+@router.post("/web-search/test", response_model=WebSearchTestResponse)
+async def test_web_search(
+    req: WebSearchTestRequest, account=Depends(verify_token)
+) -> WebSearchTestResponse:
+    """Test the configured local SearXNG instance without calling an LLM."""
+    query = " ".join(req.query.split())
+    if not query:
+        raise HTTPException(status_code=422, detail="Search query must not be blank.")
+    try:
+        results = await asyncio.to_thread(search_searxng, query)
+    except WebSearchError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    count = 0 if results == NO_WEB_SEARCH_RESULTS else results.count("\n\n") + 1
+    return WebSearchTestResponse(query=query, result_count=count, results=results)
+
+
+@router.post("/web-search/ensure", response_model=WebSearchEnsureResponse)
+async def ensure_web_search(
+    request: Request,
+    account=Depends(verify_token),
+) -> WebSearchEnsureResponse:
+    """Start the bundled local SearXNG service when the configured local URL is down."""
+    origin = request.headers.get("origin")
+    if origin:
+        parsed_origin = urlsplit(origin)
+        is_extension = parsed_origin.scheme in {"chrome-extension", "moz-extension"}
+        is_loopback = parsed_origin.scheme in {
+            "http",
+            "https",
+        } and parsed_origin.hostname in {"localhost", "127.0.0.1", "::1"}
+        if not is_extension and not is_loopback:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the extension or a local client can start SearXNG.",
+            )
+
+    try:
+        started = await asyncio.to_thread(ensure_searxng_running)
+    except WebSearchError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return WebSearchEnsureResponse(
+        ready=True, started=started, url=settings.searxng_url
+    )
+
+
 @router.post("/support-chat", response_model=SupportChatResponse)
-async def support_chat(req: SupportChatRequest, account=Depends(verify_token)) -> SupportChatResponse:
+async def support_chat(
+    req: SupportChatRequest, account=Depends(verify_token)
+) -> SupportChatResponse:
     """Answer a user's question about installing/configuring/using this
     project, using the caller's own configured LLM grounded in the
     project's README/setup docs (generate_support_chat_reply). Stateless
@@ -670,14 +776,22 @@ async def support_chat(req: SupportChatRequest, account=Depends(verify_token)) -
 
 
 @router.post("/test-key", response_model=TestApiKeyResponse)
-async def test_key(req: TestApiKeyRequest, account=Depends(verify_token)) -> TestApiKeyResponse:
+async def test_key(
+    req: TestApiKeyRequest, account=Depends(verify_token)
+) -> TestApiKeyResponse:
     """Ping one (provider, model, key) combo with a minimal text-only
     request — the popup's "Test API Key" button. Bypasses the pipeline
     concurrency slot entirely (no GPU/detection/rendering involved), so
     testing several keys at once never queues behind real translate work."""
     _apply_shared_llm_config(req, account)
     try:
-        config = build_test_key_config(req.provider, req.model_name, req.api_key, req.base_url, req.reasoning_effort)
+        config = build_test_key_config(
+            req.provider,
+            req.model_name,
+            req.api_key,
+            req.base_url,
+            req.reasoning_effort,
+        )
     except ValueError as e:
         return TestApiKeyResponse(ok=False, error=str(e))
 
@@ -697,7 +811,11 @@ async def health_check():
         "version": "1.0.0",
         "backend_version": "1.0.0",
         "gpu_available": torch.cuda.is_available(),
-        "device": "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+        "device": "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu",
         "cuda_available": torch.cuda.is_available(),
         # Model weights being fetched right now (first use of a feature);
         # the extension polls this while a request is slow. See
@@ -716,7 +834,9 @@ async def list_fonts():
     names = []
     if fonts_dir.is_dir():
         for entry in sorted(fonts_dir.iterdir()):
-            if entry.is_dir() and (any(entry.glob("*.ttf")) or any(entry.glob("*.otf"))):
+            if entry.is_dir() and (
+                any(entry.glob("*.ttf")) or any(entry.glob("*.otf"))
+            ):
                 names.append(entry.name)
     return {"fonts": names}
 

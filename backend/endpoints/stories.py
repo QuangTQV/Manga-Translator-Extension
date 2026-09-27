@@ -4,9 +4,8 @@ core/story_context.py. Opt-in per user regardless of MT_REQUIRE_AUTH: any
 logged-in account (registered or Google-signed-in via the extension's
 Account tab) can create and use stories here.
 """
-import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
 
 from auth import require_login, verify_token
 from core.accounts import Account
@@ -21,7 +20,9 @@ from core.story_context import (
     merge_story_update,
     save_story,
 )
+from core.websearch import WebSearchError, search_searxng
 from endpoints.translate import _apply_shared_llm_config, _config_for_request
+from fastapi import APIRouter, Depends, HTTPException
 from schemas import (
     CreateStoryRequest,
     StoryContextPayload,
@@ -52,20 +53,25 @@ def _to_detail(row) -> StoryDetail:
 
 
 @router.get("", response_model=list[StorySummary])
-async def list_my_stories(account: Account = Depends(require_login)) -> list[StorySummary]:
+async def list_my_stories(
+    account: Account = Depends(require_login),
+) -> list[StorySummary]:
     return [_to_summary(row) for row in list_stories(account.email)]
 
 
 @router.post("", response_model=StoryDetail)
 async def create_my_story(
-    req: CreateStoryRequest, account: Account = Depends(require_login),
+    req: CreateStoryRequest,
+    account: Account = Depends(require_login),
 ) -> StoryDetail:
     row = create_story(account.email, req.name)
     return _to_detail(row)
 
 
 @router.get("/{story_id}", response_model=StoryDetail)
-async def get_my_story(story_id: str, account: Account = Depends(require_login)) -> StoryDetail:
+async def get_my_story(
+    story_id: str, account: Account = Depends(require_login)
+) -> StoryDetail:
     try:
         row = get_story(story_id, account.email)
     except StoryNotFoundError:
@@ -75,7 +81,9 @@ async def get_my_story(story_id: str, account: Account = Depends(require_login))
 
 @router.put("/{story_id}", response_model=StoryDetail)
 async def save_my_story(
-    story_id: str, req: StoryContextPayload, account: Account = Depends(require_login),
+    story_id: str,
+    req: StoryContextPayload,
+    account: Account = Depends(require_login),
 ) -> StoryDetail:
     try:
         row = save_story(
@@ -94,7 +102,9 @@ async def save_my_story(
 
 
 @router.delete("/{story_id}")
-async def delete_my_story(story_id: str, account: Account = Depends(require_login)) -> dict:
+async def delete_my_story(
+    story_id: str, account: Account = Depends(require_login)
+) -> dict:
     try:
         delete_story(story_id, account.email)
     except StoryNotFoundError:
@@ -104,7 +114,8 @@ async def delete_my_story(story_id: str, account: Account = Depends(require_logi
 
 @router.post("/update-from-description", response_model=StoryUpdateResponse)
 async def update_story_from_description(
-    req: StoryUpdateRequest, account=Depends(verify_token),
+    req: StoryUpdateRequest,
+    account=Depends(verify_token),
 ) -> StoryUpdateResponse:
     """Turn a free-text note about a story development ("chapter 39, the
     villain turns out to be Akira's childhood friend Hina, so they switch
@@ -126,17 +137,33 @@ async def update_story_from_description(
     _apply_shared_llm_config(req, account)
     config = _config_for_request(req)
     config.translation.enable_web_search = req.enable_web_search
+    config.translation.web_search_provider = req.web_search_provider
     characters = [c.model_dump() for c in req.characters]
     relationships = [r.model_dump() for r in req.relationships]
+
+    web_search_results = None
+    if req.enable_web_search and req.web_search_provider == "searxng":
+        search_query = " ".join(filter(None, [req.story_title, req.description]))
+        try:
+            web_search_results = await asyncio.to_thread(search_searxng, search_query)
+        except WebSearchError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
 
     try:
         raw_reply = await asyncio.to_thread(
             generate_story_update,
-            config.translation, req.description, characters, relationships, req.output_language,
+            config.translation,
+            req.description,
+            characters,
+            relationships,
+            req.output_language,
             story_title=req.story_title,
+            web_search_results=web_search_results,
         )
         merged_characters, merged_relationships, continuity_note = merge_story_update(
-            characters, relationships, raw_reply,
+            characters,
+            relationships,
+            raw_reply,
         )
     except StoryUpdateParseError as e:
         raise HTTPException(status_code=502, detail=str(e))

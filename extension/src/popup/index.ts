@@ -1,8 +1,8 @@
-import { fileToDataUrl } from './image-utils.js';
-import { initRelationshipGraph } from './relationship-graph.js';
-import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type TranslateConfig, type StoryCharacter, type StoryRelationship, type StoryGlossaryTerm, type StoryContinuityNote, type StoryDetail, type StorySummary } from '../shared/types.js';
 import { UI_LANGUAGES, normalizeUiLanguage, t, type I18nKey, type UiLanguage } from '../shared/i18n.js';
+import { DEFAULT_SETTINGS, PROVIDERS, SOURCE_LANGUAGES, TARGET_LANGUAGES, normalizeProviderGroups, stripLegacyProviderFields, type AppSettings, type BackupApiKeyEntry, type ProviderGroupConfig, type StoryCharacter, type StoryContinuityNote, type StoryDetail, type StoryGlossaryTerm, type StoryRelationship, type StorySummary, type TranslateConfig } from '../shared/types.js';
+import { fileToDataUrl } from './image-utils.js';
 import { renderMarkdown } from './markdown.js';
+import { initRelationshipGraph } from './relationship-graph.js';
 
 const STORAGE_KEY = 'manga_translator_settings';
 
@@ -21,6 +21,12 @@ function qs<T extends HTMLElement>(id: string): T {
 const extensionEnabledToggle = qs<HTMLInputElement>('f-extension-enabled');
 const masterToggleRow = qs<HTMLDivElement>('master-toggle-row');
 const backendInput = qs<HTMLInputElement>('f-backend');
+const webSearchSourceSelect = qs<HTMLSelectElement>('f-web-search-source');
+const searxngStartStatus = qs<HTMLSpanElement>('searxng-start-status');
+const webSearchTestQueryInput = qs<HTMLInputElement>('f-web-search-test-query');
+const testWebSearchBtn = qs<HTMLButtonElement>('btn-test-web-search');
+const webSearchTestStatus = qs<HTMLSpanElement>('web-search-test-status');
+const webSearchTestResults = qs<HTMLPreElement>('web-search-test-results');
 const sourceInput = qs<HTMLInputElement>('f-source');
 const targetInput = qs<HTMLInputElement>('f-target');
 const sourceLanguageList = qs<HTMLDataListElement>('lang-source-list');
@@ -463,9 +469,14 @@ async function loadAndBind(): Promise<void> {
   updateLetteringVisibility();
   suggestStoryTitleInput.value = settings.config.suggestStoryTitle ?? '';
   suggestWebSearchToggle.checked = settings.config.suggestWebSearch ?? false;
+  webSearchSourceSelect.value = settings.config.webSearchProvider ?? 'provider';
 
   settingsLoaded = true;
   bind();
+  // Check SearXNG status if already selected
+  if (webSearchSourceSelect.value === 'searxng') {
+    void handleWebSearchSourceChange();
+  }
   await checkHealth(settings.backendUrl);
 }
 
@@ -490,7 +501,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
+  for (const el of [backendInput, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -507,6 +518,8 @@ function bind(): void {
   outsideTextToggle.addEventListener('change', updateInpaintingMethodVisibility);
   inpaintingMethodSelect.addEventListener('change', updateInpaintingMethodVisibility);
   testFluxRemoteBtn.addEventListener('click', () => { void handleTestFluxRemote(); });
+  testWebSearchBtn.addEventListener('click', () => { void handleTestWebSearch(); });
+  webSearchSourceSelect.addEventListener('change', () => { void handleWebSearchSourceChange(); });
 
   uiLanguageSelect.addEventListener('change', () => {
     uiLanguage = normalizeUiLanguage(uiLanguageSelect.value);
@@ -633,6 +646,12 @@ function bind(): void {
   });
 
   suggestInstructionsBtn.addEventListener('click', async () => {
+    if (suggestWebSearchToggle.checked
+      && webSearchSourceSelect.value === 'searxng'
+      && !suggestStoryTitleInput.value.trim()) {
+      setStatus(t(uiLanguage, 'errorSuggestSearxngTitleRequired'), 'err');
+      return;
+    }
     suggestInstructionsBtn.disabled = true;
     setStatus(t(uiLanguage, 'statusSuggestingInstructions'), '');
     try {
@@ -1192,6 +1211,92 @@ async function handleTestFluxRemote(): Promise<void> {
   }
 }
 
+async function handleTestWebSearch(): Promise<void> {
+  const query = webSearchTestQueryInput.value.trim();
+  webSearchTestStatus.className = 'bk-test-status';
+  webSearchTestStatus.textContent = '';
+  webSearchTestStatus.title = '';
+  webSearchTestResults.style.display = 'none';
+  webSearchTestResults.textContent = '';
+  if (!query) {
+    webSearchTestStatus.className = 'bk-test-status fail';
+    webSearchTestStatus.textContent = t(uiLanguage, 'errorTestWebSearchQuery');
+    return;
+  }
+
+  testWebSearchBtn.disabled = true;
+  webSearchTestStatus.className = 'bk-test-status pending';
+  webSearchTestStatus.textContent = t(uiLanguage, 'statusTestWebSearchPending');
+  try {
+    await autoSave();
+    const result = await new Promise<{ query?: string; result_count?: number; results?: string; error?: string }>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'TEST_WEB_SEARCH', query }, (response: unknown) => {
+        const lastError = chrome.runtime.lastError;
+        if (lastError) { resolve({ error: lastError.message }); return; }
+        resolve((response as { query?: string; result_count?: number; results?: string; error?: string }) ?? { error: 'No response from background service worker.' });
+      });
+    });
+    if (result.error) {
+      webSearchTestStatus.className = 'bk-test-status fail';
+      webSearchTestStatus.textContent = '✗';
+      webSearchTestStatus.title = result.error;
+      webSearchTestResults.textContent = result.error;
+      webSearchTestResults.style.display = 'block';
+      return;
+    }
+    const count = result.result_count ?? 0;
+    webSearchTestStatus.className = `bk-test-status ${count ? 'ok' : 'fail'}`;
+    webSearchTestStatus.textContent = t(uiLanguage, count ? 'statusTestWebSearchCount' : 'statusTestWebSearchEmpty', { count });
+    webSearchTestStatus.title = result.query ?? query;
+    webSearchTestResults.textContent = result.results ?? '';
+    webSearchTestResults.style.display = 'block';
+  } finally {
+    testWebSearchBtn.disabled = false;
+  }
+}
+
+async function handleWebSearchSourceChange(): Promise<void> {
+  const selectedSource = webSearchSourceSelect.value;
+  if (selectedSource !== 'searxng') {
+    searxngStartStatus.className = 'bk-test-status';
+    searxngStartStatus.textContent = '';
+    searxngStartStatus.title = '';
+    return;
+  }
+
+  searxngStartStatus.className = 'bk-test-status pending';
+  searxngStartStatus.textContent = t(uiLanguage, 'statusSearxngStarting');
+  try {
+    await autoSave();
+    const result = await new Promise<{ ready?: boolean; started?: boolean; url?: string; error?: string }>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'ENSURE_SEARXNG' }, (response: unknown) => {
+        const lastError = chrome.runtime.lastError;
+        if (lastError) { resolve({ error: lastError.message }); return; }
+        resolve((response as { ready?: boolean; started?: boolean; url?: string; error?: string }) ?? { error: 'No response from background service worker.' });
+      });
+    });
+    if (result.error) {
+      searxngStartStatus.className = 'bk-test-status fail';
+      searxngStartStatus.textContent = t(uiLanguage, 'statusSearxngError');
+      searxngStartStatus.title = result.error;
+      return;
+    }
+    if (result.ready) {
+      searxngStartStatus.className = 'bk-test-status ok';
+      searxngStartStatus.textContent = t(uiLanguage, 'statusSearxngReady');
+      if (result.started) {
+        searxngStartStatus.title = t(uiLanguage, 'statusSearxngReady') + ' (auto-started)';
+      } else {
+        searxngStartStatus.title = t(uiLanguage, 'statusSearxngReady') + ' (already running)';
+      }
+    }
+  } catch (error) {
+    searxngStartStatus.className = 'bk-test-status fail';
+    searxngStartStatus.textContent = t(uiLanguage, 'statusSearxngError');
+    searxngStartStatus.title = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function autoSave(): Promise<boolean> {
   if (!settingsLoaded) return false;
   const next = collectAllSettings();
@@ -1252,6 +1357,7 @@ function collectAllSettings(): AppSettings {
       letteringOutlineColor: letteringOutlineColorMode.value === 'custom' ? letteringOutlineColorInput.value : undefined,
       suggestStoryTitle: suggestStoryTitleInput.value.trim() || undefined,
       suggestWebSearch: suggestWebSearchToggle.checked,
+      webSearchProvider: (webSearchSourceSelect.value || 'provider') as TranslateConfig['webSearchProvider'],
       providerGroups: collectProviderGroups(),
     },
   };
@@ -2139,6 +2245,7 @@ async function handleStoryUpdateFromDescription(): Promise<void> {
         api_key: providerInfo.apiKey,
         base_url: providerInfo.baseUrl,
         enable_web_search: storyUpdateWebSearchToggle.checked,
+        web_search_provider: settings.config.webSearchProvider ?? 'provider',
         story_title: storyNameInput.value.trim() || undefined,
       },
     });

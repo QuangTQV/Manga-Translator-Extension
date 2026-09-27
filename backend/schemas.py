@@ -1,4 +1,5 @@
 """Pydantic request/response schemas for the translation endpoints."""
+
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -23,7 +24,9 @@ class BubbleInfo(BaseModel):
     confidence: float
     original_text: Optional[str] = None
     translated_text: str
-    high_res_crop: Optional[str] = None  # raw base64 PNG, pre-downscale supersampled render of just this bubble — sharper than cropping the final page image, for UI magnifiers. None when supersampling was off.
+    high_res_crop: Optional[str] = (
+        None  # raw base64 PNG, pre-downscale supersampled render of just this bubble — sharper than cropping the final page image, for UI magnifiers. None when supersampling was off.
+    )
 
 
 class FallbackProviderConfig(BaseModel):
@@ -33,9 +36,13 @@ class FallbackProviderConfig(BaseModel):
     provider: str
     model_name: Optional[str] = None
     api_keys: List[str] = []
-    api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as api_keys), used only when rotation_strategy is "random"
+    api_key_weights: Optional[List[float]] = (
+        None  # relative pick weight per key (same order as api_keys), used only when rotation_strategy is "random"
+    )
     base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
-    reasoning_effort: Optional[str] = None  # overrides the top-level reasoning_effort for this fallback provider; unset inherits it
+    reasoning_effort: Optional[str] = (
+        None  # overrides the top-level reasoning_effort for this fallback provider; unset inherits it
+    )
 
 
 class FixHintConfig(BaseModel):
@@ -60,7 +67,9 @@ class StoryCharacter(BaseModel):
     name: str
     gender: str = "unknown"  # male | female | other | unknown
     role: Optional[str] = None
-    voice_notes: Optional[str] = None  # personality/tone, for consistent voice across pages
+    voice_notes: Optional[str] = (
+        None  # personality/tone, for consistent voice across pages
+    )
     # Position on the popup's relationship map (0-360 x 0-260). Presentation
     # only — never sent to the model. Unset until the user drags the node.
     x: Optional[float] = None
@@ -80,8 +89,12 @@ class StoryCharacter(BaseModel):
     @classmethod
     def _valid_references(cls, v):
         if len(v) > MAX_REFERENCE_IMAGES_PER_CHARACTER:
-            raise ValueError(f"at most {MAX_REFERENCE_IMAGES_PER_CHARACTER} reference images per character")
-        return [_check_data_url(i, MAX_REFERENCE_IMAGE_CHARS, "reference image") for i in v]
+            raise ValueError(
+                f"at most {MAX_REFERENCE_IMAGES_PER_CHARACTER} reference images per character"
+            )
+        return [
+            _check_data_url(i, MAX_REFERENCE_IMAGE_CHARS, "reference image") for i in v
+        ]
 
 
 class StoryRelationship(BaseModel):
@@ -93,7 +106,9 @@ class StoryRelationship(BaseModel):
     character_a_id: str
     character_b_id: str
     surface_relation: str  # e.g. "boss and employee", "secretly in love"
-    address_notes: Optional[str] = None  # how they address each other, if not obvious from surface_relation
+    address_notes: Optional[str] = (
+        None  # how they address each other, if not obvious from surface_relation
+    )
 
 
 class StoryGlossaryTerm(BaseModel):
@@ -105,7 +120,9 @@ class StoryGlossaryTerm(BaseModel):
     translation: str
     notes: Optional[str] = None
     enforce: bool = False
-    variants: Optional[str] = Field(default=None, max_length=1000)  # comma/newline-separated alternative spellings to also rewrite
+    variants: Optional[str] = Field(
+        default=None, max_length=1000
+    )  # comma/newline-separated alternative spellings to also rewrite
 
 
 class StoryContinuityNote(BaseModel):
@@ -118,7 +135,9 @@ class StoryContinuityNote(BaseModel):
 
     id: str
     text: str
-    source_label: Optional[str] = None  # e.g. "Chapter 5" or "Page 12" — where this was established
+    source_label: Optional[str] = (
+        None  # e.g. "Chapter 5" or "Page 12" — where this was established
+    )
 
 
 class StoryContextPayload(BaseModel):
@@ -188,38 +207,75 @@ class TranslateOptions(BaseModel):
     # text only. Colors are "#rrggbb"; unset means the automatic choice.
     lettering_uppercase: bool = False
     lettering_align: Literal["center", "left", "right"] = "center"
-    lettering_text_color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    lettering_text_color: Optional[str] = Field(
+        default=None, pattern=r"^#[0-9a-fA-F]{6}$"
+    )
     lettering_outline_width: float = Field(default=0.0, ge=0.0, le=8.0)
-    lettering_outline_color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    lettering_outline_color: Optional[str] = Field(
+        default=None, pattern=r"^#[0-9a-fA-F]{6}$"
+    )
     send_full_page_context: bool = True
     image_detail: str = "auto"
     economy_mode: bool = False  # cut LLM spend: downscale the full-page context image and lower its media resolution (the client also turns off the costlier context options)
     outside_text_enabled: bool = False
-    inpainting_method: Optional[str] = None  # "auto" (default) | "lama" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"; "lama" also makes /region/render and /region/erase use LaMa
-    flux_remote_token: Optional[str] = None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one
-    flux_remote_base_url: Optional[str] = None  # run Flux on a remote worker (backend/flux_worker.py) instead of loading it locally; only used when inpainting_method is a flux_* variant
-    previous_context_texts: Optional[List[List[str]]] = None  # oldest-to-newest OCR transcripts of prior pages
-    context_memory_enabled: bool = False  # ask the model for a MEMORY NOTE summary each page
-    context_memory: Optional[str] = None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted
-    backup_api_keys: Optional[List[str]] = None  # extra keys for the same provider/model, tried on rate limit
-    fallback_providers: Optional[List[FallbackProviderConfig]] = None  # tried after primary + backup keys are rate-limited
-    fix_hint: Optional[FixHintConfig] = None  # re-translate this page with a targeted correction for one bubble
-    rotation_strategy: Optional[str] = None  # "round_robin" (default), "random", or "sequential" — which candidate to try first
-    cooldown_seconds: Optional[float] = None  # how long a rate-limited key/provider is skipped before being retried (default 15s)
-    api_key_weight: Optional[float] = None  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
-    backup_api_key_weights: Optional[List[float]] = None  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
+    inpainting_method: Optional[str] = (
+        None  # "auto" (default) | "lama" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"; "lama" also makes /region/render and /region/erase use LaMa
+    )
+    flux_remote_token: Optional[str] = (
+        None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one
+    )
+    flux_remote_base_url: Optional[str] = (
+        None  # run Flux on a remote worker (backend/flux_worker.py) instead of loading it locally; only used when inpainting_method is a flux_* variant
+    )
+    previous_context_texts: Optional[List[List[str]]] = (
+        None  # oldest-to-newest OCR transcripts of prior pages
+    )
+    context_memory_enabled: bool = (
+        False  # ask the model for a MEMORY NOTE summary each page
+    )
+    context_memory: Optional[str] = (
+        None  # accumulated MEMORY NOTE summaries from earlier pages, caller-formatted
+    )
+    backup_api_keys: Optional[List[str]] = (
+        None  # extra keys for the same provider/model, tried on rate limit
+    )
+    fallback_providers: Optional[List[FallbackProviderConfig]] = (
+        None  # tried after primary + backup keys are rate-limited
+    )
+    fix_hint: Optional[FixHintConfig] = (
+        None  # re-translate this page with a targeted correction for one bubble
+    )
+    rotation_strategy: Optional[str] = (
+        None  # "round_robin" (default), "random", or "sequential" — which candidate to try first
+    )
+    cooldown_seconds: Optional[float] = (
+        None  # how long a rate-limited key/provider is skipped before being retried (default 15s)
+    )
+    web_search_provider: Literal["provider", "searxng"] = (
+        "provider"  # source used by the opt-in Story Notes / Story DB search helpers
+    )
+    api_key_weight: Optional[float] = (
+        None  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
+    )
+    backup_api_key_weights: Optional[List[float]] = (
+        None  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
+    )
     story_use_reference_images: bool = False  # also send each character's reference images (character sheets) to the model — more tokens; only applies with LLM OCR
-    story_id: Optional[str] = None  # id of a logged-in-account Story DB (see core/story_context.py) to inject as structured context; ignored when not logged in or the id doesn't resolve
+    story_id: Optional[str] = (
+        None  # id of a logged-in-account Story DB (see core/story_context.py) to inject as structured context; ignored when not logged in or the id doesn't resolve
+    )
     # Populated server-side by endpoints/translate.py:_resolve_story_context() when story_id
     # resolves against the logged-in account — not meant to be set by the client directly.
     story_characters: List[StoryCharacter] = []
     story_relationships: List[StoryRelationship] = []
     story_glossary: List[StoryGlossaryTerm] = []
-    story_continuity_notes: List[StoryContinuityNote] = []  # only populated when the story's continuity_notes_enabled is on
+    story_continuity_notes: List[
+        StoryContinuityNote
+    ] = []  # only populated when the story's continuity_notes_enabled is on
 
 
 class StoryUpdateRequest(TranslateOptions):
-    """"Update the Story DB from a free-text description" — see
+    """ "Update the Story DB from a free-text description" — see
     core/services/translation.py:generate_story_update and
     core/story_context.py:merge_story_update. Stateless: takes the
     caller's current characters/relationships (whatever's in the popup
@@ -231,13 +287,17 @@ class StoryUpdateRequest(TranslateOptions):
     characters: List[StoryCharacter] = []
     relationships: List[StoryRelationship] = []
     enable_web_search: bool = False  # let the model search the web for the story (see generate_story_update) — unlike suggest-instructions, this deliberately allows spoilers, since tracking plot developments is the point
-    story_title: Optional[str] = None  # searched for when enable_web_search is set; falls back to guessing from context if omitted
+    story_title: Optional[str] = (
+        None  # searched for when enable_web_search is set; falls back to guessing from context if omitted
+    )
 
 
 class StoryUpdateResponse(BaseModel):
     characters: List[StoryCharacter]
     relationships: List[StoryRelationship]
-    continuity_note: Optional[StoryContinuityNote] = None  # a suggested note to add — null if the description wasn't a plot development worth logging
+    continuity_note: Optional[StoryContinuityNote] = (
+        None  # a suggested note to add — null if the description wasn't a plot development worth logging
+    )
 
 
 class TranslateRequest(TranslateOptions):
@@ -252,8 +312,12 @@ class TranslateResponse(BaseModel):
     target_language: str
     provider: str
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
-    memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
-    warnings: List[str] = []  # non-fatal issues the UI should surface, e.g. "flux_remote_unreachable", "flux_remote_unauthorized"
+    memory_note: Optional[str] = (
+        None  # this page's MEMORY NOTE summary, if context memory was enabled
+    )
+    warnings: List[
+        str
+    ] = []  # non-fatal issues the UI should surface, e.g. "flux_remote_unreachable", "flux_remote_unauthorized"
 
 
 class TranslateBatchItem(BaseModel):
@@ -272,7 +336,9 @@ class TranslateBatchItemResponse(BaseModel):
     error: Optional[str] = None
     processing_time_seconds: Optional[float] = None
     ocr_texts: List[str] = []  # this page's OCR transcripts, in reading order
-    memory_note: Optional[str] = None  # this page's MEMORY NOTE summary, if context memory was enabled
+    memory_note: Optional[str] = (
+        None  # this page's MEMORY NOTE summary, if context memory was enabled
+    )
     warnings: List[str] = []
 
 
@@ -305,11 +371,30 @@ class SuggestInstructionsRequest(BaseModel):
     api_key_weight: Optional[float] = None
     backup_api_key_weights: Optional[List[float]] = None
     enable_web_search: bool = False  # let the model use its provider's built-in web search to look up the story
-    story_title: Optional[str] = None  # user-supplied title, to search for when enable_web_search is set
+    web_search_provider: Literal["provider", "searxng"] = "provider"
+    story_title: Optional[str] = (
+        None  # user-supplied title, to search for when enable_web_search is set
+    )
 
 
 class SuggestInstructionsResponse(BaseModel):
     suggestion: str
+
+
+class WebSearchTestRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+
+
+class WebSearchTestResponse(BaseModel):
+    query: str
+    result_count: int
+    results: str
+
+
+class WebSearchEnsureResponse(BaseModel):
+    ready: bool
+    started: bool
+    url: str
 
 
 class SupportChatMessage(BaseModel):
@@ -326,7 +411,9 @@ class SupportChatRequest(BaseModel):
     server-side (the extension keeps history in chrome.storage.local)."""
 
     messages: List[SupportChatMessage]
-    ui_language: Optional[str] = None  # e.g. "Vietnamese" — answer in this language when set
+    ui_language: Optional[str] = (
+        None  # e.g. "Vietnamese" — answer in this language when set
+    )
     provider: str
     base_url: Optional[str] = None
     model_name: Optional[str] = None
@@ -355,7 +442,9 @@ class TestApiKeyRequest(BaseModel):
     model_name: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None  # Azure endpoint, or OpenAI-Compatible URL
-    reasoning_effort: Optional[str] = None  # same value the real translate request for this row would send
+    reasoning_effort: Optional[str] = (
+        None  # same value the real translate request for this row would send
+    )
 
 
 class TestApiKeyResponse(BaseModel):
@@ -370,12 +459,16 @@ class RegisterAccountRequest(BaseModel):
 
 class AccountResponse(BaseModel):
     email: str
-    token: Optional[str] = None  # only present on /account/register — never returned by /account/me
+    token: Optional[str] = (
+        None  # only present on /account/register — never returned by /account/me
+    )
     plan: str
     usage_count: int
     quota: int
     period_start: float
-    is_admin: bool = False  # true iff this account's email matches the server's MT_ADMIN_EMAIL
+    is_admin: bool = (
+        False  # true iff this account's email matches the server's MT_ADMIN_EMAIL
+    )
 
 
 class SetPlanRequest(BaseModel):
@@ -487,7 +580,9 @@ class RegionOcrRequest(TranslateOptions):
 
 class RegionOcrResponse(BaseModel):
     text: str
-    warning: Optional[str] = None  # e.g. "ocr_failed" — the user should type the text in
+    warning: Optional[str] = (
+        None  # e.g. "ocr_failed" — the user should type the text in
+    )
 
 
 class RegionTranslateRequest(TranslateOptions):
@@ -506,40 +601,58 @@ class RegionStyle(BaseModel):
     global lettering/font settings for that region only. Every field left
     unset (None) falls back to the global value."""
 
-    font: Optional[str] = Field(default=None, max_length=80)  # a font pack name from GET /fonts
-    font_size: Optional[float] = Field(default=None, ge=4, le=400)  # exact size in image pixels (unset = fit the box)
+    font: Optional[str] = Field(
+        default=None, max_length=80
+    )  # a font pack name from GET /fonts
+    font_size: Optional[float] = Field(
+        default=None, ge=4, le=400
+    )  # exact size in image pixels (unset = fit the box)
     line_spacing: Optional[float] = Field(default=None, ge=0.5, le=3.0)  # multiplier
     align: Optional[Literal["left", "center", "right"]] = None
     text_color: Optional[str] = Field(default=None, pattern=_HEX_COLOR)
-    outline_width: Optional[float] = Field(default=None, ge=0, le=20)  # 0 = no outline, even if the global setting has one
+    outline_width: Optional[float] = Field(
+        default=None, ge=0, le=20
+    )  # 0 = no outline, even if the global setting has one
     outline_color: Optional[str] = Field(default=None, pattern=_HEX_COLOR)
-    background_color: Optional[str] = Field(default=None, pattern=_HEX_COLOR)  # a highlight drawn behind each line
+    background_color: Optional[str] = Field(
+        default=None, pattern=_HEX_COLOR
+    )  # a highlight drawn behind each line
     uppercase: Optional[bool] = None
     rotation: float = Field(default=0.0, ge=-180, le=180)  # degrees, clockwise
     vertical: bool = False  # stack the characters in one column
-    offset_x: float = Field(default=0.0, ge=-50, le=50)  # shift the text block, % of the box width
+    offset_x: float = Field(
+        default=0.0, ge=-50, le=50
+    )  # shift the text block, % of the box width
     offset_y: float = Field(default=0.0, ge=-50, le=50)  # ... and height
-    text_area: Optional[float] = Field(default=None, ge=20, le=100)  # % of the box the text block may use
+    text_area: Optional[float] = Field(
+        default=None, ge=20, le=100
+    )  # % of the box the text block may use
 
 
 class RegionItem(BaseModel):
     box: RegionBox
     text: str = ""  # empty = just clean the spot; ignored when restore_only is set
     restore_only: bool = False  # paste the original (pre-translation) pixels back at this box instead of cleaning+drawing — see RegionRenderRequest.source_image
-    style: Optional[RegionStyle] = None  # this region's own text style (see RegionStyle); ignored when restore_only is set
+    style: Optional[RegionStyle] = (
+        None  # this region's own text style (see RegionStyle); ignored when restore_only is set
+    )
 
 
 class RegionRenderRequest(TranslateOptions):
     image: str  # raw base64 of the image to draw on
     regions: List[RegionItem]
-    source_image: Optional[str] = None  # raw base64 of the untranslated page; required when any region has restore_only=True
+    source_image: Optional[str] = (
+        None  # raw base64 of the untranslated page; required when any region has restore_only=True
+    )
 
 
 class RegionWarning(BaseModel):
     """Something the reader should know about a drawn region that did not stop
     it being drawn."""
 
-    region: int  # index among the regions that were drawn (restore-only ones don't count)
+    region: (
+        int  # index among the regions that were drawn (restore-only ones don't count)
+    )
     code: str  # "font_missing_glyphs": the font has no glyph for some characters, which were left out
     font: str = ""  # the font pack involved
     chars: str = ""  # the characters left out
@@ -557,7 +670,9 @@ class EraseRequest(BaseModel):
 
     image: str  # raw base64 of the image to erase from
     mask: str  # raw base64 PNG; any non-black pixel marks "erase here" — what a freehand brush stroke composited to black naturally produces
-    inpainting_method: Optional[str] = None  # "lama" uses LaMa; anything else keeps OpenCV (the extension sends its Inpainting quality setting)
+    inpainting_method: Optional[str] = (
+        None  # "lama" uses LaMa; anything else keeps OpenCV (the extension sends its Inpainting quality setting)
+    )
 
 
 class EraseResponse(BaseModel):

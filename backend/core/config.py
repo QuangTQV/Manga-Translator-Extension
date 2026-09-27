@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import torch
-
 from core.device import get_best_device
 from core.llm_defaults import DEFAULT_LLM_PROVIDER, get_provider_sampling_defaults
 
@@ -25,7 +24,9 @@ class FallbackProviderConfig:
     azure_openai_api_version: str = ""
     azure_openai_is_v1: bool = False
     openai_compatible_url: str = ""
-    reasoning_effort: Optional[str] = None  # overrides the primary config's reasoning_effort for this fallback; unset inherits it
+    reasoning_effort: Optional[str] = (
+        None  # overrides the primary config's reasoning_effort for this fallback; unset inherits it
+    )
 
 
 @dataclass
@@ -39,7 +40,9 @@ class StoryCharacterConfig:
     gender: str = "unknown"
     role: Optional[str] = None
     voice_notes: Optional[str] = None
-    reference_images: List[str] = field(default_factory=list)  # data URLs; only populated when the request opted in (never the avatar)
+    reference_images: List[str] = field(
+        default_factory=list
+    )  # data URLs; only populated when the request opted in (never the avatar)
 
 
 @dataclass
@@ -152,12 +155,9 @@ class TranslationConfig:
     send_full_page_context: bool = True
     whiteout_conjoined_bubbles: bool = True
     upscale_method: str = "model_lite"  # "model", "model_lite", "lanczos", or "none"
-    enable_web_search: bool = (
-        False  # Enable model's built-in web search for up-to-date information. OpenRouter uses its own web search tool.
-    )
-    enable_code_execution: bool = (
-        False  # Enable Gemini's code execution tool for image zoom/inspection (Gemini 3 Flash only)
-    )
+    enable_web_search: bool = False  # Enable model's built-in web search for up-to-date information. OpenRouter uses its own web search tool.
+    web_search_provider: str = "provider"  # "provider" (native LLM tool) or "searxng" (backend-side local search)
+    enable_code_execution: bool = False  # Enable Gemini's code execution tool for image zoom/inspection (Gemini 3 Flash only)
     image_detail: str = "auto"  # OpenAI image detail (auto/high/low/original)
     media_resolution: str = (
         "auto"  # Only available via Google provider (auto/high/medium/low)
@@ -169,34 +169,58 @@ class TranslationConfig:
     previous_context_image_count: int = 0
     previous_context_text_count: int = 0
     osb_min_side_pixels: int = 128
-    special_instructions: Optional[str] = None  # per-story notes (glossary, character relationships)
-    llm_instructions: Optional[str] = None  # persistent, story-independent style/behavior guidance
-    pre_replacements: Optional[str] = None  # user find/replace rules for the source text (core/text/replacements.py)
-    post_replacements: Optional[str] = None  # ... and for the translation, applied after the cache, before rendering
+    special_instructions: Optional[str] = (
+        None  # per-story notes (glossary, character relationships)
+    )
+    llm_instructions: Optional[str] = (
+        None  # persistent, story-independent style/behavior guidance
+    )
+    pre_replacements: Optional[str] = (
+        None  # user find/replace rules for the source text (core/text/replacements.py)
+    )
+    post_replacements: Optional[str] = (
+        None  # ... and for the translation, applied after the cache, before rendering
+    )
     bypass_translation_cache: bool = False  # don't read the translation cache (the result is still written) — the "re-translate this page" button
-    story_characters: List[StoryCharacterConfig] = field(default_factory=list)  # from a logged-in account's Story DB, resolved server-side (see endpoints/translate.py:_resolve_story_context)
+    story_characters: List[StoryCharacterConfig] = field(
+        default_factory=list
+    )  # from a logged-in account's Story DB, resolved server-side (see endpoints/translate.py:_resolve_story_context)
     story_relationships: List[StoryRelationshipConfig] = field(default_factory=list)
     story_glossary: List[StoryGlossaryTermConfig] = field(default_factory=list)
-    story_continuity_notes: List[StoryContinuityNoteConfig] = field(default_factory=list)  # only populated when the story's continuity_notes_enabled toggle is on
-    context_memory_enabled: bool = False  # require a MEMORY NOTE summary each page, for the caller to accumulate
-    context_memory: Optional[str] = None  # caller-accumulated MEMORY NOTE summaries from earlier pages of this story
-    fix_hint_bubble_index: Optional[int] = None  # 0-based index into the previous response's bubbles list
-    fix_hint_original_text: Optional[str] = None  # that bubble's original_text, as an anchor for the model
-    fix_hint_instruction: Optional[str] = None  # the user's correction note for that one bubble
+    story_continuity_notes: List[StoryContinuityNoteConfig] = field(
+        default_factory=list
+    )  # only populated when the story's continuity_notes_enabled toggle is on
+    context_memory_enabled: bool = (
+        False  # require a MEMORY NOTE summary each page, for the caller to accumulate
+    )
+    context_memory: Optional[str] = (
+        None  # caller-accumulated MEMORY NOTE summaries from earlier pages of this story
+    )
+    fix_hint_bubble_index: Optional[int] = (
+        None  # 0-based index into the previous response's bubbles list
+    )
+    fix_hint_original_text: Optional[str] = (
+        None  # that bubble's original_text, as an anchor for the model
+    )
+    fix_hint_instruction: Optional[str] = (
+        None  # the user's correction note for that one bubble
+    )
     ocr_method: str = "LLM"  # "LLM", "manga-ocr", or "paddleocr-vl"
-    backup_api_keys: List[str] = field(default_factory=list)  # extra keys for the same provider/model, tried on rate limit
+    backup_api_keys: List[str] = field(
+        default_factory=list
+    )  # extra keys for the same provider/model, tried on rate limit
     fallback_providers: List[FallbackProviderConfig] = field(
         default_factory=list
     )  # tried in order after the primary provider and its backup keys are all rate-limited
     rotation_strategy: str = "round_robin"  # "round_robin" (default), "random", or "sequential" — which candidate a request tries first
-    cooldown_seconds: float = 15.0  # how long a rate-limited key/provider is skipped before being retried
+    cooldown_seconds: float = (
+        15.0  # how long a rate-limited key/provider is skipped before being retried
+    )
     api_key_weight: float = 1.0  # relative pick weight for `api_key`, used only when rotation_strategy is "random"
     backup_api_key_weights: List[float] = field(
         default_factory=list
     )  # relative pick weight per key (same order as backup_api_keys), used only when rotation_strategy is "random"
-    candidate_weight: float = (
-        1.0  # internal: this specific candidate's own weight, stamped by _iter_llm_candidates — not user-facing
-    )
+    candidate_weight: float = 1.0  # internal: this specific candidate's own weight, stamped by _iter_llm_candidates — not user-facing
 
 
 @dataclass
@@ -222,8 +246,12 @@ class RenderingConfig:
     # and manual-region text; outside-bubble text keeps its own styling.
     uppercase: bool = False
     text_align: str = "center"  # "center" | "left" | "right"
-    text_color_rgb: Optional[Tuple[int, int, int]] = None  # None = auto (sampled ink / contrast)
-    outline_color_rgb: Optional[Tuple[int, int, int]] = None  # None = auto contrast with the text color
+    text_color_rgb: Optional[Tuple[int, int, int]] = (
+        None  # None = auto (sampled ink / contrast)
+    )
+    outline_color_rgb: Optional[Tuple[int, int, int]] = (
+        None  # None = auto contrast with the text color
+    )
 
 
 @dataclass

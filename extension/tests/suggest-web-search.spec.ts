@@ -11,6 +11,42 @@ import { baseSeed, firstKeyMatches, seedSettings } from './storage';
 // other setting; see tests/popup.spec.ts's "persist across closing and
 // reopening the popup" test for that behavior.
 test.describe('popup — Suggest Story Notes web search option', () => {
+  test('web search source defaults to provider and persists when switched to local SearXNG', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.locator('.tab-btn[data-tab="config"]').click();
+    const source = popup.locator('#f-web-search-source');
+    await expect(source).toHaveValue('provider');
+    await source.selectOption('searxng');
+    await expect.poll(async () => {
+      const stored = await worker.evaluate(async () => (await chrome.storage.local.get('manga_translator_settings')).manga_translator_settings);
+      return stored.config.webSearchProvider;
+    }).toBe('searxng');
+
+    await popup.reload();
+    await popup.locator('.tab-btn[data-tab="config"]').click();
+    await expect(popup.locator('#f-web-search-source')).toHaveValue('searxng');
+  });
+
+  test('local SearXNG Suggest requires a story title before contacting the active tab', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.locator('.tab-btn[data-tab="config"]').click();
+    await popup.locator('#f-web-search-source').selectOption('searxng');
+    await popup.locator('.tab-btn[data-tab="translate"]').click();
+    await popup.locator('#f-suggest-web-search').check({ force: true });
+    await popup.locator('#btn-suggest-instructions').click();
+    await expect(popup.locator('#popup-status')).toContainText('Enter a story title');
+  });
+
   test('web search checkbox and story title default to off/empty and are independently editable', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
