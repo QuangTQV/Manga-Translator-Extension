@@ -249,3 +249,174 @@ test.describe('a manual text area is hoverable like a detected bubble', () => {
     await expect(page.locator('.mt-bubble-magnifier-caption')).toHaveText('こんにちは');
   });
 });
+
+// Per-region text style: font, size, colours, alignment, rotation, ... set in
+// the region editor's "Text style" section, sent with that region only, saved
+// with it, and shown again when the region is reopened.
+test.describe('per-region text style', () => {
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+
+  async function setup(context: any, extensionId: string, renderResponse: unknown = { image: FAKE_TRANSLATED_IMAGE_B64 }, dragFy = 0.25) {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+    const renders: any[] = [];
+    await context.route('**/fonts', async (route) => { await route.fulfill(json({ fonts: ['Roboto', 'Comicka', 'Komika Hand'] })); });
+    await context.route('**/region/ocr', async (route) => { await route.fulfill(json({ text: 'こんにちは', warning: null })); });
+    await context.route('**/region/render', async (route) => { renders.push(route.request().postDataJSON()); await route.fulfill(json(renderResponse)); });
+    const page = await context.newPage();
+    await page.goto(SINGLE_URL);
+    await startAndDrag(context, page, extensionId, 0.25, dragFy);
+    const editor = page.locator('#mt-region-editor');
+    await expect(editor.locator('#orig')).toHaveValue('こんにちは', { timeout: 10_000 });
+    return { page, editor, renders };
+  }
+
+  test('a plain region sends no style; the section starts closed and every control starts on Auto', async ({ context, extensionId }) => {
+    const { editor, renders } = await setup(context, extensionId);
+    await expect(editor.locator('#style-box')).not.toHaveAttribute('open', '');
+    await editor.locator('#style-box summary').click();
+    await expect(editor.locator('#st-size')).toHaveValue('');
+    await expect(editor.locator('#st-font')).toHaveValue('');
+    await expect(editor.locator('#st-color-mode')).toHaveValue('');
+    await expect(editor.locator('#st-color')).toBeHidden();
+    await expect(editor.locator('#st-rot')).toHaveValue('0');
+    await expect(editor.locator('#st-area')).toHaveValue('100');
+    // The font list comes from the backend, after "Default".
+    await expect(editor.locator('#st-font option')).toHaveText(['Default', 'Roboto', 'Comicka', 'Komika Hand']);
+
+    await editor.locator('#trans').fill('Hello');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    expect(renders[0].regions[0].style).toBeUndefined();
+  });
+
+  test('every setting reaches the render request for that region, is saved, and is back when the region is reopened', async ({ context, extensionId }) => {
+    const { page, editor, renders } = await setup(context, extensionId);
+    await editor.locator('#style-box summary').click();
+    await editor.locator('#st-font').selectOption('Comicka');
+    await editor.locator('#st-size').fill('28');
+    await editor.locator('#st-spacing').fill('1.4');
+    await editor.locator('#st-align').selectOption('right');
+    await editor.locator('#st-upper').selectOption('1');
+    await editor.locator('#st-color-mode').selectOption('custom');
+    await editor.locator('#st-color').fill('#c8102e');
+    await editor.locator('#st-outline').fill('2.5');
+    await editor.locator('#st-outline-color-mode').selectOption('custom');
+    await editor.locator('#st-outline-color').fill('#ffffff');
+    await editor.locator('#st-bg-mode').selectOption('custom');
+    await editor.locator('#st-bg').fill('#fff27a');
+    await editor.locator('#st-rot').fill('-25');
+    await expect(editor.locator('#st-rot-out')).toHaveText('-25°');
+    await editor.locator('#st-offx').fill('10');
+    await editor.locator('#st-offy').fill('-15');
+    await editor.locator('#st-area').fill('70');
+    await editor.locator('#st-vertical').check();
+    await editor.locator('#trans').fill('Xin chao');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+
+    expect(renders[0].regions[0].style).toEqual({
+      font: 'Comicka', font_size: 28, line_spacing: 1.4, align: 'right', uppercase: true, text_color: '#c8102e',
+      outline_width: 2.5, outline_color: '#ffffff', background_color: '#fff27a', rotation: -25, vertical: true,
+      offset_x: 10, offset_y: -15, text_area: 70,
+    });
+
+    // Reopen through the region's hit target: everything is back, section open.
+    await page.locator('.mt-fix-hit').click();
+    await expect(editor.locator('#trans')).toHaveValue('Xin chao', { timeout: 10_000 });
+    await expect(editor.locator('#style-box')).toHaveAttribute('open', '');
+    await expect(editor.locator('#st-font')).toHaveValue('Comicka');
+    await expect(editor.locator('#st-size')).toHaveValue('28');
+    await expect(editor.locator('#st-align')).toHaveValue('right');
+    await expect(editor.locator('#st-upper')).toHaveValue('1');
+    await expect(editor.locator('#st-color-mode')).toHaveValue('custom');
+    await expect(editor.locator('#st-color')).toHaveValue('#c8102e');
+    await expect(editor.locator('#st-rot')).toHaveValue('-25');
+    await expect(editor.locator('#st-area')).toHaveValue('70');
+    await expect(editor.locator('#st-vertical')).toBeChecked();
+
+    // Reset returns to plain; applying then sends no style at all.
+    await editor.locator('#st-reset').click();
+    await expect(editor.locator('#st-size')).toHaveValue('');
+    await expect(editor.locator('#st-color')).toBeHidden();
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    expect(renders.at(-1).regions[0].style).toBeUndefined();
+  });
+
+  test('a style survives a page reload with the saved region', async ({ context, extensionId }) => {
+    const { page, editor, renders } = await setup(context, extensionId);
+    await editor.locator('#style-box summary').click();
+    await editor.locator('#st-rot').fill('30');
+    await editor.locator('#st-color-mode').selectOption('custom');
+    await editor.locator('#st-color').fill('#112233');
+    await editor.locator('#trans').fill('Persisted');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+
+    await page.reload();
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await page.bringToFront();
+    await popup2.locator('#btn-region').click(); // injects the content script, which re-applies saved regions
+    await expect(page.locator('#mt-region-select')).toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press('Escape');
+    await expect.poll(() => renders.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    expect(renders.at(-1).regions[0].style).toEqual(expect.objectContaining({ rotation: 30, text_color: '#112233' }));
+  });
+
+  test('a saved font that the backend no longer lists is kept in the picker, not lost', async ({ context, extensionId }) => {
+    const { page, editor } = await setup(context, extensionId);
+    await editor.locator('#style-box summary').click();
+    await editor.locator('#st-font').selectOption('Comicka');
+    await editor.locator('#trans').fill('x');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+
+    await context.unroute('**/fonts');
+    await context.route('**/fonts', async (route) => { await route.fulfill(json({ fonts: ['Roboto'] })); });
+    await page.locator('.mt-fix-hit').click();
+    await expect(editor.locator('#st-font')).toHaveValue('Comicka', { timeout: 10_000 });
+    await expect(editor.locator('#st-font option')).toContainText(['Default', 'Roboto', 'Comicka']);
+  });
+
+  test('when the font lacks glyphs the reader is told which characters were left out', async ({ context, extensionId }) => {
+    const { page, editor } = await setup(context, extensionId, {
+      image: FAKE_TRANSLATED_IMAGE_B64,
+      warnings: [{ region: 0, code: 'font_missing_glyphs', font: 'Comicka', chars: 'àạẻ' }],
+    });
+    await editor.locator('#style-box summary').click();
+    await editor.locator('#st-font').selectOption('Comicka');
+    await editor.locator('#trans').fill('Xin chào');
+    await editor.locator('#apply').click();
+    await expect(page.locator('#mt-toast')).toContainText('Comicka');
+    await expect(page.locator('#mt-toast')).toContainText('àạẻ');
+  });
+
+  test('opening the style section on a short window keeps the whole card on screen, so Apply stays reachable', async ({ context, extensionId }) => {
+    // Selected near the top of the page, so the card sits BELOW it and has to
+    // move up once it grows past the bottom of the window.
+    const { page, editor, renders } = await setup(context, extensionId, undefined, 0.02);
+    await page.setViewportSize({ width: 1000, height: 560 });
+    await editor.locator('#style-box summary').click(); // the card gets much taller than the window
+    await expect(editor.locator('#st-rot')).toBeVisible();
+
+    await expect.poll(async () => {
+      const host = await page.locator('#mt-region-editor').boundingBox();
+      return host && host.y >= 0 && host.y + host.height <= 560;
+    }).toBe(true);
+    const apply = await editor.locator('#apply').boundingBox();
+    // The card scrolls inside itself when it is taller than the window; Apply is
+    // reached by scrolling it, never by leaving the screen.
+    await editor.locator('#apply').scrollIntoViewIfNeeded();
+    const applyAfter = await editor.locator('#apply').boundingBox();
+    expect(applyAfter!.y).toBeGreaterThanOrEqual(0);
+    expect(applyAfter!.y + applyAfter!.height).toBeLessThanOrEqual(560);
+    void apply;
+    await editor.locator('#trans').fill('Reachable');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    expect(renders).toHaveLength(1);
+  });
+});

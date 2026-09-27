@@ -136,6 +136,20 @@ def get_font_cmap(font_path: str) -> set:
     return supported_codepoints
 
 
+def unsupported_characters(text: str, font_path: str) -> str:
+    """The distinct characters of `text` (in order of first use) that the font
+    has no glyph for — what sanitize_text_for_font would silently drop."""
+    supported = get_font_cmap(font_path)
+    if not text or not supported:
+        return ""
+    seen: List[str] = []
+    for char in text:
+        if char in {"*", " ", "\t", "\n", "\r"} or ord(char) in supported or char in seen:
+            continue
+        seen.append(char)
+    return "".join(seen)
+
+
 def sanitize_text_for_font(text: str, font_path: str, verbose: bool = False) -> str:
     """
     Removes characters from text that are not supported by the font's cmap.

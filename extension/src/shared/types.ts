@@ -490,11 +490,32 @@ export const PROVIDERS = [
 // page image so it survives resizing/upscaled translations; `text` is what
 // OCR/the user read there and `translation` what gets drawn over it.
 export interface RegionBoxNorm { x1: number; y1: number; x2: number; y2: number; }
+// How ONE manual text area's text is drawn (backend schemas.RegionStyle).
+// Every field left undefined follows the global settings (Pro tab lettering,
+// font pack, font-size range), so a region with no style looks like any other.
+export interface RegionStyle {
+  font?: string; // a font pack name from GET /fonts
+  fontSize?: number; // exact size in image pixels; unset = fit the box
+  lineSpacing?: number; // multiplier
+  align?: 'left' | 'center' | 'right';
+  textColor?: string; // "#rrggbb"
+  outlineWidth?: number; // px; 0 = no outline even if the global setting has one
+  outlineColor?: string;
+  backgroundColor?: string; // highlight behind each line
+  uppercase?: boolean;
+  rotation?: number; // degrees, clockwise; 0 = none
+  vertical?: boolean; // one column of stacked characters
+  offsetX?: number; // % of the box width the text block is shifted
+  offsetY?: number;
+  textArea?: number; // % of the box the text block may use; unset = all of it
+}
+
 export interface StoredRegion {
   id: string;
   box: RegionBoxNorm;
   text: string;
   translation: string;
+  style?: RegionStyle; // undefined = plain (global settings)
   // Paste the original (pre-translation) pixels back at `box` instead of
   // cleaning+drawing — used to delete a wrongly-detected bubble, or as the
   // "erase the old spot" half of moving one (see region-tool.ts).

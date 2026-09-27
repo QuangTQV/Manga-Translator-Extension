@@ -87,7 +87,7 @@ def test_request_fields_reach_the_manual_region_renderer(monkeypatch):
 
     seen = {}
 
-    def fake_render(base, draw_regions, font_dir, rendering, use_lama=False):
+    def fake_render(base, draw_regions, font_dir, rendering, use_lama=False, **_kwargs):
         seen["rendering"] = rendering
         return base
 

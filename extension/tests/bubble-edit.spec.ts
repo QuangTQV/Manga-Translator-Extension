@@ -211,4 +211,81 @@ test.describe('bubble box editing (move / delete a detected bubble)', () => {
     await hits.nth(1).click();
     await expect(editor.locator('#trans')).toHaveValue('By hand', { timeout: 10_000 });
   });
+
+  test('Style on a detected bubble opens the editor on its own box, and applying puts the style on just that bubble', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    await context.route('**/translate', async (route) => {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          translated_image: FAKE_B64,
+          bubbles: [{ bbox: BUBBLE_BBOX, confidence: 0.9, original_text: 'げんき？', translated_text: 'You okay?' }],
+          processing_time_seconds: 0.1, source_language: 'Japanese', target_language: 'English', provider: 'Google', ocr_texts: ['げんき？'],
+        }),
+      });
+    });
+    let ocrCalls = 0;
+    const renders: any[] = [];
+    await context.route('**/fonts', async (route) => { await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ fonts: ['Roboto', 'Comicka'] }) }); });
+    await context.route('**/region/ocr', async (route) => { ocrCalls++; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: 'unused', warning: null }) }); });
+    await context.route('**/region/render', async (route) => {
+      renders.push(route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ image: FAKE_B64 }) });
+    });
+
+    const mangaPage = await context.newPage();
+    await mangaPage.goto(TEST_SITE_URL);
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await mangaPage.bringToFront();
+    await popup.locator('#btn-auto').click();
+    const hits = mangaPage.locator('.mt-fix-hit');
+    await expect(hits).toHaveCount(1, { timeout: 15_000 });
+
+    // Cancelling leaves the detected bubble exactly as it was.
+    await hits.first().click();
+    const popover = mangaPage.locator('.mt-fix-popover');
+    await popover.getByRole('button', { name: 'Style', exact: true }).click();
+    await expect(popover).toHaveCount(0);
+    const editor = mangaPage.locator('#mt-region-editor');
+    await expect(editor.locator('#orig')).toHaveValue('げんき？', { timeout: 5_000 }); // known text: no OCR
+    await expect(editor.locator('#trans')).toHaveValue('You okay?');
+    await expect(editor.locator('#style-box')).toHaveAttribute('open', ''); // straight to the style controls
+    expect(ocrCalls).toBe(0);
+    await editor.locator('#cancel').click();
+    await expect(editor).toHaveCount(0);
+    await expect(hits).toHaveCount(1);
+    expect(renders).toHaveLength(0);
+
+    // Apply a style: the old drawing is restored under a same-box region carrying it.
+    await hits.first().click();
+    await mangaPage.locator('.mt-fix-popover').getByRole('button', { name: 'Style', exact: true }).click();
+    await editor.locator('#st-color-mode').selectOption('custom');
+    await editor.locator('#st-color').fill('#c8102e');
+    await editor.locator('#st-size').fill('24');
+    await editor.locator('#st-rot').fill('12');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+
+    await expect.poll(() => renders.length, { timeout: 5_000 }).toBe(1);
+    const regions = renders[0].regions;
+    expect(regions).toHaveLength(2);
+    const restore = regions.find((r: any) => r.restore_only);
+    const drawn = regions.find((r: any) => !r.restore_only);
+    for (const key of ['x1', 'y1', 'x2', 'y2']) expect(drawn.box[key]).toBeCloseTo(restore.box[key], 6); // the same box
+    expect(restore.box.x1).toBeCloseTo(BUBBLE_BBOX[0] / NATURAL_W, 4);
+    expect(restore.box.y2).toBeCloseTo(BUBBLE_BBOX[3] / NATURAL_H, 4);
+    expect(drawn.text).toBe('You okay?');
+    expect(drawn.style).toEqual(expect.objectContaining({ text_color: '#c8102e', font_size: 24, rotation: 12 }));
+    expect(renders[0].source_image).toBeTruthy();
+
+    // The detected bubble was replaced by the manual region: still one target, now the editable kind.
+    await expect(hits).toHaveCount(1);
+    await expect(hits.first()).toHaveAttribute('title', 'Click to edit this text area');
+    await hits.first().hover();
+    await expect(mangaPage.locator('.mt-bubble-magnifier-caption')).toHaveText('げんき？');
+  });
 });

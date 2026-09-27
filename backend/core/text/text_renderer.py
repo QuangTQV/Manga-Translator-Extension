@@ -47,6 +47,8 @@ def render_text_skia(
     text_background_color: Optional[Tuple[int, int, int]] = None,
     layout_only: bool = False,
     high_res_crops: Optional[dict] = None,
+    layout_size: Optional[Tuple[float, float]] = None,
+    center_offset: Tuple[float, float] = (0.0, 0.0),
 ) -> Image.Image:
     """
     Fits and renders text within a bounding box using Skia and HarfBuzz.
@@ -75,6 +77,10 @@ def render_text_skia(
         bubble_color_bgr: Background color of the bubble (BGR tuple). Used to determine text color.
         config: RenderingConfig object containing all rendering parameters. If None, uses defaults.
         verbose: Whether to print detailed logs.
+        layout_size: Optional (width, height) the text block may use, when smaller
+            than `bbox` — the block stays centred in `bbox`, which is still the
+            region that is cropped/pasted, so text rotated inside it can't be clipped.
+        center_offset: (dx, dy) pixels the text block is shifted from the centre of `bbox`.
         high_res_crops: Optional dict to populate with this bubble's pre-downscale
             supersampled render (keyed by bubble_id), for callers that want a sharper
             crop than the final (downscaled) page image — e.g. a UI magnifier. Only
@@ -150,6 +156,9 @@ def render_text_skia(
         layout_box_top_left = (box_x, box_y)
         max_render_width = float(box_w)
         max_render_height = float(box_h)
+        if layout_size is not None:
+            max_render_width = min(max_render_width, float(layout_size[0]))
+            max_render_height = min(max_render_height, float(layout_size[1]))
         target_center_x = box_x + box_w / 2.0
         target_center_y = box_y + box_h / 2.0
         log_message("Using centroid-based safe area calculation", verbose=verbose)
@@ -160,8 +169,10 @@ def render_text_skia(
                 "Safe area calculation failed, falling back to padded bbox method",
                 verbose=verbose,
             )
-        max_render_width = bubble_width * (1 - 2 * FALLBACK_PADDING_RATIO)
-        max_render_height = bubble_height * (1 - 2 * FALLBACK_PADDING_RATIO)
+        available_width = layout_size[0] if layout_size is not None else bubble_width
+        available_height = layout_size[1] if layout_size is not None else bubble_height
+        max_render_width = available_width * (1 - 2 * FALLBACK_PADDING_RATIO)
+        max_render_height = available_height * (1 - 2 * FALLBACK_PADDING_RATIO)
 
         if max_render_width <= 0 or max_render_height <= 0:
             max_render_width = max(1.0, float(bubble_width))
@@ -169,6 +180,9 @@ def render_text_skia(
 
         target_center_x = x1 + bubble_width / 2.0
         target_center_y = y1 + bubble_height / 2.0
+
+    target_center_x += center_offset[0]
+    target_center_y += center_offset[1]
 
     try:
         font_variants = find_font_variants(font_dir, verbose=verbose)

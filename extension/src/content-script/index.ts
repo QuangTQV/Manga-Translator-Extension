@@ -2,7 +2,7 @@ import type { AppSettings, BubbleInfo, RegionBoxNorm, StoredRegion, TranslateReq
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
 import { withEffectiveConfig } from '../shared/economy.js';
 import { initEraserTool, startEraserSelect } from './eraser-tool.js';
-import { deleteBubbleRegion, editManualRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect } from './region-tool.js';
+import { deleteBubbleRegion, editManualRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect, startStyleBubble } from './region-tool.js';
 import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
@@ -91,6 +91,35 @@ const EN_MESSAGES = {
   retryBadgeTitle: 'Translation failed after several retries — click to try again',
   fixHintTooltip: "Click to fix this bubble's translation",
   manualRegionTooltip: "Click to edit this text area",
+  fixStyleBtn: "Style",
+  regionStyleTitle: "Text style",
+  regionStyleFont: "Font",
+  regionStyleDefault: "Default",
+  regionStyleSize: "Size (px)",
+  regionStyleAuto: "Auto",
+  regionStyleLineSpacing: "Line spacing",
+  regionStyleAlign: "Alignment",
+  regionStyleAlignLeft: "Left",
+  regionStyleAlignCenter: "Center",
+  regionStyleAlignRight: "Right",
+  regionStyleCase: "Letter case",
+  regionStyleCaseUpper: "ALL CAPS",
+  regionStyleCaseAsTyped: "As typed",
+  regionStyleColor: "Text color",
+  regionStyleCustom: "Custom",
+  regionStyleOutline: "Outline (px)",
+  regionStyleOutlineColor: "Outline color",
+  regionStyleBackground: "Highlight",
+  regionStyleNone: "None",
+  regionStyleRotation: "Rotation",
+  regionStyleOffsetX: "Shift ← →",
+  regionStyleOffsetY: "Shift ↑ ↓",
+  regionStyleArea: "Text area",
+  regionStyleVertical: "Vertical",
+  regionStyleVerticalHint: "one column",
+  regionStyleReset: "Reset style",
+  regionStyleHint: "Anything left on Auto follows your global settings (Pro tab). A fixed size may overflow the box. Vertical suits short text such as sound effects.",
+  regionStyleFontMissing: "The font “{font}” has no glyphs for: {chars} — they were left out. Pick another font.",
   zoomTooltip: 'Click to view full size',
   fixHintCurrentLabel: 'Current:',
   fixMoveBtn: '⇔ Move',
@@ -198,6 +227,35 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     retryBadgeTitle: 'Dich that bai sau nhieu lan thu - bam de thu lai',
     fixHintTooltip: 'Bam de sua ban dich o bubble nay',
     manualRegionTooltip: "Bam de sua vung chu nay",
+    fixStyleBtn: "Kieu chu",
+    regionStyleTitle: "Kieu chu",
+    regionStyleFont: "Font",
+    regionStyleDefault: "Mac dinh",
+    regionStyleSize: "Co chu (px)",
+    regionStyleAuto: "Tu dong",
+    regionStyleLineSpacing: "Gian dong",
+    regionStyleAlign: "Can le",
+    regionStyleAlignLeft: "Trai",
+    regionStyleAlignCenter: "Giua",
+    regionStyleAlignRight: "Phai",
+    regionStyleCase: "Chu hoa/thuong",
+    regionStyleCaseUpper: "IN HOA",
+    regionStyleCaseAsTyped: "Giu nguyen",
+    regionStyleColor: "Mau chu",
+    regionStyleCustom: "Tuy chon",
+    regionStyleOutline: "Vien chu (px)",
+    regionStyleOutlineColor: "Mau vien",
+    regionStyleBackground: "To sang nen",
+    regionStyleNone: "Khong",
+    regionStyleRotation: "Xoay",
+    regionStyleOffsetX: "Dich ← →",
+    regionStyleOffsetY: "Dich ↑ ↓",
+    regionStyleArea: "Vung chu",
+    regionStyleVertical: "Chu doc",
+    regionStyleVerticalHint: "mot cot",
+    regionStyleReset: "Dat lai kieu",
+    regionStyleHint: "Muc de Tu dong se theo cai dat chung (tab Pro). Co chu co dinh co the tran khung. Chu doc hop voi doan ngan nhu tieng dong.",
+    regionStyleFontMissing: "Font “{font}” khong co cac ky tu: {chars} — chung da bi bo qua. Hay chon font khac.",
     zoomTooltip: 'Bam de xem anh phong to',
     fixHintCurrentLabel: 'Hien tai:',
     fixMoveBtn: '⇔ Di chuyen',
@@ -300,6 +358,35 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     retryBadgeTitle: '多次重试后翻译失败——点击重试',
     fixHintTooltip: '点击修正这个气泡的翻译',
     manualRegionTooltip: "点击编辑此文字区域",
+    fixStyleBtn: "样式",
+    regionStyleTitle: "文字样式",
+    regionStyleFont: "字体",
+    regionStyleDefault: "默认",
+    regionStyleSize: "字号 (px)",
+    regionStyleAuto: "自动",
+    regionStyleLineSpacing: "行距",
+    regionStyleAlign: "对齐",
+    regionStyleAlignLeft: "左",
+    regionStyleAlignCenter: "居中",
+    regionStyleAlignRight: "右",
+    regionStyleCase: "大小写",
+    regionStyleCaseUpper: "全部大写",
+    regionStyleCaseAsTyped: "保持原样",
+    regionStyleColor: "文字颜色",
+    regionStyleCustom: "自定义",
+    regionStyleOutline: "描边 (px)",
+    regionStyleOutlineColor: "描边颜色",
+    regionStyleBackground: "高亮",
+    regionStyleNone: "无",
+    regionStyleRotation: "旋转",
+    regionStyleOffsetX: "移动 ← →",
+    regionStyleOffsetY: "移动 ↑ ↓",
+    regionStyleArea: "文字区域",
+    regionStyleVertical: "竖排",
+    regionStyleVerticalHint: "单列",
+    regionStyleReset: "重置样式",
+    regionStyleHint: "保持“自动”的项目会沿用全局设置（Pro 标签页）。固定字号可能超出框。竖排适合拟声词等短文字。",
+    regionStyleFontMissing: "字体“{font}”没有这些字符的字形：{chars} — 已被省略。请换一个字体。",
     zoomTooltip: '点击查看大图',
     fixHintCurrentLabel: '当前:',
     fixMoveBtn: '⇔ 移动',
@@ -402,6 +489,35 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     retryBadgeTitle: '数回再試行しましたが翻訳に失敗しました。クリックして再試行',
     fixHintTooltip: 'クリックしてこの吹き出しの翻訳を修正',
     manualRegionTooltip: "クリックでこのテキスト範囲を編集",
+    fixStyleBtn: "スタイル",
+    regionStyleTitle: "文字スタイル",
+    regionStyleFont: "フォント",
+    regionStyleDefault: "既定",
+    regionStyleSize: "サイズ (px)",
+    regionStyleAuto: "自動",
+    regionStyleLineSpacing: "行間",
+    regionStyleAlign: "配置",
+    regionStyleAlignLeft: "左",
+    regionStyleAlignCenter: "中央",
+    regionStyleAlignRight: "右",
+    regionStyleCase: "大文字小文字",
+    regionStyleCaseUpper: "すべて大文字",
+    regionStyleCaseAsTyped: "入力どおり",
+    regionStyleColor: "文字色",
+    regionStyleCustom: "カスタム",
+    regionStyleOutline: "縁取り (px)",
+    regionStyleOutlineColor: "縁取りの色",
+    regionStyleBackground: "ハイライト",
+    regionStyleNone: "なし",
+    regionStyleRotation: "回転",
+    regionStyleOffsetX: "移動 ← →",
+    regionStyleOffsetY: "移動 ↑ ↓",
+    regionStyleArea: "文字領域",
+    regionStyleVertical: "縦書き",
+    regionStyleVerticalHint: "1列",
+    regionStyleReset: "スタイルをリセット",
+    regionStyleHint: "「自動」のままの項目は全体設定（Pro タブ）に従います。固定サイズは枠からはみ出すことがあります。縦書きは効果音などの短い文字向きです。",
+    regionStyleFontMissing: "フォント「{font}」には次の文字のグリフがありません：{chars} — 省略されました。別のフォントを選んでください。",
     zoomTooltip: 'クリックして拡大表示',
     fixHintCurrentLabel: '現在の訳:',
     fixMoveBtn: '⇔ 移動',
@@ -504,6 +620,35 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     retryBadgeTitle: '여러 번 재시도했지만 번역에 실패했습니다 - 클릭하여 다시 시도',
     fixHintTooltip: '클릭하여 이 말풍선의 번역 수정',
     manualRegionTooltip: "클릭하여 이 텍스트 영역 편집",
+    fixStyleBtn: "스타일",
+    regionStyleTitle: "글자 스타일",
+    regionStyleFont: "글꼴",
+    regionStyleDefault: "기본값",
+    regionStyleSize: "크기 (px)",
+    regionStyleAuto: "자동",
+    regionStyleLineSpacing: "줄 간격",
+    regionStyleAlign: "정렬",
+    regionStyleAlignLeft: "왼쪽",
+    regionStyleAlignCenter: "가운데",
+    regionStyleAlignRight: "오른쪽",
+    regionStyleCase: "대소문자",
+    regionStyleCaseUpper: "모두 대문자",
+    regionStyleCaseAsTyped: "입력한 그대로",
+    regionStyleColor: "글자 색",
+    regionStyleCustom: "사용자 지정",
+    regionStyleOutline: "외곽선 (px)",
+    regionStyleOutlineColor: "외곽선 색",
+    regionStyleBackground: "강조 배경",
+    regionStyleNone: "없음",
+    regionStyleRotation: "회전",
+    regionStyleOffsetX: "이동 ← →",
+    regionStyleOffsetY: "이동 ↑ ↓",
+    regionStyleArea: "글자 영역",
+    regionStyleVertical: "세로쓰기",
+    regionStyleVerticalHint: "한 줄",
+    regionStyleReset: "스타일 초기화",
+    regionStyleHint: "‘자동’으로 둔 항목은 전체 설정(Pro 탭)을 따릅니다. 고정 크기는 상자를 넘칠 수 있습니다. 세로쓰기는 효과음 같은 짧은 글자에 적합합니다.",
+    regionStyleFontMissing: "글꼴 “{font}”에는 다음 글자의 글리프가 없습니다: {chars} — 생략되었습니다. 다른 글꼴을 고르세요.",
     zoomTooltip: '클릭하여 크게 보기',
     fixHintCurrentLabel: '현재:',
     fixMoveBtn: '⇔ 이동',
@@ -3007,7 +3152,23 @@ function openFixHintPopover(img: HTMLImageElement, bubbleIndex: number, bubble: 
     });
   };
 
-  bubbleActionsRow.append(moveBtn, deleteBtn);
+  // Per-bubble text style: reuses the manual text area editor on this
+  // bubble's own box (its text is already known), with the Text style section
+  // open. Applying swaps the detected bubble for a manual region carrying it.
+  const styleBtn = document.createElement('button');
+  styleBtn.textContent = tr('fixStyleBtn');
+  styleBtn.style.flex = '1';
+  styleFixPopoverButton(styleBtn, false);
+  styleBtn.onclick = (ev) => {
+    ev.stopPropagation();
+    const rawUrl = resolveMangaUrl(img);
+    const box = normalizedBubbleBox(img, bubble);
+    closeFixHintPopover();
+    if (!rawUrl || !box) { toast(tr('regionNoImage'), true); return; }
+    startStyleBubble(img, rawUrl, box, bubble.originalText ?? '', bubble.translatedText ?? '', () => removeBubbleFromFixTargets(img, bubbleIndex));
+  };
+
+  bubbleActionsRow.append(moveBtn, styleBtn, deleteBtn);
   popover.appendChild(bubbleActionsRow);
 
   const textarea = document.createElement('textarea');
@@ -5305,6 +5466,20 @@ function injectStyles(shadow: ShadowRoot): void {
 // Manual region tool wiring (see region-tool.ts)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Font packs the backend offers, fetched by the service worker (a page can't
+// call the backend directly). Cached once it has a non-empty answer.
+let backendFonts: string[] | null = null;
+function listBackendFonts(): Promise<string[]> {
+  if (backendFonts) return Promise.resolve(backendFonts);
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'LIST_FONTS' }, (resp: { ok?: boolean; fonts?: string[] } | undefined) => {
+      if (chrome.runtime.lastError || !resp?.ok || !resp.fonts?.length) { resolve([]); return; }
+      backendFonts = resp.fonts;
+      resolve(resp.fonts);
+    });
+  });
+}
+
 initRegionTool({
   requestOptions: async () => {
     const { image: _image, ...options } = buildTranslateRequest('', await loadSettings());
@@ -5317,8 +5492,9 @@ initRegionTool({
   restoreOriginal: (img) => { resetRecycledTranslatedImage(img); },
   resolveUrl: resolveMangaUrl,
   onRegionsChanged: (img, rawUrl, regions) => { setManualRegionTargets(img, rawUrl, regions); },
-  tr: (key) => tr(key as ContentMessageKey),
+  tr: (key, vars) => tr(key as ContentMessageKey, vars),
   toast,
+  listFonts: listBackendFonts,
 });
 initEraserTool({
   resolveUrl: resolveMangaUrl,

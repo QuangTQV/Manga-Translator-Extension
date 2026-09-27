@@ -257,6 +257,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'LIST_FONTS') {
+      sendResponse(await listFonts());
+      return;
+    }
+
     if (message.type === 'LIVE_AI_LOG') {
       const { limit, since } = message as { type: string; limit: number; since?: number };
       sendResponse(await fetchLiveAiLog(limit, since));
@@ -799,6 +804,22 @@ async function storiesApiCall<T>(path: string, init: RequestInit): Promise<{ ok:
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: t(settings.uiLanguage, 'errorBackendUnreachable', { msg }) };
+  }
+}
+
+// Font packs the backend can draw with (GET /fonts, never gated) — for the
+// manual text area editor's per-region font picker, which runs in a page
+// where a direct fetch would be blocked by CORS.
+async function listFonts(): Promise<{ ok: boolean; fonts?: string[] }> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl || 'http://localhost:7677';
+  try {
+    const res = await fetch(`${backendUrl.replace(/\/$/, '')}/fonts`);
+    if (!res.ok) return { ok: false };
+    const data = (await res.json()) as { fonts?: unknown };
+    return { ok: true, fonts: Array.isArray(data.fonts) ? data.fonts.filter((f): f is string => typeof f === 'string') : [] };
+  } catch {
+    return { ok: false };
   }
 }
 

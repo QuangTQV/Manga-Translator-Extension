@@ -377,6 +377,46 @@ Revokes the caller's current token immediately — an actual server-side "sign o
 
 ---
 
+### `POST /region/render`
+
+Draws text into user-chosen boxes on one image (the extension's *Select text area* tool): each box is cleaned, then its text drawn with the layout engine. Takes the usual translate options (font pack, size range, lettering) plus:
+
+```json
+{
+  "image": "<base64 png>",
+  "source_image": "<base64 png, needed when a region has restore_only>",
+  "regions": [
+    { "box": { "x1": 0.1, "y1": 0.1, "x2": 0.6, "y2": 0.4 }, "text": "Hello",
+      "style": { "font": "Comicka", "font_size": 26, "text_color": "#c8102e", "rotation": -8 } },
+    { "box": { "x1": 0.1, "y1": 0.5, "x2": 0.6, "y2": 0.9 }, "restore_only": true }
+  ]
+}
+```
+
+Boxes are normalised 0..1. An empty `text` only cleans the spot; `restore_only` pastes the original pixels from `source_image` back instead of drawing.
+
+**`style`** (optional, per region — every field left out follows the request's global settings; ignored for `restore_only`):
+
+| Field | Meaning |
+|---|---|
+| `font` | A font pack name from `GET /fonts`. An unknown name is ignored (the default font is used) |
+| `font_size` | Exact size in image pixels (4–400); unset fits the text to the box |
+| `line_spacing` | Line-height multiplier (0.5–3) |
+| `align` | `left`, `center` or `right` |
+| `text_color`, `outline_color`, `background_color` | `#rrggbb`. `background_color` is a highlight behind each line |
+| `outline_width` | 0–20 px; `0` means no outline even if the global setting has one |
+| `uppercase` | Force ALL CAPS on or off |
+| `rotation` | Degrees clockwise (−180–180); the text is laid out to fit inside the box once rotated |
+| `vertical` | Stack the characters in one column |
+| `offset_x`, `offset_y` | Shift the text block, in % of the box width/height (−50–50), kept inside the box |
+| `text_area` | Percent of the box the text block may use (20–100) |
+
+Out-of-range values are rejected with `422`.
+
+**Response `200 OK`:** `{ "image": "<base64 png>", "warnings": [...] }`. A warning is `{ "region": 0, "code": "font_missing_glyphs", "font": "Comicka", "chars": "àạẻ" }`: the font has no glyph for those characters, so they were left out of that region (`region` counts only the drawn regions).
+
+---
+
 ### `GET /admin/llm-config`
 
 Admin-only (see [Authentication](#authentication-hosted-deployments-only) — this requires `Authorization: Bearer <token>` for the account whose email matches `MT_ADMIN_EMAIL`, independent of whether `MT_REQUIRE_AUTH` is on). Returns the shared LLM provider/model/key every hosted user's request falls back to when it doesn't carry its own `api_key`.

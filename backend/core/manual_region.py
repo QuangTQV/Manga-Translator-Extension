@@ -11,14 +11,19 @@ output, thumbnail, ...).
 from __future__ import annotations
 
 import base64
+import dataclasses
 import io
-from typing import List, Optional, Tuple
+import math
+import re
+from pathlib import Path
+from typing import Any, List, Mapping, Optional, Sequence, Tuple, Union
 
 import cv2
 import numpy as np
 from PIL import Image
 
 from core.config import RenderingConfig
+from core.text.font_manager import find_font_variants, unsupported_characters
 from core.text.text_renderer import render_text_skia
 from utils.logging import log_message
 
@@ -174,28 +179,176 @@ def restore_regions(
     return out
 
 
+_FONT_PACK_NAME = re.compile(r"^[\w .()\-]{1,80}$")  # a pack directory's name — never a path
+
+# (box, text) or (box, text, style) — style being a RegionStyle as a plain dict.
+RegionSpec = Union[
+    Tuple[Tuple[float, float, float, float], str],
+    Tuple[Tuple[float, float, float, float], str, Optional[Mapping[str, Any]]],
+]
+
+
+def _hex_rgb(value: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    if not value or len(value) != 7 or not value.startswith("#"):
+        return None
+    try:
+        return int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16)
+    except ValueError:
+        return None
+
+
+def rotated_fit(width: float, height: float, degrees: float) -> Tuple[float, float]:
+    """The largest text block (by area) that still lies inside a width x height
+    box after being rotated by `degrees` about the box centre — the size to
+    lay the text out at when it will be drawn rotated (a quarter turn swaps
+    the two sides)."""
+    t = math.radians(degrees % 180.0)
+    c, s = abs(math.cos(t)), abs(math.sin(t))
+    if s < 1e-6:
+        return width, height
+    if c < 1e-6:
+        return height, width
+    best_w, best_h, best_area = 1.0, 1.0, 0.0
+    max_w = min(width / c, height / s)
+    for i in range(1, 401):
+        w = max_w * i / 400
+        h = min((width - w * c) / s, (height - w * s) / c)
+        if h > 0 and w * h > best_area:
+            best_w, best_h, best_area = w, h, w * h
+    return best_w, best_h
+
+
+def resolve_font_pack(name: Optional[str], fonts_base_dir: Optional[Path]) -> Optional[str]:
+    """A font pack directory (a direct child of fonts_base_dir holding .ttf/.otf
+    files) by name, or None if the name isn't one — so a request can pick from
+    what GET /fonts lists but can never point the renderer anywhere else."""
+    if not name or fonts_base_dir is None or not _FONT_PACK_NAME.match(name) or name in {".", ".."}:
+        return None
+    base = Path(fonts_base_dir)
+    candidate = base / name
+    try:
+        if candidate.resolve().parent != base.resolve() or not candidate.is_dir():
+            return None
+    except OSError:
+        return None
+    if not (any(candidate.glob("*.ttf")) or any(candidate.glob("*.otf"))):
+        return None
+    return str(candidate)
+
+
+def apply_region_style(
+    px_box: Tuple[int, int, int, int],
+    style: Optional[Mapping[str, Any]],
+    rendering: RenderingConfig,
+    font_dir: str,
+    fonts_base_dir: Optional[Path] = None,
+) -> Tuple[RenderingConfig, str, dict]:
+    """(rendering, font_dir, extra render_text_skia kwargs) for one region:
+    the request's global settings with this region's own style laid over
+    them. Anything the style leaves unset keeps the global value."""
+    if not style:
+        return rendering, font_dir, {}
+    changes: dict = {}
+    if style.get("font_size"):
+        size = max(1, int(round(float(style["font_size"]))))
+        changes["min_font_size"] = size
+        changes["max_font_size"] = size
+    if style.get("line_spacing"):
+        changes["line_spacing_mult"] = float(style["line_spacing"])
+    if style.get("align"):
+        changes["text_align"] = style["align"]
+    if _hex_rgb(style.get("text_color")):
+        changes["text_color_rgb"] = _hex_rgb(style["text_color"])
+    if style.get("outline_width") is not None:
+        changes["outline_width"] = float(style["outline_width"])
+    if _hex_rgb(style.get("outline_color")):
+        changes["outline_color_rgb"] = _hex_rgb(style["outline_color"])
+    if style.get("uppercase") is not None:
+        changes["uppercase"] = bool(style["uppercase"])
+
+    chosen_font_dir = font_dir
+    if style.get("font"):
+        pack = resolve_font_pack(style["font"], fonts_base_dir)
+        if pack:
+            chosen_font_dir = pack
+        else:
+            log_message(f"Unknown font pack {style['font']!r} for a manual region; using the default", always_print=True)
+
+    kwargs: dict = {}
+    if _hex_rgb(style.get("background_color")):
+        kwargs["text_background_color"] = _hex_rgb(style["background_color"])
+    if style.get("vertical"):
+        kwargs["vertical_stack"] = True
+
+    # Geometry: how much of the box the text block may use, rotated to fit
+    # inside it, and nudged — kept inside the box so the crop that gets
+    # pasted back never clips it.
+    x1, y1, x2, y2 = px_box
+    width, height = float(x2 - x1), float(y2 - y1)
+    area = float(style["text_area"]) / 100.0 if style.get("text_area") else 1.0
+    block_w, block_h = width * area, height * area
+    rotation = float(style.get("rotation") or 0.0)
+    if abs(rotation) > 0.01:
+        kwargs["rotation_deg"] = rotation
+        layout_w, layout_h = rotated_fit(block_w, block_h, rotation)
+    else:
+        layout_w, layout_h = block_w, block_h
+    if area < 1.0 or abs(rotation) > 0.01:
+        kwargs["layout_size"] = (layout_w, layout_h)
+    dx = float(style.get("offset_x") or 0.0) / 100.0 * width
+    dy = float(style.get("offset_y") or 0.0) / 100.0 * height
+    room_x, room_y = max(0.0, (width - block_w) / 2.0), max(0.0, (height - block_h) / 2.0)
+    dx, dy = max(-room_x, min(room_x, dx)), max(-room_y, min(room_y, dy))
+    if dx or dy:
+        kwargs["center_offset"] = (dx, dy)
+
+    return (dataclasses.replace(rendering, **changes) if changes else rendering), chosen_font_dir, kwargs
+
+
+def _missing_glyphs(text: str, rendering: RenderingConfig, font_dir: str) -> str:
+    try:
+        regular = find_font_variants(font_dir).get("regular")
+        shown = text.upper() if rendering.uppercase else text
+        return unsupported_characters(shown, str(regular)) if regular else ""
+    except Exception:  # noqa: BLE001 — a warning must never break the drawing
+        return ""
+
+
 def render_regions(
     base: Image.Image,
-    regions: List[Tuple[Tuple[float, float, float, float], str]],
+    regions: Sequence[RegionSpec],
     font_dir: str,
     rendering: Optional[RenderingConfig] = None,
     use_lama: bool = False,
+    fonts_base_dir: Optional[Path] = None,
+    warnings: Optional[List[dict]] = None,
 ) -> Image.Image:
     """Cleans each region of `base` and draws its text there. Regions with
-    empty text are cleaned only (useful for "just remove this text")."""
+    empty text are cleaned only (useful for "just remove this text"). A
+    region may carry its own style (see apply_region_style). If `warnings` is
+    given, a {region, code, font, chars} entry is appended for every region
+    whose font lacks glyphs for some of its characters (they are left out of
+    the drawing)."""
     image = base.convert("RGB")
     rendering = rendering or RenderingConfig(font_dir=font_dir)
-    for box, text in regions:
+    for index, region in enumerate(regions):
+        box, text = region[0], region[1]
+        style = region[2] if len(region) > 2 else None
         px_box = box_to_pixels(image.size, box)
         bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
         background = clean_region(bgr, px_box, use_lama=use_lama)
         image = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
         if not text.strip():
             continue
+        region_rendering, region_font_dir, extra = apply_region_style(px_box, style, rendering, font_dir, fonts_base_dir)
+        if warnings is not None:
+            missing = _missing_glyphs(text, region_rendering, region_font_dir)
+            if missing:
+                warnings.append({"region": index, "code": "font_missing_glyphs", "font": Path(region_font_dir).name, "chars": missing})
         try:
             image = render_text_skia(
-                image, text, px_box, font_dir,
-                cleaned_mask=None, bubble_color_bgr=background, config=rendering,
+                image, text, px_box, region_font_dir,
+                cleaned_mask=None, bubble_color_bgr=background, config=region_rendering, **extra,
             )
         except Exception as e:  # noqa: BLE001 — one bad region must not lose the others
             log_message(f"Manual region render failed for {px_box}: {e}", always_print=True)

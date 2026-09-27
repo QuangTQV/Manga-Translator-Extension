@@ -2,10 +2,12 @@
 piece of text, and draw text into boxes. See core/manual_region.py."""
 import asyncio
 import re
+from typing import List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth import verify_token
+from config import settings
 from core.manual_region import (
     box_to_pixels,
     crop_for_ocr,
@@ -147,27 +149,34 @@ async def region_render(req: RegionRenderRequest, account=Depends(verify_token))
         _reject_oversized_image(req.source_image)
     config = _config_for_request(req)
 
-    def work() -> str:
+    def work() -> Tuple[str, List[dict]]:
         base = decode_image(req.image)
         restore_boxes = [_box_tuple(r.box) for r in req.regions if r.restore_only]
         if restore_boxes:
             if not req.source_image:
                 raise ValueError("source_image is required when a region has restore_only set")
             base = restore_regions(base, decode_image(req.source_image), restore_boxes)
-        draw_regions = [(_box_tuple(r.box), r.text) for r in req.regions if not r.restore_only]
-        return encode_png(render_regions(
+        draw_regions = [
+            (_box_tuple(r.box), r.text, r.style.model_dump(exclude_none=True) if r.style else None)
+            for r in req.regions if not r.restore_only
+        ]
+        warnings: List[dict] = []
+        image = render_regions(
             base, draw_regions, config.rendering.font_dir, config.rendering,
             use_lama=req.inpainting_method == "lama",
-        ))
+            fonts_base_dir=settings.fonts_base_dir,
+            warnings=warnings,
+        )
+        return encode_png(image), warnings
 
     try:
         async with _pipeline_slot(False):
-            image_b64 = await asyncio.to_thread(work)
+            image_b64, warnings = await asyncio.to_thread(work)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Render failed: {e}")
-    return RegionRenderResponse(image=image_b64)
+    return RegionRenderResponse(image=image_b64, warnings=warnings)
 
 
 @router.post("/erase", response_model=EraseResponse)

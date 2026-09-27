@@ -498,10 +498,35 @@ class RegionTranslateResponse(BaseModel):
     translation: str
 
 
+_HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
+
+
+class RegionStyle(BaseModel):
+    """How ONE manual text area's text is drawn, overriding the request's
+    global lettering/font settings for that region only. Every field left
+    unset (None) falls back to the global value."""
+
+    font: Optional[str] = Field(default=None, max_length=80)  # a font pack name from GET /fonts
+    font_size: Optional[float] = Field(default=None, ge=4, le=400)  # exact size in image pixels (unset = fit the box)
+    line_spacing: Optional[float] = Field(default=None, ge=0.5, le=3.0)  # multiplier
+    align: Optional[Literal["left", "center", "right"]] = None
+    text_color: Optional[str] = Field(default=None, pattern=_HEX_COLOR)
+    outline_width: Optional[float] = Field(default=None, ge=0, le=20)  # 0 = no outline, even if the global setting has one
+    outline_color: Optional[str] = Field(default=None, pattern=_HEX_COLOR)
+    background_color: Optional[str] = Field(default=None, pattern=_HEX_COLOR)  # a highlight drawn behind each line
+    uppercase: Optional[bool] = None
+    rotation: float = Field(default=0.0, ge=-180, le=180)  # degrees, clockwise
+    vertical: bool = False  # stack the characters in one column
+    offset_x: float = Field(default=0.0, ge=-50, le=50)  # shift the text block, % of the box width
+    offset_y: float = Field(default=0.0, ge=-50, le=50)  # ... and height
+    text_area: Optional[float] = Field(default=None, ge=20, le=100)  # % of the box the text block may use
+
+
 class RegionItem(BaseModel):
     box: RegionBox
     text: str = ""  # empty = just clean the spot; ignored when restore_only is set
     restore_only: bool = False  # paste the original (pre-translation) pixels back at this box instead of cleaning+drawing — see RegionRenderRequest.source_image
+    style: Optional[RegionStyle] = None  # this region's own text style (see RegionStyle); ignored when restore_only is set
 
 
 class RegionRenderRequest(TranslateOptions):
@@ -510,8 +535,19 @@ class RegionRenderRequest(TranslateOptions):
     source_image: Optional[str] = None  # raw base64 of the untranslated page; required when any region has restore_only=True
 
 
+class RegionWarning(BaseModel):
+    """Something the reader should know about a drawn region that did not stop
+    it being drawn."""
+
+    region: int  # index among the regions that were drawn (restore-only ones don't count)
+    code: str  # "font_missing_glyphs": the font has no glyph for some characters, which were left out
+    font: str = ""  # the font pack involved
+    chars: str = ""  # the characters left out
+
+
 class RegionRenderResponse(BaseModel):
     image: str  # raw base64 PNG
+    warnings: List[RegionWarning] = []
 
 
 class EraseRequest(BaseModel):

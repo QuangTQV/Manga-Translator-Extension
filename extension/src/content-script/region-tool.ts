@@ -9,6 +9,7 @@
 
 import { toggleStyleMarker } from '../shared/text-style.js';
 import type { RegionBoxNorm, StoredRegion } from '../shared/types.js';
+import { STYLE_CSS, StyleControls, styleHtml, styleToApi } from './region-style.js';
 
 export interface RegionToolDeps {
   /** Translate-request fields (provider, languages, story, ...) without the image. */
@@ -23,9 +24,14 @@ export interface RegionToolDeps {
   /** Called every time a page's manual regions have been (re)drawn, with the regions now on it —
    * so the page can make each one hoverable/clickable like a detected bubble. */
   onRegionsChanged(img: HTMLImageElement, rawUrl: string, regions: StoredRegion[]): void;
-  tr(key: string): string;
+  tr(key: string, vars?: Record<string, string | number>): string;
   toast(message: string, isError?: boolean): void;
+  /** Font packs the backend can draw with (for the per-region font picker); empty if it can't be reached. */
+  listFonts(): Promise<string[]>;
 }
+
+/** A drawn region the backend had something to say about (see RegionWarning in backend/schemas.py). */
+interface RegionWarning { region: number; code: string; font: string; chars: string }
 
 const STORAGE_KEY = 'mtManualRegions';
 const MAX_STORED_PAGES = 200;
@@ -129,15 +135,16 @@ async function api<T>(path: string, body: Record<string, unknown>): Promise<T> {
 /** Draws the page's saved eraser mask (if any) and `regions` onto the page's
  * base image and shows the result. The eraser mask is always applied first —
  * it's the "clean the raw" layer everything else sits on top of. */
-async function renderPage(img: HTMLImageElement, rawUrl: string, regions: StoredRegion[]): Promise<void> {
+async function renderPage(img: HTMLImageElement, rawUrl: string, regions: StoredRegion[]): Promise<RegionWarning[]> {
   const translated = deps.translatedBase(rawUrl);
   const eraseMask = await eraseMaskFor(rawUrl);
   if (!regions.length && !eraseMask) {
     if (translated) deps.applyImage(rawUrl, `data:image/png;base64,${translated}`);
     else deps.restoreOriginal(img);
     deps.onRegionsChanged(img, rawUrl, []);
-    return;
+    return [];
   }
+  let warnings: RegionWarning[] = [];
   let base = translated ?? (await deps.fetchSource(rawUrl));
   if (!base) throw new Error(deps.tr('regionNoImage'));
   if (eraseMask) {
@@ -153,14 +160,17 @@ async function renderPage(img: HTMLImageElement, rawUrl: string, regions: Stored
       sourceImage = translated ? (await deps.fetchSource(rawUrl)) ?? undefined : base;
       if (!sourceImage) throw new Error(deps.tr('regionNoImage'));
     }
-    base = (await api<{ image: string }>('/region/render', {
+    const rendered = await api<{ image: string; warnings?: RegionWarning[] }>('/region/render', {
       image: base,
       source_image: sourceImage,
-      regions: regions.map((r) => ({ box: r.box, text: r.translation, restore_only: !!r.restoreOnly })),
-    })).image;
+      regions: regions.map((r) => ({ box: r.box, text: r.translation, restore_only: !!r.restoreOnly, style: styleToApi(r.style) })),
+    });
+    base = rendered.image;
+    warnings = rendered.warnings ?? [];
   }
   deps.applyImage(rawUrl, `data:image/png;base64,${base}`);
   deps.onRegionsChanged(img, rawUrl, regions);
+  return warnings;
 }
 
 /** Opens the editor on an existing manual region (from clicking its hit target on the page). */
@@ -350,6 +360,35 @@ export function startMoveBubbleSelect(
 
 /** Deleting an already-detected bubble: restore its box to the original,
  * pre-translation pixels — no editor needed. */
+/** "Style" on a detected bubble: opens the editor on the bubble's own box with
+ * its text filled in and the Text style section open. Applying it replaces the
+ * bubble's drawing with a manual region (same box) carrying that style, and
+ * puts the untouched art back first (a restoreOnly region) so the old text
+ * can't show through. */
+export function startStyleBubble(
+  img: HTMLImageElement,
+  rawUrl: string,
+  box: RegionBoxNorm,
+  text: string,
+  translation: string,
+  onCommitted: () => void,
+): void {
+  const rect = img.getBoundingClientRect();
+  const sel: Rect = {
+    left: rect.left + box.x1 * rect.width,
+    top: rect.top + box.y1 * rect.height,
+    right: rect.left + box.x2 * rect.width,
+    bottom: rect.top + box.y2 * rect.height,
+  };
+  void openEditor(img, rawUrl, sel, {
+    text,
+    translation,
+    extraCommit: [{ id: crypto.randomUUID(), box, text: '', translation: '', restoreOnly: true }],
+    openStyle: true,
+    onCommitted,
+  });
+}
+
 export async function deleteBubbleRegion(img: HTMLImageElement, rawUrl: string, box: RegionBoxNorm): Promise<void> {
   const regions = await regionsFor(rawUrl);
   const next = [...regions, { id: crypto.randomUUID(), box, text: '', translation: '', restoreOnly: true }];
@@ -409,6 +448,10 @@ interface EditorSeed {
   /** Extra regions to save alongside this one on Apply — the restoreOnly
    * region that erases the bubble's old spot, for a move. */
   extraCommit: StoredRegion[];
+  /** Open the "Text style" section straight away (the reader came here to style this text). */
+  openStyle?: boolean;
+  /** Runs once Apply has succeeded — e.g. to drop the detected bubble this region replaces. */
+  onCommitted?: () => void;
 }
 
 async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed?: EditorSeed, editRegionId?: string): Promise<void> {
@@ -432,7 +475,8 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   const tr = deps.tr;
   shadow.innerHTML = `
     <style>
-      .card{background:#0b1120;color:#dde6f5;border:1px solid #7aa2ff;border-radius:12px;padding:12px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:8px}
+      .card{background:#0b1120;color:#dde6f5;border:1px solid #7aa2ff;border-radius:12px;padding:12px;font:13px/1.4 system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 16px);overflow-y:auto;box-sizing:border-box}
+      ${STYLE_CSS}
       .title{font-weight:600}
       label{font-size:11px;color:#9fb0cf;text-transform:uppercase;letter-spacing:.04em}
       textarea{width:100%;min-height:54px;resize:vertical;box-sizing:border-box;background:#080c18;color:#dde6f5;border:1px solid rgba(122,162,255,.35);border-radius:8px;padding:6px 8px;font:13px system-ui,sans-serif}
@@ -463,6 +507,7 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
         </div>
       </div>
       <textarea id="trans"></textarea>
+      ${styleHtml(tr)}
       <div class="status" id="status"></div>
       <div class="row">
         <button id="apply" class="primary" type="button">${tr('regionApply')}</button>
@@ -486,6 +531,14 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   orig.value = region.text;
   trans.value = region.translation;
 
+  // Per-region text style: prefilled from what was saved, open when there is
+  // one (or the reader came from a bubble's Style button), fonts filled in as
+  // soon as the backend answers.
+  const styleControls = new StyleControls(shadow);
+  styleControls.set(region.style);
+  if (styleControls.isCustomised() || seed?.openStyle) styleControls.open();
+  void deps.listFonts().then((fonts) => { styleControls.setFonts(fonts, region.style?.font); place(); });
+
   const setStatus = (msg: string, err = false): void => { status.textContent = msg; status.classList.toggle('err', err); };
   const setBusy = (busy: boolean): void => { aiBtn.disabled = busy; applyBtn.disabled = busy; delBtn.disabled = busy; };
 
@@ -493,14 +546,22 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   const place = (): void => {
     const h = host.getBoundingClientRect().height || 260;
     let top = sel.bottom + 8;
-    if (top + h > window.innerHeight - 8) top = Math.max(8, sel.top - h - 8);
+    if (top + h > window.innerHeight - 8) top = sel.top - h - 8;
+    // ...and whatever happens never let it hang off the screen: its Apply button
+    // would be out of reach (the card scrolls inside itself, the page can't).
+    top = Math.max(8, Math.min(top, window.innerHeight - h - 8));
     host.style.top = `${top}px`;
     host.style.left = `${Math.min(Math.max(8, sel.left), window.innerWidth - 338)}px`;
   };
   document.body.append(outline, host);
   place();
+  // The card grows and shrinks (the Text style section opening, the font list
+  // arriving, a status line appearing): follow it.
+  const resizeObserver = new ResizeObserver(() => place());
+  resizeObserver.observe(host);
 
   const close = (): void => {
+    resizeObserver.disconnect();
     outline.remove();
     host.remove();
     document.removeEventListener('keydown', onKey, true);
@@ -513,8 +574,13 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
 
   const others = all.filter((r) => r.id !== region.id);
   const commit = async (next: StoredRegion[]): Promise<void> => {
-    await renderPage(img, rawUrl, next);
+    const warnings = await renderPage(img, rawUrl, next);
     await saveRegions(rawUrl, next);
+    // A font without the glyphs drops those characters; say so, or the reader
+    // just sees a word with letters missing and no idea why.
+    for (const warning of warnings) {
+      if (warning.code === 'font_missing_glyphs') deps.toast(tr('regionStyleFontMissing', { font: warning.font, chars: warning.chars }), true);
+    }
   };
 
   aiBtn.addEventListener('click', async () => {
@@ -537,7 +603,8 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
     setBusy(true);
     setStatus(tr('regionApplying'));
     try {
-      await commit([...others, { ...region, text: orig.value.trim(), translation: trans.value.trim() }, ...(seed?.extraCommit ?? [])]);
+      await commit([...others, { ...region, text: orig.value.trim(), translation: trans.value.trim(), style: styleControls.get() }, ...(seed?.extraCommit ?? [])]);
+      seed?.onCommitted?.();
       close();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e), true);
