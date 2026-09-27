@@ -1,7 +1,10 @@
 """Backend configuration."""
-from pathlib import Path
-from pydantic_settings import BaseSettings
+
 import os
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -18,6 +21,12 @@ class Settings(BaseSettings):
     # Backend-specific settings
     max_image_size_mb: int = 50
     request_timeout_seconds: int = 300
+    # Local web search used by the one-off Story Notes / Story DB helpers
+    # when the request selects SearXNG instead of a provider-native tool.
+    searxng_url: str = "http://localhost:8080"
+    searxng_auto_start: bool = True
+    web_search_timeout_seconds: float = Field(default=8.0, ge=1.0, le=30.0)
+    web_search_max_results: int = Field(default=5, ge=1, le=10)
     # Caps how many translation pipeline runs (single + batch combined) may
     # execute concurrently, regardless of how many requests are in flight —
     # the ML pipeline is GPU/VRAM-bound, so unbounded concurrency across

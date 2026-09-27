@@ -1,9 +1,9 @@
+import JSZip from 'jszip';
+import { withEffectiveConfig } from '../shared/economy.js';
 import type { AppSettings, BubbleInfo, RegionBoxNorm, StoredRegion, TranslateRequest } from '../shared/types.js';
 import { normalizeProviderGroups, stripLegacyProviderFields } from '../shared/types.js';
-import { withEffectiveConfig } from '../shared/economy.js';
 import { initEraserTool, startEraserSelect } from './eraser-tool.js';
 import { deleteBubbleRegion, editManualRegion, initRegionTool, reapplyManualRegions, restoreManualRegionsOnLoad, startMoveBubbleSelect, startRegionSelect, startStyleBubble } from './region-tool.js';
-import JSZip from 'jszip';
 
 const ROOT_ID  = 'mt-scanner-root';
 const STYLE_ID = 'mt-scanner-style';
@@ -825,9 +825,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, send) => {
         .map((p) => fullResBase64For(p.rawUrl))
         .filter((b64): b64 is string => Boolean(b64))
         .slice(0, SUGGEST_INSTRUCTIONS_MAX_IMAGES);
-      const result = await runSuggestInstructions(images, enableWebSearch, storyTitle);
-      send(result);
-    })();
+      return runSuggestInstructions(images, enableWebSearch, storyTitle);
+    })()
+      .then(send)
+      .catch((error) => send({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   }
   return false;
@@ -4143,6 +4144,7 @@ function bgSuggestInstructions(
           rotation_strategy: settings.config.rotationStrategy,
           cooldown_seconds: settings.config.cooldownSeconds,
           enable_web_search: enableWebSearch ?? false,
+          web_search_provider: settings.config.webSearchProvider ?? 'provider',
           story_title: storyTitle,
         },
       },

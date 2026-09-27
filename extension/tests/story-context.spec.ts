@@ -577,7 +577,7 @@ test.describe('popup — Story DB update from description', () => {
       worker,
       baseSeed({
         accountToken: 'tok-abc', accountEmail: 'a@example.com', activeStoryId: 'story-1',
-        config: { providerGroups: [{ provider: 'Google', modelName: 'gemini-3.1-flash', enabled: true, apiKeys: [{ key: 'k1', enabled: true }] }] },
+        config: { webSearchProvider: 'searxng', providerGroups: [{ provider: 'Google', modelName: 'gemini-3.1-flash', enabled: true, apiKeys: [{ key: 'k1', enabled: true }] }] },
       }),
       firstKeyMatches('k1'),
     );
@@ -636,6 +636,7 @@ test.describe('popup — Story DB update from description', () => {
     expect(capturedBody.api_key).toBe('k1');
     expect(capturedBody.characters).toHaveLength(1); // what was in the form before the update
     expect(capturedBody.enable_web_search).toBe(true);
+    expect(capturedBody.web_search_provider).toBe('searxng');
     expect(capturedBody.story_title).toBe('My Manga');
   });
 

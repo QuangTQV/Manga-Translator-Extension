@@ -253,6 +253,7 @@ Drafts Story Notes text (cast, relationships, tone) from a handful of sample pag
   "api_key_weight": null,
   "backup_api_key_weights": null,
   "enable_web_search": false,
+  "web_search_provider": "provider",
   "story_title": null
 }
 ```
@@ -263,7 +264,10 @@ Drafts Story Notes text (cast, relationships, tone) from a handful of sample pag
 | `images` | `string[]` | **required** | Raw base64 sample page images (no `data:` prefix) |
 | `output_language` | `string` | **required** | Language to write the suggestion in |
 | `enable_web_search` | `bool` | `false` | Let the model use its provider's built-in web search to look up the story |
+| `web_search_provider` | `"provider"` or `"searxng"` | `"provider"` | Search source for this helper. `searxng` uses the backend's `MT_SEARXNG_URL` and supplies bounded search snippets to the model instead of invoking its native search tool. |
 | `story_title` | `string?` | `null` | User-supplied title to search for, when `enable_web_search` is set |
+
+For local SearXNG, configure `MT_SEARXNG_URL` on the backend (default `http://localhost:8080`) and enable JSON output in that SearXNG instance. When the backend itself runs in Docker, use a container-reachable host such as `http://host.docker.internal:8080` instead of `localhost`. The same `web_search_provider` field is available on `POST /stories/update-from-description`.
 
 **Response `200 OK`:**
 ```json

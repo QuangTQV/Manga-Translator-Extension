@@ -36,6 +36,20 @@ curl http://localhost:7677/health
 
 Kết quả mong đợi: `{"status":"ok", ...}`.
 
+### Tìm kiếm web cục bộ (tùy chọn)
+
+Nếu chọn **Local SearXNG** trong tab **Config** của extension, cần chạy SearXNG riêng. Có thể khởi động service tùy chọn đi kèm project:
+
+```bash
+cd backend
+docker compose --profile web-search up -d searxng
+curl 'http://localhost:8080/search?q=manga&format=json'
+```
+
+Chỉ bật profile `web-search` khi dùng tính năng này; service được bind vào `127.0.0.1:8080`, không mở ra mạng LAN. Cấu hình `backend/searxng/settings.yml` bật JSON API mà backend cần. Sau khi `curl` trả JSON có trường `results`, giữ `MT_SEARXNG_URL=http://localhost:8080` (mặc định) và thử lại **Suggest Notes** hoặc **Update from a description**.
+
+Nếu backend chạy trong container riêng, `localhost` sẽ trỏ vào chính container backend, không phải máy host; đặt `MT_SEARXNG_URL=http://host.docker.internal:8080` (macOS/Windows) hoặc URL/service name có thể truy cập từ container backend. Nếu không muốn chạy SearXNG cục bộ, chọn **LLM provider's built-in search** trong Config.
+
 ## 4. Build extension
 
 ```bash

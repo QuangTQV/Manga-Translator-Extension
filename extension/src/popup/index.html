@@ -272,6 +272,7 @@
     .bk-error-detail.visible { display: block; }
     .bk-test-status.ok { color: #4ade80; }
     .bk-test-status.fail { color: #f87171; }
+    #web-search-test-results { display:none; max-height:220px; overflow:auto; margin:8px 0 0; padding:8px; border:1px solid rgba(122,144,184,.18); border-radius:6px; background:rgba(8,12,24,.7); color:#cbd5e1; font:11px/1.45 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
     .btn-test-all {
       background: rgba(74,222,128,0.12); color: #4ade80;
       border: 1px solid rgba(74,222,128,0.25); border-radius: 6px;
@@ -678,6 +679,25 @@
         <div class="field">
           <label class="label" data-i18n="labelBackendUrl">Backend URL</label>
           <input id="f-backend" class="input" type="url" />
+        </div>
+        <div class="field">
+          <label class="label" for="f-web-search-source" data-i18n="labelWebSearchSource">Web search source</label>
+          <select id="f-web-search-source" class="select">
+            <option value="provider" data-i18n="webSearchSourceProvider">LLM provider's built-in search</option>
+            <option value="searxng" data-i18n="webSearchSourceSearxng">Local SearXNG</option>
+          </select>
+          <span id="searxng-start-status" class="bk-test-status" aria-live="polite" style="margin-left:8px;"></span>
+          <div class="toggle-hint" data-i18n="hintWebSearchSource">Used by the opt-in Story Notes and Story DB search options. Local mode uses the backend's MT_SEARXNG_URL (default http://localhost:8080); configure that SearXNG instance to allow JSON search results.</div>
+        </div>
+        <div class="field">
+          <label class="label" for="f-web-search-test-query" data-i18n="labelTestWebSearch">Test local SearXNG</label>
+          <div class="model-picker-header">
+            <input id="f-web-search-test-query" class="input" type="search" maxlength="500" data-i18n-placeholder="placeholderTestWebSearch" placeholder="Enter a title or search query" />
+            <button id="btn-test-web-search" class="btn-fetch-models" type="button" data-i18n="btnTestWebSearch">Test search</button>
+            <span id="web-search-test-status" class="bk-test-status" aria-live="polite"></span>
+          </div>
+          <div class="toggle-hint" data-i18n="hintTestWebSearch">Searches SearXNG directly without calling an LLM. Results below confirm what the Story Notes and Story DB helpers will receive.</div>
+          <pre id="web-search-test-results"></pre>
         </div>
         <div class="field">
           <label class="label" data-i18n="labelLiveAiViewer">Live AI log viewer</label>

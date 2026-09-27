@@ -1,0 +1,16 @@
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  limiter: false
+  image_proxy: false
+
+engines:
+  - name: wikidata
+    disabled: true
+  - name: wikipedia
+    disabled: false
