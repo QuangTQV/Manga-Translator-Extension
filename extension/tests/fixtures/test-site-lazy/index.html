@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manga reader lazy-image fixture</title>
+<style>
+  body { margin: 0; min-height: 100vh; background: #16191d; color: #e5e7eb; font: 14px sans-serif; }
+  .reader-bar { position: sticky; top: 0; z-index: 2; height: 42px; padding: 0 16px; display: flex; align-items: center; background: #272b31; border-bottom: 1px solid #3a4048; }
+  .reader-page { width: min(600px, calc(100vw - 24px)); margin: 18px auto; }
+  .reader-page img { display: block; width: 100%; height: auto; min-height: 400px; background: #343a40; object-fit: contain; }
+</style>
+</head>
+<body>
+  <header class="reader-bar">Chapter 12 <span style="margin-left:auto">1 / 1</span></header>
+  <main class="reader-page">
+    <img id="reader-page" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" data-src="../test-site/page1.jpg" loading="lazy" alt="manga page">
+  </main>
+  <script>
+    const page = document.getElementById('reader-page');
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      page.src = page.dataset.src;
+      delete page.dataset.src;
+      observer.disconnect();
+    });
+    observer.observe(page);
+  </script>
+</body>
+</html>

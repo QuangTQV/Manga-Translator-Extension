@@ -419,4 +419,78 @@ test.describe('per-region text style', () => {
     await expect(editor).toHaveCount(0);
     expect(renders).toHaveLength(1);
   });
+
+  test('style presets save locally, reapply exact attributes, survive editor reopen, and can be deleted', async ({ context, extensionId }) => {
+    const { page, editor, renders } = await setup(context, extensionId);
+    await editor.locator('#style-box summary').click();
+    await editor.locator('#st-size').fill('32');
+    await editor.locator('#st-color-mode').selectOption('custom');
+    await editor.locator('#st-color').fill('#c8102e');
+    await editor.locator('#st-rot').fill('15');
+    await editor.locator('#st-preset-name').fill('Sound effect');
+    await expect(editor.locator('#st-preset-save')).toBeEnabled();
+    await editor.locator('#st-preset-save').click();
+    await expect(editor.locator('#st-preset-status')).toHaveText('Preset saved');
+    await expect(editor.locator('#st-presets option')).toContainText(['Choose a preset...', 'Sound effect']);
+
+    await editor.locator('#st-size').fill('12');
+    await editor.locator('#st-color-mode').selectOption('');
+    await editor.locator('#st-rot').fill('0');
+    await editor.locator('#st-presets').selectOption('');
+    await editor.locator('#st-presets').selectOption('Sound effect');
+    await expect(editor.locator('#st-size')).toHaveValue('32');
+    await expect(editor.locator('#st-color')).toHaveValue('#c8102e');
+    await expect(editor.locator('#st-rot')).toHaveValue('15');
+
+    await editor.locator('#trans').fill('Pow!');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    expect(renders.at(-1).regions[0].style).toEqual(expect.objectContaining({ font_size: 32, text_color: '#c8102e', rotation: 15 }));
+
+    await page.locator('.mt-fix-hit').click();
+    await expect(editor.locator('#st-presets option')).toContainText(['Sound effect']);
+    await editor.locator('#st-presets').selectOption('Sound effect');
+    await editor.locator('#st-preset-delete').click();
+    await expect(editor.locator('#st-presets option')).toHaveText(['Choose a preset...']);
+    await editor.locator('#cancel').click();
+  });
+
+  test('saved-region list switches regions and corner resizing persists the new box', async ({ context, extensionId }) => {
+    const { page, editor, renders } = await setup(context, extensionId);
+    await editor.locator('#orig').fill('First original');
+    await editor.locator('#trans').fill('First translation');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+
+    await startAndDrag(context, page, extensionId, 0.6, 0.25);
+    await editor.locator('#orig').fill('Second original');
+    await editor.locator('#trans').fill('Second translation');
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+
+    await page.locator('.mt-fix-hit').first().click();
+    await editor.locator('#region-list-box summary').click();
+    const savedRegions = editor.locator('#region-list-items button');
+    await expect(savedRegions).toHaveCount(2);
+    await savedRegions.nth(1).click();
+    await expect(editor.locator('#orig')).toHaveValue('Second original');
+    await expect(editor.locator('#trans')).toHaveValue('Second translation');
+
+    const before = renders.at(-1).regions.find((item: any) => item.text === 'Second translation').box;
+    await editor.locator('#resize-box').click();
+    const southeast = page.locator('.mt-region-resize-handle[data-corner="se"]');
+    await southeast.scrollIntoViewIfNeeded();
+    const handle = await southeast.boundingBox();
+    expect(handle).not.toBeNull();
+    await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle!.x + handle!.width / 2 + 24, handle!.y + handle!.height / 2 + 18, { steps: 4 });
+    await page.mouse.up();
+
+    await editor.locator('#apply').click();
+    await expect(editor).toHaveCount(0);
+    const resized = renders.at(-1).regions.find((item: any) => item.text === 'Second translation');
+    expect(resized.box.x2).toBeGreaterThan(before.x2);
+    expect(resized.box.y2).toBeGreaterThan(before.y2);
+  });
 });

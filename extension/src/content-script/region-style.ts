@@ -5,6 +5,9 @@
 // turn it into the request's snake_case shape.
 import type { RegionStyle } from '../shared/types.js';
 
+const STYLE_PRESETS_KEY = 'mtRegionStylePresets';
+interface RegionStylePreset { name: string; style: RegionStyle }
+
 /** Only the fields that differ from "follow the global settings". */
 export function normalizeStyle(style: RegionStyle | undefined): RegionStyle | undefined {
   if (!style) return undefined;
@@ -55,6 +58,11 @@ export const STYLE_CSS = `
   .style-grid output{font-size:11px;color:#9fb0cf;min-width:38px;text-align:right}
   .style-grid .check{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:12px;color:#dde6f5}
   .style-hint{font-size:11px;color:#8092b8;margin:8px 0 6px}
+  .style-presets{grid-column:1/-1;display:grid;gap:5px;padding:6px 0;border-bottom:1px solid rgba(122,162,255,.2)}
+  .style-presets .pair{display:flex;gap:5px;min-width:0}
+  .style-presets select,.style-presets input{min-width:0;flex:1;box-sizing:border-box;background:#080c18;color:#dde6f5;border:1px solid rgba(122,162,255,.35);border-radius:6px;padding:4px 6px;font:12px system-ui,sans-serif}
+  .style-presets button{padding:4px 7px}
+  .style-presets-status{min-height:13px;color:#86efac;font-size:10px}
 `;
 
 export function styleHtml(tr: (key: string) => string): string {
@@ -68,6 +76,17 @@ export function styleHtml(tr: (key: string) => string): string {
     <details class="style" id="style-box">
       <summary>${tr('regionStyleTitle')}</summary>
       <div class="style-grid">
+        <div class="style-presets">
+          <div class="pair">
+            <select id="st-presets" aria-label="${tr('regionStylePreset')}"><option value="">${tr('regionStylePresetChoose')}</option></select>
+            <button id="st-preset-delete" type="button" title="${tr('regionStylePresetDelete')}" aria-label="${tr('regionStylePresetDelete')}" disabled>×</button>
+          </div>
+          <div class="pair">
+            <input id="st-preset-name" type="text" maxlength="40" placeholder="${tr('regionStylePresetName')}" />
+            <button id="st-preset-save" type="button" disabled>${tr('regionStylePresetSave')}</button>
+          </div>
+          <span class="style-presets-status" id="st-preset-status" aria-live="polite"></span>
+        </div>
         <label>${tr('regionStyleFont')}</label>
         <select id="st-font"><option value="">${tr('regionStyleDefault')}</option></select>
         <label>${tr('regionStyleSize')}</label>
@@ -105,9 +124,14 @@ export function styleHtml(tr: (key: string) => string): string {
 /** Reads and writes a RegionStyle from/to the controls styleHtml() produced. */
 export class StyleControls {
   private readonly $: <T extends HTMLElement>(id: string) => T;
+  private readonly tr: (key: string) => string;
+  private presets: RegionStylePreset[] = [];
+  private readonly presetsReady: Promise<void>;
 
-  constructor(shadow: ShadowRoot) {
+  constructor(shadow: ShadowRoot, tr: (key: string) => string) {
     this.$ = <T extends HTMLElement>(id: string): T => shadow.getElementById(id) as T;
+    this.tr = tr;
+    this.presetsReady = this.loadPresets();
     for (const id of ['st-color', 'st-outline-color', 'st-bg']) {
       this.$<HTMLSelectElement>(`${id}-mode`).addEventListener('change', () => this.syncColorVisibility());
     }
@@ -115,8 +139,81 @@ export class StyleControls {
       this.$<HTMLInputElement>(id).addEventListener('input', () => this.syncOutputs());
     }
     this.$<HTMLButtonElement>('st-reset').addEventListener('click', () => this.set(undefined));
+    this.$<HTMLSelectElement>('st-presets').addEventListener('change', (event) => {
+      const preset = this.presets.find((item) => item.name === (event.currentTarget as HTMLSelectElement).value);
+      if (preset) this.set(preset.style);
+      this.$<HTMLSpanElement>('st-preset-status').textContent = '';
+      this.syncPresetButtons();
+    });
+    this.$<HTMLInputElement>('st-preset-name').addEventListener('input', () => this.syncPresetButtons());
+    this.$<HTMLElement>('style-box').addEventListener('input', () => this.syncPresetButtons());
+    this.$<HTMLElement>('style-box').addEventListener('change', () => this.syncPresetButtons());
+    this.$<HTMLButtonElement>('st-preset-save').addEventListener('click', () => { void this.savePreset(); });
+    this.$<HTMLButtonElement>('st-preset-delete').addEventListener('click', () => { void this.deletePreset(); });
     this.syncColorVisibility();
     this.syncOutputs();
+  }
+
+  private async loadPresets(): Promise<void> {
+    try {
+      const stored = (await chrome.storage.local.get(STYLE_PRESETS_KEY))[STYLE_PRESETS_KEY];
+      this.presets = Array.isArray(stored)
+        ? stored.filter((item): item is RegionStylePreset => Boolean(item && typeof item.name === 'string' && item.name.trim() && item.style && typeof item.style === 'object'))
+        : [];
+    } catch {
+      this.presets = [];
+    }
+    this.renderPresets();
+  }
+
+  private renderPresets(): void {
+    const select = this.$<HTMLSelectElement>('st-presets');
+    const current = select.value;
+    const first = select.options[0];
+    select.replaceChildren(first, ...this.presets.map((preset) => new Option(preset.name, preset.name)));
+    select.value = this.presets.some((preset) => preset.name === current) ? current : '';
+    this.syncPresetButtons();
+  }
+
+  private syncPresetButtons(): void {
+    const name = this.$<HTMLInputElement>('st-preset-name').value.trim();
+    this.$<HTMLButtonElement>('st-preset-save').disabled = !name || !this.get();
+    this.$<HTMLButtonElement>('st-preset-delete').disabled = !this.$<HTMLSelectElement>('st-presets').value;
+  }
+
+  private async savePreset(): Promise<void> {
+    await this.presetsReady;
+    const name = this.$<HTMLInputElement>('st-preset-name').value.trim();
+    const style = this.get();
+    if (!name || !style) return;
+    this.presets = this.presets.filter((preset) => preset.name.toLocaleLowerCase() !== name.toLocaleLowerCase());
+    this.presets.push({ name, style });
+    if (this.presets.length > 20) this.presets.shift();
+    try {
+      await chrome.storage.local.set({ [STYLE_PRESETS_KEY]: this.presets });
+      this.renderPresets();
+      this.$<HTMLSelectElement>('st-presets').value = name;
+      this.$<HTMLInputElement>('st-preset-name').value = '';
+      this.$<HTMLSpanElement>('st-preset-status').textContent = this.tr('regionStylePresetSaved');
+      this.syncPresetButtons();
+    } catch {
+      this.$<HTMLSpanElement>('st-preset-status').textContent = this.tr('regionStylePresetError');
+    }
+  }
+
+  private async deletePreset(): Promise<void> {
+    await this.presetsReady;
+    const select = this.$<HTMLSelectElement>('st-presets');
+    const name = select.value;
+    if (!name) return;
+    this.presets = this.presets.filter((preset) => preset.name !== name);
+    try {
+      await chrome.storage.local.set({ [STYLE_PRESETS_KEY]: this.presets });
+      this.renderPresets();
+      this.$<HTMLSpanElement>('st-preset-status').textContent = '';
+    } catch {
+      this.$<HTMLSpanElement>('st-preset-status').textContent = this.tr('regionStylePresetError');
+    }
   }
 
   /** Fills the font picker; a font the list doesn't have (backend offline, or
@@ -156,6 +253,7 @@ export class StyleControls {
     this.$<HTMLInputElement>('st-vertical').checked = s.vertical === true;
     this.syncColorVisibility();
     this.syncOutputs();
+    this.syncPresetButtons();
   }
 
   get(): RegionStyle | undefined {

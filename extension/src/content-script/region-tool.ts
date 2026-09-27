@@ -44,7 +44,6 @@ const sessionRegions = new Map<string, StoredRegion[]>(); // rawUrl -> regions
 const sessionEraseMasks = new Map<string, string | undefined>(); // rawUrl -> cumulative eraser mask (base64 PNG)
 let selecting = false;
 let closeEditor: (() => void) | null = null;
-
 export function initRegionTool(d: RegionToolDeps): void {
   deps = d;
 }
@@ -371,7 +370,7 @@ export function startStyleBubble(
   box: RegionBoxNorm,
   text: string,
   translation: string,
-  onCommitted: () => void,
+  onCommitted: (text: string, translation: string) => void,
 ): void {
   const rect = img.getBoundingClientRect();
   const sel: Rect = {
@@ -451,7 +450,7 @@ interface EditorSeed {
   /** Open the "Text style" section straight away (the reader came here to style this text). */
   openStyle?: boolean;
   /** Runs once Apply has succeeded — e.g. to drop the detected bubble this region replaces. */
-  onCommitted?: () => void;
+  onCommitted?: (text: string, translation: string) => void;
 }
 
 async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed?: EditorSeed, editRegionId?: string): Promise<void> {
@@ -464,13 +463,16 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   // Opened from a region's own hit target: that exact region, even where several overlap.
   const existing = seed ? null : (editRegionId ? all.find((r) => r.id === editRegionId) ?? null : overlapsExisting(box, all));
   const region: StoredRegion = existing ?? { id: crypto.randomUUID(), box, text: seed?.text ?? '', translation: seed?.translation ?? '' };
+  const editingBox: RegionBoxNorm = { ...region.box };
 
   const outline = document.createElement('div');
-  outline.style.cssText = `position:fixed;z-index:${Z};left:${sel.left}px;top:${sel.top}px;width:${sel.right - sel.left}px;height:${sel.bottom - sel.top}px;border:2px solid #7aa2ff;border-radius:4px;pointer-events:none;`;
+  outline.setAttribute('popover', 'manual');
+  outline.style.cssText = `position:fixed;z-index:${Z};border:2px solid #7aa2ff;border-radius:4px;pointer-events:none;box-sizing:border-box;`;
 
   const host = document.createElement('div');
   host.id = 'mt-region-editor';
-  host.style.cssText = `position:fixed;z-index:${Z};width:330px;`;
+  host.setAttribute('popover', 'manual');
+  host.style.cssText = `position:fixed;z-index:${Z};width:330px;margin:0;border:0;padding:0;background:transparent;color:inherit;overflow:visible;inset:auto;max-width:none;`;
   const shadow = host.attachShadow({ mode: 'open' });
   const tr = deps.tr;
   shadow.innerHTML = `
@@ -493,9 +495,19 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
       .spacer{flex:1}
       .status{font-size:11px;color:#9fb0cf;min-height:14px}
       .status.err{color:#f87171}
+      .title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+      details.region-list{border-top:1px solid rgba(122,162,255,.2);padding-top:6px}
+      details.region-list summary{cursor:pointer;font-size:11px;color:#9fb0cf}
+      .region-list-items{display:grid;gap:4px;max-height:120px;overflow:auto;margin-top:6px}
+      .region-list-item{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .region-list-item[aria-current=true]{border-color:#7aa2ff;background:rgba(122,162,255,.14)}
     </style>
     <div class="card">
-      <div class="title">${tr('regionTitle')}</div>
+      <div class="title-row"><div class="title">${tr('regionTitle')}</div><button id="resize-box" type="button" aria-pressed="false">${tr('regionResizeBox')}</button></div>
+      <details class="region-list" id="region-list-box">
+        <summary>${tr('regionListTitle')} (${all.filter((item) => !item.restoreOnly).length})</summary>
+        <div class="region-list-items" id="region-list-items"></div>
+      </details>
       <label>${tr('regionOriginalLabel')}</label>
       <textarea id="orig"></textarea>
       <div class="row"><button id="ai" type="button">${tr('regionTranslateAi')}</button></div>
@@ -534,7 +546,7 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   // Per-region text style: prefilled from what was saved, open when there is
   // one (or the reader came from a bubble's Style button), fonts filled in as
   // soon as the backend answers.
-  const styleControls = new StyleControls(shadow);
+  const styleControls = new StyleControls(shadow, tr);
   styleControls.set(region.style);
   if (styleControls.isCustomised() || seed?.openStyle) styleControls.open();
   void deps.listFonts().then((fonts) => { styleControls.setFonts(fonts, region.style?.font); place(); });
@@ -542,18 +554,91 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   const setStatus = (msg: string, err = false): void => { status.textContent = msg; status.classList.toggle('err', err); };
   const setBusy = (busy: boolean): void => { aiBtn.disabled = busy; applyBtn.disabled = busy; delBtn.disabled = busy; };
 
-  // Place the card just below the selection, or above it if there's no room.
+  const screenRect = (): Rect => {
+    const bounds = img.getBoundingClientRect();
+    return {
+      left: bounds.left + editingBox.x1 * bounds.width,
+      top: bounds.top + editingBox.y1 * bounds.height,
+      right: bounds.left + editingBox.x2 * bounds.width,
+      bottom: bounds.top + editingBox.y2 * bounds.height,
+    };
+  };
+  const corners = ['nw', 'ne', 'sw', 'se'] as const;
+  const handles = corners.map((corner) => {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.setAttribute('popover', 'manual');
+    handle.className = 'mt-region-resize-handle';
+    handle.dataset.corner = corner;
+    handle.setAttribute('aria-label', tr('regionResizeHandle'));
+    handle.style.cssText = `position:fixed;z-index:${Z};width:14px;height:14px;padding:0;border:2px solid #f8fafc;border-radius:3px;background:#2563eb;box-shadow:0 1px 5px #000;cursor:${corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize'};transform:translate(-50%,-50%);`;
+    handle.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handle.setPointerCapture(event.pointerId);
+      const bounds = img.getBoundingClientRect();
+      const initial = { ...editingBox };
+      const minX = Math.min(0.02, 12 / Math.max(1, bounds.width));
+      const minY = Math.min(0.02, 12 / Math.max(1, bounds.height));
+      const onMove = (move: PointerEvent): void => {
+        const x = Math.max(0, Math.min(1, (move.clientX - bounds.left) / bounds.width));
+        const y = Math.max(0, Math.min(1, (move.clientY - bounds.top) / bounds.height));
+        if (corner.includes('w')) editingBox.x1 = Math.min(x, initial.x2 - minX);
+        else editingBox.x2 = Math.max(x, initial.x1 + minX);
+        if (corner.includes('n')) editingBox.y1 = Math.min(y, initial.y2 - minY);
+        else editingBox.y2 = Math.max(y, initial.y1 + minY);
+        place();
+      };
+      const onUp = (): void => {
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
+    });
+    return handle;
+  });
+
+  // Place the editor beside the current box and keep the outline/handles
+  // attached to its image-relative geometry as corners move.
   const place = (): void => {
+    const rect = screenRect();
+    outline.style.left = `${rect.left}px`;
+    outline.style.top = `${rect.top}px`;
+    outline.style.width = `${rect.right - rect.left}px`;
+    outline.style.height = `${rect.bottom - rect.top}px`;
     const h = host.getBoundingClientRect().height || 260;
-    let top = sel.bottom + 8;
-    if (top + h > window.innerHeight - 8) top = sel.top - h - 8;
-    // ...and whatever happens never let it hang off the screen: its Apply button
-    // would be out of reach (the card scrolls inside itself, the page can't).
+    let top = rect.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = rect.top - h - 8;
     top = Math.max(8, Math.min(top, window.innerHeight - h - 8));
     host.style.top = `${top}px`;
-    host.style.left = `${Math.min(Math.max(8, sel.left), window.innerWidth - 338)}px`;
+    host.style.left = `${Math.min(Math.max(8, rect.left), window.innerWidth - 338)}px`;
+    const points: Record<(typeof corners)[number], [number, number]> = {
+      nw: [rect.left, rect.top], ne: [rect.right, rect.top],
+      sw: [rect.left, rect.bottom], se: [rect.right, rect.bottom],
+    };
+    handles.forEach((handle, index) => {
+      const [x, y] = points[corners[index]];
+      handle.style.left = `${x}px`;
+      handle.style.top = `${y}px`;
+    });
   };
-  document.body.append(outline, host);
+  document.body.append(outline, host, ...handles);
+  outline.showPopover();
+  host.showPopover();
+  const resizeToggle = $<HTMLButtonElement>('resize-box');
+  resizeToggle.addEventListener('click', () => {
+    const enabled = resizeToggle.getAttribute('aria-pressed') !== 'true';
+    resizeToggle.setAttribute('aria-pressed', String(enabled));
+    resizeToggle.textContent = tr(enabled ? 'regionResizeDone' : 'regionResizeBox');
+    handles.forEach((handle) => {
+      if (enabled) handle.showPopover();
+      else handle.hidePopover();
+    });
+    place();
+  });
   place();
   // The card grows and shrinks (the Text style section opening, the font list
   // arriving, a status line appearing): follow it.
@@ -562,8 +647,14 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
 
   const close = (): void => {
     resizeObserver.disconnect();
+    try { outline.hidePopover(); } catch { /* already closed */ }
+    try { host.hidePopover(); } catch { /* already closed */ }
     outline.remove();
     host.remove();
+    handles.forEach((handle) => {
+      try { handle.hidePopover(); } catch { /* not currently shown */ }
+      handle.remove();
+    });
     document.removeEventListener('keydown', onKey, true);
     if (closeEditor === close) closeEditor = null;
   };
@@ -571,6 +662,31 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
   document.addEventListener('keydown', onKey, true);
   closeEditor = close;
   $<HTMLButtonElement>('cancel').addEventListener('click', close);
+
+  const regionListItems = $<HTMLDivElement>('region-list-items');
+  const listedRegions = all.filter((item) => !item.restoreOnly);
+  if (!listedRegions.length) {
+    const empty = document.createElement('div');
+    empty.className = 'status';
+    empty.textContent = tr('regionListEmpty');
+    regionListItems.append(empty);
+  }
+  for (const item of listedRegions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'region-list-item';
+    button.dataset.regionId = item.id;
+    button.setAttribute('aria-current', String(item.id === region.id));
+    button.textContent = `${item.text || tr('regionOriginalLabel')} → ${item.translation || '—'}`;
+    regionListItems.append(button);
+  }
+  regionListItems.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-region-id]');
+    const id = button?.dataset.regionId;
+    if (!id || id === region.id) return;
+    close();
+    void editManualRegion(img, rawUrl, id);
+  });
 
   const others = all.filter((r) => r.id !== region.id);
   const commit = async (next: StoredRegion[]): Promise<void> => {
@@ -603,8 +719,8 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
     setBusy(true);
     setStatus(tr('regionApplying'));
     try {
-      await commit([...others, { ...region, text: orig.value.trim(), translation: trans.value.trim(), style: styleControls.get() }, ...(seed?.extraCommit ?? [])]);
-      seed?.onCommitted?.();
+      await commit([...others, { ...region, box: editingBox, text: orig.value.trim(), translation: trans.value.trim(), style: styleControls.get() }, ...(seed?.extraCommit ?? [])]);
+      seed?.onCommitted?.(orig.value.trim(), trans.value.trim());
       close();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e), true);

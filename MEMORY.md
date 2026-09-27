@@ -55,17 +55,19 @@ Advanced/pro-translator features must not be scattered onto the main Translate/L
 - Pro tab (supersampling-factor select) + CBZ export (zero-padded `page_NNN.png`, unlike the URL-derived ZIP names).
 - **PDF export (2026-09-25):** scanner toolbar's "Export PDF" button, next to Export CBZ. `content-script/index.ts:buildPdf()` hand-rolls a minimal PDF rather than pulling in a library (jsPDF etc. would meaningfully bloat the content-script bundle) — one JPEG-per-page (`pngBase64ToJpegPage()` re-encodes each translated PNG via canvas, since PDF has no native PNG filter but `/Filter /DCTDecode` accepts a JPEG byte stream unmodified), MediaBox = image pixel dimensions as points (1:1 — fine for on-screen reading, not print-accurate). Verified with a real parser (`pdf-lib`, test-only devDependency) actually opening the generated file and confirming page count/size, not just a magic-byte check — this matters because a hand-rolled xref table is exactly the kind of thing that silently produces a corrupt-but-plausible-looking file if the byte-offset math is off by one anywhere.
 
+## Done 2026-09-27 (branch feat/manual-editing-qa)
+
+- **Scanner Review text pane:** aggregates current-session source/translation bubble metadata across translated pages; search filters rows, blank and source-identical text are marked as checks, and Edit opens the existing manual-region editor on that bubble. This is a review aid, not an automatic quality score. Translated-image cache entries do not retain bubble transcripts, so cache-only pages explain that re-translation is needed rather than pretending the text is available.
+- **Manual region management:** the editor's Saved text areas list navigates all drawable regions on the current page. Four corner handles resize the current box in normalized image coordinates; changes reach storage/render only on Apply, while Cancel leaves the saved box alone.
+- **Style presets:** up to 20 named per-region styles persist in `chrome.storage.local` (`mtRegionStylePresets`), with save/apply/delete controls in the Text style section.
+- **Reader fixture:** `tests/fixtures/test-site-lazy/` swaps a placeholder for a chapter image through `IntersectionObserver`; a Playwright test exercises the actual manual OCR/render flow after the lazy source changes. This is not a live-site check; the specific manga site and access/session are still needed to verify the toolchain in production.
+
 ## Roadmap — still open
 
-- **Resize handles for a moved bubble** (currently: drag a brand-new box only, no corner/edge drag on the existing outline).
-- **Manual region tool only works on `<img>` tags** — a page using CSS `background-image` for its pages isn't supported (`findTargetImage` in `region-tool.ts` only scans `img`).
-- **Vertical or rotated text isn't laid out specially** in the manual region tool (`render_regions` calls `render_text_skia` without `vertical_stack`/`rotation_deg`), even though the main pipeline supports it.
-- **No screen listing a page's saved manual regions** — to edit one you must re-select the same spot (>50% overlap opens it in edit mode instead of creating a new one).
-- **True manual color/vertical-stack override** for typed text (bold/italic markdown-wrapping is done; a real style toolbar or schema field for the Fix-hint/manual-region paths is not).
+- **Manual region tool only works on `<img>` tags** — a page using CSS `background-image` for its pages isn't supported (`findTargetImageForRect` in `region-tool.ts` only scans `img`).
 - **Lightweight project/chapter tracker** (story → chapter → export-timestamp ledger; explicitly NOT an automatic multi-tab crawler — rejected as too fragile, no generic way to know a chapter's URL structure across sites).
-- **Batch QA/proofread view** before export.
 - **Team collaboration / shared Story DB with roles** — the big one; don't start without the repo owner explicitly deciding they want a real multi-user product surface.
-- **Verify the whole manual-editing toolchain on a real manga site** (see limitation note above).
+- **Verify the whole manual-editing toolchain on a real manga site** (fixture coverage added, but no live site was specified or tested).
 - **Popup onboarding for a new install** — scope undecided (banner? checklist? doc link?) — ask before building.
 - **Auto-translate resume after reload / extension re-enable — DECIDED 2026-09-26: keep as is (no auto-resume).** Repo owner's answer; the master toggle's "no surprise auto-translate" promise stands. Don't re-ask.
 
@@ -74,7 +76,7 @@ Advanced/pro-translator features must not be scattered onto the main Translate/L
 - **"Text reading" select (Translate tab, `#f-text-reading`)** — one control drives the backend's `(translation_mode, ocr_method)` pair: AI reads image = `one-step`+`LLM` (default); manga-ocr / PaddleOCR-VL = `two-step`+that OCR. The backend and the request builders (background + content-script) already carried both fields; only the popup UI was missing. It also drives Select text area's OCR (`/region/ocr` reads `ocr_method`). Verified with real manga-ocr on the sample page: 0 image parts reach the LLM, and the Pro-tab "before translation" rule rewrites the OCR text exactly. Caveats: manga-ocr is Japanese-only; the AI no longer sees bubble images. Not run with real PaddleOCR-VL (untested here) or a real LLM.
 - **Story DB glossary "Enforce exactly"** — `StoryGlossaryTerm(Config).enforce/variants` (stored inline in `glossary_json`, no schema change; old rows default off). `core/text/replacements.py:apply_glossary`: ONE case-insensitive alternation pass, longest match first, the row's own translation as an identity alternative — so replaced text is never rescanned ("Shadow"→"Shadow Style" can't become "Shadow Style Style"); Latin word edges are guarded ("Kage" ≠ inside "Kagerou"), CJK edges aren't. Runs in `core/pipeline.py` after the user's post rules and in `/region/translate`. Excluded from the translation-cache key (post-cache, like the post dictionary). **Limit stated in the UI/README:** it only fixes what the model actually wrote (the term's own spelling or a listed variant), not an unlisted alternative translation. My earlier "names are always right" pitch overstated this.
 
-**Still open / ideas:** QA/proofread view before export; list of a page's manual regions; resize handles for a moved bubble; vertical text in Select text area; `background-image` pages; `/app` gets lettering + dictionary fields (backend ready, UI only).
+**Still open / ideas:** vertical text in Select text area; `background-image` pages; `/app` gets lettering + dictionary fields (backend ready, UI only).
 
 ## Done 2026-09-26 (branch chore/cleanup-ci-model-download-status)
 

@@ -73,6 +73,11 @@ const EN_MESSAGES = {
   regionApply: 'Apply',
   regionCancel: 'Cancel',
   regionDelete: 'Delete',
+  regionListTitle: 'Saved text areas',
+  regionListEmpty: 'No other saved text areas on this page.',
+  regionResizeBox: 'Resize box',
+  regionResizeDone: 'Finish resizing',
+  regionResizeHandle: 'Resize text area corner',
   regionNeedText: 'Enter or read some text first.',
   regionTranslating: 'Translating…',
   regionApplying: 'Applying…',
@@ -118,6 +123,13 @@ const EN_MESSAGES = {
   regionStyleVertical: "Vertical",
   regionStyleVerticalHint: "one column",
   regionStyleReset: "Reset style",
+  regionStylePreset: "Style preset",
+  regionStylePresetChoose: "Choose a preset...",
+  regionStylePresetName: "Preset name",
+  regionStylePresetSave: "Save preset",
+  regionStylePresetDelete: "Delete preset",
+  regionStylePresetSaved: "Preset saved",
+  regionStylePresetError: "Could not save preset",
   regionStyleHint: "Anything left on Auto follows your global settings (Pro tab). A fixed size may overflow the box. Vertical suits short text such as sound effects.",
   regionStyleFontMissing: "The font “{font}” has no glyphs for: {chars} — they were left out. Pick another font.",
   zoomTooltip: 'Click to view full size',
@@ -134,6 +146,13 @@ const EN_MESSAGES = {
   btnExportAll: 'Export',
   btnExportCbz: 'Export CBZ',
   btnExportPdf: 'Export PDF',
+  btnProofread: 'Review text',
+  proofreadSummary: '{count} text areas · {flagged} to check',
+  proofreadNoMetadata: 'Text details are unavailable for this cached page. Re-translate it to review the text.',
+  proofreadEdit: 'Edit',
+  proofreadEmptyTranslation: 'Empty translation',
+  proofreadSameText: 'Same as source',
+  proofreadSearch: 'Search source or translation',
   exportingStatus: 'Exporting...',
   exportNoneTranslated: 'No translated pages to export yet',
   exportDone: 'Exported {count} page(s)',
@@ -209,6 +228,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionApply: 'Ap dung',
     regionCancel: 'Huy',
     regionDelete: 'Xoa',
+    regionListTitle: 'Vung chu da luu',
+    regionListEmpty: 'Trang nay khong co vung chu nao khac.',
+    regionResizeBox: 'Doi kich thuoc khung',
+    regionResizeDone: 'Xong doi kich thuoc',
+    regionResizeHandle: 'Doi kich thuoc goc vung chu',
     regionNeedText: 'Hay nhap hoac doc chu truoc.',
     regionTranslating: 'Dang dich…',
     regionApplying: 'Dang ap dung…',
@@ -254,6 +278,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionStyleVertical: "Chu doc",
     regionStyleVerticalHint: "mot cot",
     regionStyleReset: "Dat lai kieu",
+    regionStylePreset: "Mau kieu chu",
+    regionStylePresetChoose: "Chon mau...",
+    regionStylePresetName: "Ten mau",
+    regionStylePresetSave: "Luu mau",
+    regionStylePresetDelete: "Xoa mau",
+    regionStylePresetSaved: "Da luu mau",
+    regionStylePresetError: "Khong luu duoc mau",
     regionStyleHint: "Muc de Tu dong se theo cai dat chung (tab Pro). Co chu co dinh co the tran khung. Chu doc hop voi doan ngan nhu tieng dong.",
     regionStyleFontMissing: "Font “{font}” khong co cac ky tu: {chars} — chung da bi bo qua. Hay chon font khac.",
     zoomTooltip: 'Bam de xem anh phong to',
@@ -270,6 +301,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     btnExportAll: 'Xuat',
     btnExportCbz: 'Xuat CBZ',
     btnExportPdf: 'Xuat PDF',
+    btnProofread: 'Ra soat ban dich',
+    proofreadSummary: '{count} vung chu · {flagged} can kiem tra',
+    proofreadNoMetadata: 'Trang nay chi con anh trong bo nho dem, chua co chi tiet van ban. Hay dich lai de ra soat.',
+    proofreadEdit: 'Sua',
+    proofreadEmptyTranslation: 'Ban dich trong',
+    proofreadSameText: 'Giong chu goc',
+    proofreadSearch: 'Tim chu goc hoac ban dich',
     exportingStatus: 'Dang xuat...',
     exportNoneTranslated: 'Chua co trang nao da dich de xuat',
     exportDone: 'Da xuat {count} trang',
@@ -340,6 +378,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionApply: '应用',
     regionCancel: '取消',
     regionDelete: '删除',
+    regionListTitle: '已保存的文本区域',
+    regionListEmpty: '此页面没有其他已保存的文本区域。',
+    regionResizeBox: '调整区域大小',
+    regionResizeDone: '完成调整',
+    regionResizeHandle: '调整文本区域角点',
     regionNeedText: '请先输入或识别文字。',
     regionTranslating: '翻译中…',
     regionApplying: '应用中…',
@@ -385,6 +428,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionStyleVertical: "竖排",
     regionStyleVerticalHint: "单列",
     regionStyleReset: "重置样式",
+    regionStylePreset: "样式预设",
+    regionStylePresetChoose: "选择预设...",
+    regionStylePresetName: "预设名称",
+    regionStylePresetSave: "保存预设",
+    regionStylePresetDelete: "删除预设",
+    regionStylePresetSaved: "预设已保存",
+    regionStylePresetError: "无法保存预设",
     regionStyleHint: "保持“自动”的项目会沿用全局设置（Pro 标签页）。固定字号可能超出框。竖排适合拟声词等短文字。",
     regionStyleFontMissing: "字体“{font}”没有这些字符的字形：{chars} — 已被省略。请换一个字体。",
     zoomTooltip: '点击查看大图',
@@ -401,6 +451,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     btnExportAll: '导出',
     btnExportCbz: '导出 CBZ',
     btnExportPdf: '导出 PDF',
+    btnProofread: '校对文本',
+    proofreadSummary: '{count} 个文本区域 · {flagged} 项待检查',
+    proofreadNoMetadata: '此缓存页面没有文本详情。请重新翻译以校对文本。',
+    proofreadEdit: '编辑',
+    proofreadEmptyTranslation: '译文为空',
+    proofreadSameText: '与原文相同',
+    proofreadSearch: '搜索原文或译文',
     exportingStatus: '正在导出...',
     exportNoneTranslated: '还没有已翻译的页面可导出',
     exportDone: '已导出 {count} 页',
@@ -471,6 +528,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionApply: '適用',
     regionCancel: 'キャンセル',
     regionDelete: '削除',
+    regionListTitle: '保存したテキスト領域',
+    regionListEmpty: 'このページに他の保存済みテキスト領域はありません。',
+    regionResizeBox: '領域サイズを変更',
+    regionResizeDone: 'サイズ変更を終了',
+    regionResizeHandle: 'テキスト領域の角を変更',
     regionNeedText: '先に文字を入力または読み取ってください。',
     regionTranslating: '翻訳中…',
     regionApplying: '適用中…',
@@ -516,6 +578,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionStyleVertical: "縦書き",
     regionStyleVerticalHint: "1列",
     regionStyleReset: "スタイルをリセット",
+    regionStylePreset: "スタイルプリセット",
+    regionStylePresetChoose: "プリセットを選択...",
+    regionStylePresetName: "プリセット名",
+    regionStylePresetSave: "プリセットを保存",
+    regionStylePresetDelete: "プリセットを削除",
+    regionStylePresetSaved: "プリセットを保存しました",
+    regionStylePresetError: "プリセットを保存できません",
     regionStyleHint: "「自動」のままの項目は全体設定（Pro タブ）に従います。固定サイズは枠からはみ出すことがあります。縦書きは効果音などの短い文字向きです。",
     regionStyleFontMissing: "フォント「{font}」には次の文字のグリフがありません：{chars} — 省略されました。別のフォントを選んでください。",
     zoomTooltip: 'クリックして拡大表示',
@@ -532,6 +601,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     btnExportAll: 'エクスポート',
     btnExportCbz: 'CBZをエクスポート',
     btnExportPdf: 'PDFをエクスポート',
+    btnProofread: '訳文を確認',
+    proofreadSummary: '{count} 件のテキスト · 要確認 {flagged} 件',
+    proofreadNoMetadata: 'このキャッシュ済みページにはテキスト情報がありません。確認するには再翻訳してください。',
+    proofreadEdit: '編集',
+    proofreadEmptyTranslation: '訳文が空です',
+    proofreadSameText: '原文と同じ',
+    proofreadSearch: '原文または訳文を検索',
     exportingStatus: 'エクスポート中...',
     exportNoneTranslated: 'まだエクスポートできる翻訳済みページがありません',
     exportDone: '{count} ページをエクスポートしました',
@@ -602,6 +678,11 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionApply: '적용',
     regionCancel: '취소',
     regionDelete: '삭제',
+    regionListTitle: '저장된 텍스트 영역',
+    regionListEmpty: '이 페이지에 다른 저장된 텍스트 영역이 없습니다.',
+    regionResizeBox: '영역 크기 조절',
+    regionResizeDone: '크기 조절 완료',
+    regionResizeHandle: '텍스트 영역 모서리 크기 조절',
     regionNeedText: '먼저 글자를 입력하거나 읽어 오세요.',
     regionTranslating: '번역 중…',
     regionApplying: '적용 중…',
@@ -647,6 +728,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     regionStyleVertical: "세로쓰기",
     regionStyleVerticalHint: "한 줄",
     regionStyleReset: "스타일 초기화",
+    regionStylePreset: "스타일 프리셋",
+    regionStylePresetChoose: "프리셋 선택...",
+    regionStylePresetName: "프리셋 이름",
+    regionStylePresetSave: "프리셋 저장",
+    regionStylePresetDelete: "프리셋 삭제",
+    regionStylePresetSaved: "프리셋 저장됨",
+    regionStylePresetError: "프리셋을 저장할 수 없습니다",
     regionStyleHint: "‘자동’으로 둔 항목은 전체 설정(Pro 탭)을 따릅니다. 고정 크기는 상자를 넘칠 수 있습니다. 세로쓰기는 효과음 같은 짧은 글자에 적합합니다.",
     regionStyleFontMissing: "글꼴 “{font}”에는 다음 글자의 글리프가 없습니다: {chars} — 생략되었습니다. 다른 글꼴을 고르세요.",
     zoomTooltip: '클릭하여 크게 보기',
@@ -663,6 +751,13 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     btnExportAll: '내보내기',
     btnExportCbz: 'CBZ 내보내기',
     btnExportPdf: 'PDF 내보내기',
+    btnProofread: '번역 검토',
+    proofreadSummary: '텍스트 {count}개 · 확인 필요 {flagged}개',
+    proofreadNoMetadata: '캐시된 페이지에 텍스트 정보가 없습니다. 검토하려면 다시 번역하세요.',
+    proofreadEdit: '편집',
+    proofreadEmptyTranslation: '번역 없음',
+    proofreadSameText: '원문과 동일',
+    proofreadSearch: '원문 또는 번역 검색',
     exportingStatus: '내보내는 중...',
     exportNoneTranslated: '아직 내보낼 번역된 페이지가 없습니다',
     exportDone: '{count}개 페이지를 내보냈습니다',
@@ -753,6 +848,7 @@ let abortCollect = false;
 let abortTranslate = false;
 let currentPages: PageEntry[] = [];
 let currentShadow: ShadowRoot | null = null;
+let scannerAutoCloseTimer: number | undefined;
 let totalChapterPages = 0;
 let seenUrls = new Set<string>();
 let imageCache = new Map<string, string>();
@@ -1088,6 +1184,26 @@ const AUTO_RETRY_MAX = 3;
 // back from a cache hit), so the affordance is only available for pages
 // translated fresh in this session.
 const lastTranslateInfo = new WeakMap<HTMLImageElement, { bubbles: BubbleInfo[]; body: TranslateRequest; url: string }>();
+const translatedBubblesByUrl = new Map<string, BubbleInfo[]>();
+const REVIEW_METADATA_LIMIT = 200;
+
+function rememberTranslateInfo(img: HTMLImageElement, info: { bubbles: BubbleInfo[]; body: TranslateRequest; url: string }): void {
+  lastTranslateInfo.set(img, info);
+  // The scanner only needs transcript and box data. Do not keep optional
+  // supersampled crops alive here; they can be large for a long chapter.
+  translatedBubblesByUrl.delete(info.url);
+  translatedBubblesByUrl.set(info.url, info.bubbles.map((bubble) => ({
+    bbox: bubble.bbox,
+    confidence: bubble.confidence,
+    originalText: bubble.originalText,
+    translatedText: bubble.translatedText,
+  })));
+  while (translatedBubblesByUrl.size > REVIEW_METADATA_LIMIT) {
+    const oldest = translatedBubblesByUrl.keys().next().value;
+    if (!oldest) break;
+    translatedBubblesByUrl.delete(oldest);
+  }
+}
 let activeFixPopover: HTMLElement | null = null;
 let activeBubbleMagnifier: HTMLElement | null = null;
 // While a fix-hint re-translate is in flight, don't let auto-translate start
@@ -1848,7 +1964,7 @@ async function translateAndApply(img: HTMLImageElement, url: string): Promise<vo
     const translatedB64 = result.translated_image;
     const dataUrl = `data:image/png;base64,${translatedB64}`;
     const bubbles = normalizeBubbles(result.bubbles);
-    lastTranslateInfo.set(img, { bubbles, body, url });
+    rememberTranslateInfo(img, { bubbles, body, url });
 
     // Cache it (both the fast within-session URL lookup and the persisted
     // content-addressed lookup that survives reloads/URL changes)
@@ -2378,7 +2494,7 @@ async function retranslatePage(img: HTMLImageElement): Promise<void> {
     const translatedB64 = result.translated_image;
     const bubbles = normalizeBubbles(result.bubbles);
     const contentKey = await contentCacheKey(imgData, settings.config.outputLanguage);
-    lastTranslateInfo.set(img, { bubbles, body, url });
+    rememberTranslateInfo(img, { bubbles, body, url });
     rememberTranslated(url, translatedB64);
     rememberTranslatedContent(contentKey, translatedB64);
     rememberTranslatedThumbnail(img, translatedB64, settings.config.outputLanguage);
@@ -2524,7 +2640,7 @@ function applyTranslatedImageToPage(
     applied = true;
 
     if (bubbles && body) {
-      lastTranslateInfo.set(img, { bubbles, body, url: rawUrl });
+      rememberTranslateInfo(img, { bubbles, body, url: rawUrl });
       renderBubbleFixTargets(img, bubbles);
     }
   }
@@ -3279,7 +3395,7 @@ async function submitFixHint(img: HTMLImageElement, bubbleIndex: number, bubble:
     await saveTranslatedCacheEntry(info.url, translatedB64);
     await saveTranslatedContentCacheEntry(contentKey, translatedB64);
 
-    lastTranslateInfo.set(img, { bubbles: newBubbles, body: info.body, url: info.url });
+    rememberTranslateInfo(img, { bubbles: newBubbles, body: info.body, url: info.url });
     applyTranslatedOverlay(img, dataUrl);
     renderBubbleFixTargets(img, newBubbles);
     return true;
@@ -4345,8 +4461,17 @@ function buildScannerHTML(): string {
         <button class="mts-btn-toolbar" data-action="export-all">${tr('btnExportAll')}</button>
         <button class="mts-btn-toolbar" data-action="export-cbz">${tr('btnExportCbz')}</button>
         <button class="mts-btn-toolbar" data-action="export-pdf">${tr('btnExportPdf')}</button>
+        <button class="mts-btn-toolbar" data-action="proofread">${tr('btnProofread')}</button>
         <button class="mts-btn-primary mts-btn-translate" data-action="translate" disabled>${tr('translate')}</button>
       </div>
+      <section class="mts-review" id="mts-review" hidden>
+        <header class="mts-review-header">
+          <strong id="mts-review-summary"></strong>
+          <input id="mts-review-search" type="search" placeholder="${tr('proofreadSearch')}" />
+          <button class="mts-btn-toolbar" data-action="proofread-close">${tr('close')}</button>
+        </header>
+        <div class="mts-review-list" id="mts-review-list"></div>
+      </section>
       <div class="mts-grid">${cards}</div>
     </div>
     <div class="mts-lightbox" id="mts-lightbox" style="display:none">
@@ -4357,6 +4482,79 @@ function buildScannerHTML(): string {
       <img class="mts-hover-preview-img" id="mts-hover-preview-img" src="" alt="" />
     </div>
   `;
+}
+
+function renderProofreadView(shadow: ShadowRoot): void {
+  const list = shadow.querySelector<HTMLElement>('#mts-review-list');
+  const summary = shadow.querySelector<HTMLElement>('#mts-review-summary');
+  if (!list || !summary) return;
+  list.replaceChildren();
+
+  let textCount = 0;
+  let flaggedCount = 0;
+  for (const page of currentPages) {
+    if (!translatedCache.has(page.rawUrl)) continue;
+    const bubbles = translatedBubblesByUrl.get(page.rawUrl);
+    if (!bubbles) {
+      const section = document.createElement('section');
+      section.className = 'mts-review-page';
+      const title = document.createElement('h3');
+      title.textContent = tr('pageAlt', { page: page.index + 1 });
+      const note = document.createElement('p');
+      note.className = 'mts-review-note';
+      note.textContent = tr('proofreadNoMetadata');
+      section.append(title, note);
+      list.append(section);
+      continue;
+    }
+
+    const section = document.createElement('section');
+    section.className = 'mts-review-page';
+    const title = document.createElement('h3');
+    title.textContent = tr('pageAlt', { page: page.index + 1 });
+    section.append(title);
+
+    bubbles.forEach((bubble, bubbleIndex) => {
+      textCount++;
+      const source = bubble.originalText?.trim() ?? '';
+      const translation = bubble.translatedText.trim();
+      const issue = !translation
+        ? tr('proofreadEmptyTranslation')
+        : source && source === translation ? tr('proofreadSameText') : '';
+      if (issue) flaggedCount++;
+
+      const row = document.createElement('article');
+      row.className = `mts-review-row${issue ? ' flagged' : ''}`;
+      row.dataset.search = `${source}\n${translation}`.toLocaleLowerCase();
+      const texts = document.createElement('div');
+      texts.className = 'mts-review-texts';
+      const sourceEl = document.createElement('p');
+      sourceEl.className = 'mts-review-source';
+      sourceEl.textContent = source || '—';
+      const translationEl = document.createElement('p');
+      translationEl.className = 'mts-review-translation';
+      translationEl.textContent = translation || '—';
+      texts.append(sourceEl, translationEl);
+      row.append(texts);
+      if (issue) {
+        const issueEl = document.createElement('span');
+        issueEl.className = 'mts-review-issue';
+        issueEl.textContent = issue;
+        row.append(issueEl);
+      }
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'mts-btn-toolbar';
+      edit.dataset.action = 'proofread-edit';
+      edit.dataset.pageIndex = String(page.index);
+      edit.dataset.bubbleIndex = String(bubbleIndex);
+      edit.textContent = tr('proofreadEdit');
+      row.append(edit);
+      section.append(row);
+    });
+    list.append(section);
+  }
+  summary.textContent = tr('proofreadSummary', { count: textCount, flagged: flaggedCount });
 }
 
 function reRenderGrid(): void {
@@ -4404,6 +4602,49 @@ function bindScanner(shadow: ShadowRoot): void {
   const lightboxCloseBtn = shadow.querySelector<HTMLButtonElement>('[data-action="lightbox-close"]')!;
   const hoverPreview = shadow.querySelector<HTMLElement>('#mts-hover-preview')!;
   const hoverPreviewImg = shadow.querySelector<HTMLImageElement>('#mts-hover-preview-img')!;
+  const reviewPanel = shadow.querySelector<HTMLElement>('#mts-review')!;
+  const reviewList = shadow.querySelector<HTMLElement>('#mts-review-list')!;
+  const reviewSearch = shadow.querySelector<HTMLInputElement>('#mts-review-search')!;
+  const proofreadBtn = shadow.querySelector<HTMLButtonElement>('[data-action="proofread"]')!;
+
+  proofreadBtn.addEventListener('click', () => {
+    if (scannerAutoCloseTimer !== undefined) {
+      window.clearTimeout(scannerAutoCloseTimer);
+      scannerAutoCloseTimer = undefined;
+    }
+    renderProofreadView(shadow);
+    grid.hidden = true;
+    reviewPanel.hidden = false;
+  });
+  shadow.querySelector<HTMLButtonElement>('[data-action="proofread-close"]')!.addEventListener('click', () => {
+    reviewPanel.hidden = true;
+    grid.hidden = false;
+  });
+  reviewSearch.addEventListener('input', () => {
+    const query = reviewSearch.value.trim().toLocaleLowerCase();
+    reviewList.querySelectorAll<HTMLElement>('.mts-review-row').forEach((row) => {
+      row.hidden = Boolean(query) && !row.dataset.search?.includes(query);
+    });
+  });
+  reviewList.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action="proofread-edit"]');
+    if (!button) return;
+    const page = currentPages.find((candidate) => candidate.index === Number(button.dataset.pageIndex));
+    const bubble = translatedBubblesByUrl.get(page?.rawUrl ?? '')?.[Number(button.dataset.bubbleIndex)];
+    if (!page || !bubble) return;
+    const img = Array.from(document.querySelectorAll<HTMLImageElement>('img')).find((candidate) => resolveMangaUrl(candidate) === page.rawUrl);
+    const box = img ? normalizedBubbleBox(img, bubble) : null;
+    if (!img || !box) { toast(tr('regionNoImage'), true); return; }
+    startStyleBubble(img, page.rawUrl, box, bubble.originalText ?? '', bubble.translatedText, (sourceText, translatedText) => {
+      const reviewed = translatedBubblesByUrl.get(page.rawUrl)?.[Number(button.dataset.bubbleIndex)];
+      if (reviewed) {
+        reviewed.originalText = sourceText;
+        reviewed.translatedText = translatedText;
+      }
+      removeBubbleFromFixTargets(img, Number(button.dataset.bubbleIndex));
+      renderProofreadView(shadow);
+    });
+  });
 
   // Prefer the translated version if this page has one — zooming in is
   // most useful to check the translation actually reads right, not just
@@ -4718,7 +4959,11 @@ function bindScanner(shadow: ShadowRoot): void {
       );
     }
 
-    setTimeout(closeScanner, 2500);
+    if (scannerAutoCloseTimer !== undefined) window.clearTimeout(scannerAutoCloseTimer);
+    scannerAutoCloseTimer = window.setTimeout(() => {
+      scannerAutoCloseTimer = undefined;
+      closeScanner();
+    }, 2500);
   });
 
   cancelBtn.addEventListener('click', () => { abortTranslate = true; });
@@ -5194,6 +5439,10 @@ function getDefaultSettings(): AppSettings {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function closeScanner(resumeAutoTranslate = true): void {
+  if (scannerAutoCloseTimer !== undefined) {
+    window.clearTimeout(scannerAutoCloseTimer);
+    scannerAutoCloseTimer = undefined;
+  }
   abortCollect = true;
   abortTranslate = true;
   const shouldResumeAutoTranslate = resumeAutoTranslate && scannerPausedAutoTranslate;
@@ -5375,6 +5624,30 @@ function injectStyles(shadow: ShadowRoot): void {
       flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px;
       display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px;
       background: #050710;
+    }
+    .mts-review { flex: 1; min-height: 0; overflow: hidden; background: #080c18; display: flex; flex-direction: column; }
+    #mts-review[hidden] { display: none; }
+    .mts-review-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(148,163,184,.18); }
+    .mts-review-header strong { margin-right: auto; font-size: 12px; color: #dce7f4; }
+    .mts-review-header input { width: min(280px, 36vw); min-width: 120px; padding: 6px 8px; border: 1px solid #34445c; border-radius: 5px; background: #101827; color: #e2e8f0; }
+    .mts-review-list { overflow: auto; padding: 10px 14px 18px; }
+    .mts-review-page { padding: 8px 0 12px; border-bottom: 1px solid rgba(148,163,184,.14); }
+    .mts-review-page h3 { margin: 0 0 7px; font-size: 12px; color: #93c5fd; }
+    .mts-review-note { margin: 0; color: #a7b3c4; font-size: 12px; line-height: 1.45; }
+    .mts-review-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(148,163,184,.1); }
+    .mts-review-texts { min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .mts-review-texts p { margin: 0; color: #cbd5e1; font-size: 12px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .mts-review-translation { color: #f1f5f9 !important; }
+    .mts-review-issue { color: #fbbf24; font-size: 11px; white-space: nowrap; }
+    .mts-review-row.flagged { background: rgba(245,158,11,.06); }
+    .mts-review-row[hidden] { display: none; }
+    @media (max-width: 700px) {
+      .mts-review-header { flex-wrap: wrap; }
+      .mts-review-header input { order: 3; width: 100%; }
+      .mts-review-row { grid-template-columns: minmax(0,1fr) auto; gap: 6px; }
+      .mts-review-texts { grid-template-columns: 1fr; gap: 4px; }
+      .mts-review-issue { grid-column: 1; }
+      .mts-review-row button { grid-column: 2; grid-row: 1 / span 2; }
     }
     .mts-grid::-webkit-scrollbar { width: 5px; }
     .mts-grid::-webkit-scrollbar-track { background: transparent; }
