@@ -171,13 +171,28 @@ def _build_system_prompt_translation(
     previous_context_text_count: int = 0,
     input_language: Optional[str] = None,
     context_memory_enabled: bool = False,
+    single_page_image: bool = False,
 ) -> str:
     direction = (
         "right-to-left"
         if (reading_direction or "rtl").lower() == "rtl"
         else "left-to-right"
     )
-    input_type = "transcriptions" if mode == "two-step" else "image crops"
+    input_type = (
+        "transcriptions"
+        if mode == "two-step"
+        else ("numbered regions in the page image" if single_page_image else "image crops")
+    )
+    # combine_into_page_image: the model reads one annotated page instead of
+    # one crop per element — every "crop" reference below needs to instead
+    # point at "the region numbered i", since there's no separate crop image
+    # for the model to mix up anymore (only different numbered boxes on the
+    # one image it does have).
+    crop_ref = "the region numbered" if single_page_image else "crop"
+    crop_noun = "numbered region" if single_page_image else "crop"
+    full_page_confusion_note = (
+        "" if single_page_image else " or from the full-page reference image"
+    )
 
     if input_language and input_language.strip().lower() != "auto":
         source_language_rule = (
@@ -199,6 +214,10 @@ def _build_system_prompt_translation(
         edge_cases = """- **Edge Cases:**
   - If an input line contains standalone periods/ellipses, you must return it exactly as it appears.
   - If an input line is the exact token `[OCR FAILED]`, you must output it unchanged."""
+    elif single_page_image:
+        edge_cases = """- **Edge Cases:**
+  - If a numbered region contains standalone periods/ellipses, you must return it exactly as it appears.
+  - If text is indecipherable, you must return the exact token: `[OCR FAILED]`."""
     else:
         edge_cases = """- **Edge Cases:**
   - If an image contains standalone periods/ellipses, you must return it exactly as it appears.
@@ -255,7 +274,7 @@ def _build_system_prompt_translation(
 - **Reading Context:** The {input_type} are presented in a {direction} reading order. Do not reorder them.
 {source_language_rule}
 - **Cohesion:** Treat the input lines as a continuous narrative. Ensure the translation flows logically and naturally as a cohesive whole.{cohesion_visual}
-- **Index Integrity:** Cohesion is about tone and flow, never about which numbered item a line belongs to. Item `i`'s transcription/translation must come only from crop `i` itself — never from a similar-looking line you recall from a different crop or from the full-page reference image. Plain rectangular narration/caption boxes in different panels often look nearly identical; do not let that similarity, or the narrative logic of the page, cause you to swap which numbered item a piece of text is attached to. Before writing item `i`, re-check that the text you're about to write is actually what appears in crop `i`, not just narratively where it "should" go next.
+- **Index Integrity:** Cohesion is about tone and flow, never about which numbered item a line belongs to. Item `i`'s transcription/translation must come only from {crop_ref} `i` itself — never from a similar-looking line you recall from a different {crop_noun}{full_page_confusion_note}. Plain rectangular narration/caption boxes in different panels often look nearly identical; do not let that similarity, or the narrative logic of the page, cause you to swap which numbered item a piece of text is attached to. Before writing item `i`, re-check that the text you're about to write is actually what appears in {crop_ref} `i`, not just narratively where it "should" go next.
 - **Fidelity:** Focus on intent; translate functionally rather than literally.
 - **Conciseness:** Keep translations idiomatic and concise.{natural_style_rule}
 - **Emphasis:** If the source text is visually emphasized (bold, slanted, etc.), mirror that emphasis using the STYLING GUIDE.
@@ -338,13 +357,15 @@ You must use the following markdown-style markers to convey emphasis:
     )
 
     if mode == "one-step":
+        item_ref = "numbered region" if single_page_image else "input image"
+        item_ref_order = "numbered regions'" if single_page_image else "input image"
         output_schema = f"""
 ## OUTPUT SCHEMA
 {pronoun_map_instruction}
-- You must return your response as a single numbered list with exactly one line per input image.
-- The numbering must correspond to the input image order (1, 2, 3...).
+- You must return your response as a single numbered list with exactly one line per {item_ref}.
+- The numbering must correspond to the {item_ref_order} order (1, 2, 3...).
 - For each item, provide both transcription and translation in the format:
-  {one_step_format} where `i` is the input image number.
+  {one_step_format} where `i` is the {item_ref} number.
 {memory_note_instruction}{pronoun_subject_reminder}
 - Do not include section headers, explanations, or formatting outside of this list{schema_exceptions}.
 """
@@ -2440,6 +2461,8 @@ def call_translation_api_batch(
     previous_context_texts: Optional[List[List[str]]] = None,
     ocr_texts_output: Optional[List[str]] = None,
     memory_note_output: Optional[List[str]] = None,
+    annotated_page_b64: Optional[str] = None,
+    annotated_page_mime_type: Optional[str] = None,
     debug: bool = False,
 ) -> List[str]:
     """
@@ -2479,6 +2502,17 @@ def call_translation_api_batch(
     output_language = config.output_language
     reading_direction = config.reading_direction
     translation_mode = config.translation_mode
+    # One annotated page image replaces all per-bubble crops for this call —
+    # only meaningful for one-step LLM OCR (two-step/local OCR never sends
+    # bubble images to the LLM at all). Falls back to normal per-bubble crops
+    # if the caller enabled the setting but didn't actually produce an
+    # annotated image (e.g. no text elements on the page).
+    single_page_image = (
+        config.combine_into_page_image
+        and translation_mode == "one-step"
+        and config.ocr_method == "LLM"
+        and bool(annotated_page_b64)
+    )
     pre_rules = parse_rules(config.pre_replacements)
     previous_context_images = previous_context_images or []
     if not config.send_full_page_context or config.ocr_method != "LLM":
@@ -2489,7 +2523,10 @@ def call_translation_api_batch(
         _story_reference_images(config) if config.ocr_method == "LLM" else []
     )
 
-    if provider == "OpenAI-Compatible" and config.ocr_method == "LLM":
+    if provider == "OpenAI-Compatible" and config.ocr_method == "LLM" and not single_page_image:
+        # single_page_image sends exactly one image total (the annotated
+        # page), never the per-bubble crops this chunking logic exists to
+        # split — always well under any provider's media-count limit.
         has_full_page_context = config.send_full_page_context and bool(full_image_b64)
         current_page_media_count = len(images_b64) + (1 if has_full_page_context else 0)
 
@@ -2574,7 +2611,7 @@ def call_translation_api_batch(
     previous_text_section = _format_previous_context_texts(cleaned_previous_texts)
 
     # Include conditional bubble hints
-    total_elements = len(images_b64)
+    total_elements = len(bubble_metadata) if single_page_image else len(images_b64)
     dialogue_indices = [
         i + 1
         for i, meta in enumerate(bubble_metadata)
@@ -2669,27 +2706,44 @@ def call_translation_api_batch(
     supports_per_part_res = is_gemini_3 or provider == "xAI"
 
     base_parts = []
-    for i, img_b64 in enumerate(images_b64):
-        mime_type = mime_types[i] if i < len(mime_types) else "image/jpeg"
-        bubble_part = {"inline_data": {"mime_type": mime_type, "data": img_b64}}
-        if supports_per_part_res:
-            bubble_part = _add_media_resolution_to_part(
-                bubble_part, config.media_resolution_bubbles
-            )
-        base_parts.append(bubble_part)
-
-    if config.send_full_page_context and full_image_b64:
-        context_part = {
+    if single_page_image:
+        # One annotated page replaces every per-bubble crop below — sending
+        # the crops too would defeat the entire point (fewer images), and a
+        # separate send_full_page_context image would be a redundant near-
+        # duplicate of the same page, so that's skipped here too.
+        page_part = {
             "inline_data": {
-                "mime_type": full_image_mime_type,
-                "data": full_image_b64,
+                "mime_type": annotated_page_mime_type or "image/jpeg",
+                "data": annotated_page_b64,
             }
         }
         if supports_per_part_res:
-            context_part = _add_media_resolution_to_part(
-                context_part, config.media_resolution_context
+            page_part = _add_media_resolution_to_part(
+                page_part, config.media_resolution_context
             )
-        base_parts.append(context_part)
+        base_parts.append(page_part)
+    else:
+        for i, img_b64 in enumerate(images_b64):
+            mime_type = mime_types[i] if i < len(mime_types) else "image/jpeg"
+            bubble_part = {"inline_data": {"mime_type": mime_type, "data": img_b64}}
+            if supports_per_part_res:
+                bubble_part = _add_media_resolution_to_part(
+                    bubble_part, config.media_resolution_bubbles
+                )
+            base_parts.append(bubble_part)
+
+        if config.send_full_page_context and full_image_b64:
+            context_part = {
+                "inline_data": {
+                    "mime_type": full_image_mime_type,
+                    "data": full_image_b64,
+                }
+            }
+            if supports_per_part_res:
+                context_part = _add_media_resolution_to_part(
+                    context_part, config.media_resolution_context
+                )
+            base_parts.append(context_part)
 
     for image in previous_context_images:
         previous_part = {
@@ -2931,14 +2985,17 @@ The target language is {output_language}. Use the appropriate translation approa
 
             full_page_context = (
                 "A full-page image is also provided for visual and narrative context."
-                if config.send_full_page_context
+                if config.send_full_page_context and not single_page_image
                 else ""
             )
             previous_page_context = _format_previous_context_prompt_note(
                 previous_context_image_count,
                 previous_context_text_count,
                 (
-                    "text crops first, optional current full page, then previous "
+                    "the annotated page image first, then previous source "
+                    "pages oldest-to-newest"
+                    if single_page_image
+                    else "text crops first, optional current full page, then previous "
                     "source pages oldest-to-newest"
                 ),
             )
@@ -2949,15 +3006,25 @@ The target language is {output_language}. Use the appropriate translation approa
                 + _format_fix_hint(config)
             )
 
+            context_intro = (
+                f"You have been provided with ONE full-page manga image. "
+                f"{total_elements} text regions on it are marked with numbered "
+                "boxes — translate each numbered region."
+                if single_page_image
+                else f"You have been provided with {total_elements} individual "
+                "text images from a manga page."
+            )
+            task_unit = "numbered region" if single_page_image else "image"
+
             one_step_prompt = f"""
 ## CONTEXT
-You have been provided with {total_elements} individual text images from a manga page. {full_page_context}{previous_page_context}
+{context_intro} {full_page_context}{previous_page_context}
 {context_hints}
 {previous_text_section}
 {context_memory_section}
 {story_context_section}
 ## TASK
-For each image, you must perform two steps:
+For each {task_unit}, you must perform two steps:
 1.  **Transcribe:** Extract the original text exactly as it appears.
 2.  **Translate:** Translate the text you just transcribed into {output_language}, applying your translation and styling rules.{special_instructions_section}
 """  # noqa
@@ -2967,12 +3034,15 @@ For each image, you must perform two steps:
                 mode="one-step",
                 reading_direction=reading_direction,
                 full_page_context=(
-                    config.send_full_page_context and bool(full_image_b64)
+                    config.send_full_page_context
+                    and not single_page_image
+                    and bool(full_image_b64)
                 ),
                 previous_context_image_count=previous_context_image_count,
                 previous_context_text_count=previous_context_text_count,
                 input_language=input_language,
                 context_memory_enabled=config.context_memory_enabled,
+                single_page_image=single_page_image,
             )
             one_step_system = _append_story_context_to_system(
                 one_step_system, story_context_block

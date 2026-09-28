@@ -143,6 +143,14 @@ class TranslationConfig:
     output_language: str = "English"
     reading_direction: str = "rtl"
     translation_mode: str = "one-step"
+    # One-step only: instead of sending one cropped image per detected text
+    # element, draw a numbered box on each element directly on the full page
+    # and send that single annotated image — cuts the per-page image count
+    # from N crops to 1, at the cost of per-element legibility on a busy/
+    # small-text page (see core/pipeline.py:_build_annotated_page_image).
+    # Defaults on: the cost savings apply to every one-step LLM-OCR page,
+    # and measured translation quality held up well in practice.
+    combine_into_page_image: bool = True
     reasoning_effort: Optional[str] = (
         None  # Default: Google uses "auto", Anthropic uses "none", others use "medium"
     )

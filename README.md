@@ -223,7 +223,7 @@ Open the extension popup and use the tabs:
 | `Config` | Extension UI language and backend URL. |
 | `Account` | Sign in with email or Google to use optional per-account features (Story DB); also where a centrally-hosted deployment's users see their plan/usage. |
 | `Story DB` | Optional, requires being logged in on `Account`. Per-story character database, relationships, a term glossary, and continuity notes, synced to your account. |
-| `Pro` | Advanced controls kept out of the main tabs: text sharpness (supersampling), lettering (ALL CAPS, alignment, text color, outline), and the before/after-translation replacement dictionary. |
+| `Pro` | Advanced controls kept out of the main tabs: text sharpness (supersampling), **Combine into one page image** (on by default — sends one numbered full-page image per page instead of one cropped image per bubble; only applies when `Text reading` is "AI reads the page image"), lettering (ALL CAPS, alignment, text color, outline), and the before/after-translation replacement dictionary. |
 
 Default backend URL:
 
@@ -261,7 +261,7 @@ Translate offline with no API cost by pointing the `OpenAI-Compatible` provider 
 **Good to know**
 
 - The Base URL is called by the **backend**, not the browser. If the backend runs in Docker, use `http://host.docker.internal:11434/v1`; if the model runs on another machine, use that machine's LAN address (for Ollama, start it with `OLLAMA_HOST=0.0.0.0`).
-- A page sends several images at once. Ollama's default context window can be too small for that, which shows up as missing or garbled translations — start it with a bigger one, e.g. `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. **Economy mode** also helps (fewer, smaller images).
+- By default a page sends one combined full-page image (Pro tab's **Combine into one page image**, on by default); turning that off sends one image per bubble instead, which can be several at once. Either way, Ollama's default context window can be too small for a full manga page, which shows up as missing or garbled translations — start it with a bigger one, e.g. `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. **Economy mode** also helps (smaller images).
 - 7-12B local models are noticeably weaker than large cloud models on small or stylized text, and a page can take tens of seconds without a strong GPU. If a small model breaks the numbered answer format (bubbles show a translation error), try a larger model or a lower temperature.
 - Every other feature (Story DB, replacement dictionary, lettering, manual tools) works the same with a local model.
 

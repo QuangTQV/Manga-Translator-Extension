@@ -72,6 +72,7 @@ Translate a single image.
   "top_k": 40,
   "max_tokens": null,
   "translation_mode": "one-step",
+  "combine_into_page_image": true,
   "ocr_method": "LLM",
   "reasoning_effort": null,
   "special_instructions": null,
@@ -111,6 +112,7 @@ Translate a single image.
 | `top_k` | `int` | `40` | Top-k sampling |
 | `max_tokens` | `int?` | `null` | Max output tokens |
 | `translation_mode` | `"one-step" \| "two-step"` | `"one-step"` | One-shot or two-pass translation |
+| `combine_into_page_image` | `bool` | `true` | One-step + `ocr_method: "LLM"` only: send one numbered full-page image instead of one cropped image per text element — far fewer images per request, at some cost to per-element legibility on a busy page. No-op for two-step/local OCR. |
 | `ocr_method` | `"LLM" \| "manga-ocr" \| "paddleocr-vl"` | `"LLM"` | Text recognition method |
 | `reasoning_effort` | `string?` | `null` | Reasoning effort for supported models |
 | `special_instructions` | `string?` | `null` | Story Notes: per-story glossary/relationships/tone the model always follows |

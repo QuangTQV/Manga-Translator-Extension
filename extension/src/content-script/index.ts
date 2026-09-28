@@ -5089,6 +5089,11 @@ function buildTranslateRequest(
     top_k: settings.config.topK,
     max_tokens: settings.config.maxTokens,
     translation_mode: settings.config.translationMode,
+    // Default is true (backend and here) — unlike neighboring `|| undefined`
+    // fields, this must send an explicit false when the user turns it off,
+    // or omitting it would let the backend's own true default override
+    // their choice right back on.
+    combine_into_page_image: settings.config.combineIntoPageImage ?? true,
     ocr_method: settings.config.ocrMethod,
     reasoning_effort: rotation.reasoning_effort,
     special_instructions: settings.config.specialInstructions || undefined,
@@ -5422,6 +5427,7 @@ function getDefaultSettings(): AppSettings {
       topP: 0.95,
       topK: 1,
       translationMode: 'one-step',
+      combineIntoPageImage: true,
       ocrMethod: 'LLM',
       maxFontSize: 16,
       minFontSize: 8,
