@@ -69,6 +69,9 @@ TRANSLATION_PATTERN = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS = 10
+# The page image is resent only for a targeted structural repair. Keep this
+# deliberately small: each attempt is another paid provider request.
+COMBINE_PAGE_IMAGE_MAX_REPAIR_ATTEMPTS = 1
 
 
 def _is_vietnamese_output(output_language: Optional[str]) -> bool:
@@ -1807,6 +1810,60 @@ def _parse_llm_response_unified(
         return [f"[{provider}: Parse error]"] * total_elements
 
 
+def _inspect_combined_page_response(
+    response_text: Optional[str], total_elements: int
+) -> Tuple[Dict[int, str], List[int], bool]:
+    """Return valid numbered rows, rows needing repair, and whether an
+    out-of-range index made the mapping ambiguous.
+
+    This stricter check is only used for the single annotated-page flow;
+    ordinary crop-based parsing keeps its existing behavior.
+    """
+    if not response_text:
+        return {}, list(range(1, total_elements + 1)), False
+
+    pattern = re.compile(
+        r'^\s*(\d+)\s*[:.]\s*"?\s*(.*?)\s*"?\s*(?=\s*\n\s*\d+\s*[:.]|\s*$)',
+        re.MULTILINE | re.DOTALL,
+    )
+    entries: Dict[int, str] = {}
+    counts: Dict[int, int] = {}
+    out_of_range = False
+    for number_text, row in pattern.findall(response_text):
+        number = int(number_text)
+        if number < 1 or number > total_elements:
+            out_of_range = True
+            continue
+        counts[number] = counts.get(number, 0) + 1
+        entries[number] = row.strip()
+
+    repair_ids = {
+        number for number in range(1, total_elements + 1) if counts.get(number, 0) != 1
+    }
+    for number, row in entries.items():
+        if counts[number] != 1:
+            continue
+        if "||" not in row:
+            repair_ids.add(number)
+            continue
+        original, translated = (part.strip() for part in row.split("||", 1))
+        if (
+            not original
+            or not translated
+            or "[OCR FAILED]" in original.upper()
+            or "[OCR FAILED]" in translated.upper()
+        ):
+            repair_ids.add(number)
+
+    # An unexpected index makes it impossible to know which valid row was
+    # shifted/mislabeled, so re-check the complete numbered set once.
+    if out_of_range:
+        repair_ids = set(range(1, total_elements + 1))
+    for number in repair_ids:
+        entries.pop(number, None)
+    return entries, sorted(repair_ids), out_of_range
+
+
 _MEMORY_NOTE_PATTERN = re.compile(
     r"\n?[ \t]*MEMORY NOTE:[ \t]*(.*?)[ \t]*$",
     re.IGNORECASE | re.DOTALL,
@@ -3062,15 +3119,82 @@ For each {task_unit}, you must perform two steps:
                 debug,
                 system_prompt=one_step_system,
             )
+            memory_note = ""
             if config.context_memory_enabled and response_text:
                 response_text, memory_note = _extract_memory_note(response_text)
                 if memory_note_output is not None and memory_note:
                     memory_note_output.append(memory_note)
 
             # Parse one-step format ("Original || Translated")
-            raw_lines = _parse_llm_response_unified(
-                response_text, total_elements, provider, debug
-            )
+            if single_page_image:
+                valid_rows, repair_ids, had_out_of_range = (
+                    _inspect_combined_page_response(response_text, total_elements)
+                )
+                if repair_ids and COMBINE_PAGE_IMAGE_MAX_REPAIR_ATTEMPTS:
+                    log_message(
+                        "Combined-page response has structural issues; making one "
+                        f"targeted repair call for region(s) {repair_ids}"
+                        + (" (out-of-range index found)" if had_out_of_range else ""),
+                        always_print=True,
+                    )
+                    repair_prompt = f"""
+{one_step_prompt}
+
+## STRUCTURAL REPAIR
+The previous response did not provide a valid row for numbered region(s): {', '.join(map(str, repair_ids))}.
+Re-read only those numbered regions from the attached annotated page image. Return corrected rows for those region numbers, each exactly in this format:
+<region number>: <original text> || <translation>
+Do not change the already valid rows shown below. Do not invent text for an unreadable region; use `[OCR FAILED]` for its original text and translation.
+
+## PREVIOUS RESPONSE
+{response_text or '[empty response]'}
+""".strip()
+                    repair_system_prompt = (
+                        one_step_system
+                        + "\n\n## STRUCTURAL REPAIR OVERRIDE\n"
+                        + "For this repair call, output only the requested region number(s), "
+                        "not a fresh list for the whole page. Keep the original transcription/translation "
+                        "format and all translation rules. The previous response contains the existing "
+                        "PRONOUN MAP; follow it. Do not generate a new MEMORY NOTE."
+                    )
+                    try:
+                        # The single annotated page is base_parts[0]. Do not resend
+                        # per-bubble crops, previous pages, or character-reference
+                        # images for this bounded structural repair call.
+                        repair_response = _call_llm_endpoint(
+                            config,
+                            base_parts[:1],
+                            repair_prompt,
+                            debug,
+                            system_prompt=repair_system_prompt,
+                        )
+                        if config.context_memory_enabled and repair_response:
+                            repair_response, _ = _extract_memory_note(repair_response)
+                        repaired_rows, _, repair_had_out_of_range = (
+                            _inspect_combined_page_response(
+                                repair_response, total_elements
+                            )
+                        )
+                        if not repair_had_out_of_range:
+                            for region_id in repair_ids:
+                                if region_id in repaired_rows:
+                                    valid_rows[region_id] = repaired_rows[region_id]
+                    except Exception as repair_error:
+                        # Keep the first call's valid rows even if the optional
+                        # repair call fails (e.g. transient provider/network error).
+                        log_message(
+                            f"Combined-page structural repair failed: {repair_error}",
+                            always_print=True,
+                        )
+
+                raw_lines = [
+                    valid_rows.get(i, f"[{provider}: Missing item {i}]")
+                    for i in range(1, total_elements + 1)
+                ]
+            else:
+                raw_lines = _parse_llm_response_unified(
+                    response_text, total_elements, provider, debug
+                )
 
             is_vi_output = _is_vietnamese_output(output_language)
             translations = []
