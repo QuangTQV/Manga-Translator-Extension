@@ -394,7 +394,7 @@ function applyFilters(): void {
     output: formatTokenCount(outputCalls ? outputTotal : null, outputEstimated),
     outputCalls,
     cache: formatTokens(cachedCalls ? cachedTotal : null),
-    cacheCalls,
+    cacheCalls: cachedCalls,
   });
   tokenTotalsEl.title = tt('liveAiTokenTotalsTitle');
 
