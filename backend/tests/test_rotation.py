@@ -245,6 +245,32 @@ def test_rotates_past_rate_limited_primary_to_backup_and_skips_it_next_time():
         assert result2 == "1: translated"
 
 
+def test_503_prefers_candidate_with_different_model_and_api_key():
+    config = TranslationConfig(
+        provider="Google", google_api_key="g1", backup_api_keys=["g2"],
+        model_name="model-a", rotation_strategy="sequential",
+        fallback_providers=[
+            FallbackProviderConfig(
+                provider="Google", model_name="model-b", api_keys=["g3"]
+            ),
+        ],
+    )
+    attempts = []
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        attempts.append((candidate.model_name, candidate.google_api_key))
+        if candidate.google_api_key == "g1":
+            raise TranslationError("Google API HTTP Error: Status 503: model unavailable")
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+    assert attempts == [("model-a", "g1"), ("model-b", "g3")]
+    assert _cooldown_remaining("Google", "g1", "model-a") > 0
+
+
 def test_missing_key_candidate_is_skipped_without_marking_cooldown():
     """An empty/unconfigured key isn't a rate limit — nothing to cool down,
     and it should never block rotation to the next real candidate."""

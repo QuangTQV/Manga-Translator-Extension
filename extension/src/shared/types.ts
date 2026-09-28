@@ -443,7 +443,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     translationMode: 'one-step',
     combineIntoPageImage: true,
     ocrMethod: 'LLM',
-    maxFontSize: 16,
+    maxFontSize: 32,
     minFontSize: 8,
     supersamplingFactor: 4,
     sendFullPageContext: true,

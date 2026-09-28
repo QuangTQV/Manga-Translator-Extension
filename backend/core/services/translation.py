@@ -887,6 +887,14 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "Rate limited after" in str(exc)
 
 
+def _is_service_unavailable_error(exc: Exception) -> bool:
+    """True for an HTTP 503 response, which is usually scoped to a
+    temporarily unavailable model/service rather than a bad request.
+    Prefer a configured candidate using both a different model and key;
+    if none exists, ordinary fallback candidates are still attempted."""
+    return bool(re.search(r"\bStatus\s+503\b", str(exc), re.IGNORECASE))
+
+
 # Phrases each provider actually uses for "this account is out of money",
 # as opposed to a plain too-many-requests rate limit — kept to *structured*
 # error codes / exact phrases that only appear on a genuine zero-balance
@@ -1274,7 +1282,7 @@ def _call_llm_endpoint(
             cooling_remaining.append(remaining)
             log_message(
                 f"Skipping {candidate.provider} candidate — cooling down for "
-                f"{remaining:.0f}s more after a recent rate limit/credit failure.",
+                f"{remaining:.0f}s more after a recent temporary provider failure.",
                 always_print=True,
             )
         else:
@@ -1284,7 +1292,7 @@ def _call_llm_endpoint(
         soonest = min(cooling_remaining) if cooling_remaining else 0.0
         raise TranslationError(
             f"All {len(all_candidates)} configured API key(s)/provider(s) are "
-            f"cooling down after a recent rate limit/credit failure. Try again "
+            f"cooling down after a recent temporary provider failure. Try again "
             f"in about {soonest:.0f}s."
         )
 
@@ -1383,9 +1391,10 @@ def _call_llm_endpoint(
             )
             is_credit_error = _is_insufficient_credit_error(e)
             is_rate_limited = _is_rate_limit_error(e)
+            is_service_unavailable = _is_service_unavailable_error(e)
             is_missing_key = _is_missing_key_error(e)
             is_content_filtered = _is_content_filter_error(e)
-            if is_rate_limited or is_credit_error:
+            if is_rate_limited or is_credit_error or is_service_unavailable:
                 # Prefer the provider's own Retry-After value over the
                 # user-configured blind guess, when it sent one — clamped
                 # so a provider reporting an hours-away quota reset doesn't
@@ -1403,9 +1412,30 @@ def _call_llm_endpoint(
                     is_credit_error,
                     rate_limit_cooldown,
                 )
+            if is_service_unavailable and not is_last:
+                # A 503 often means this particular model is temporarily
+                # unavailable. Before trying a backup key on that same
+                # model, promote the next candidate with BOTH a different
+                # model and a different API key, when configured.
+                current_key = _candidate_key(candidate)
+                alternate_idx = next(
+                    (
+                        next_idx
+                        for next_idx in range(idx + 1, len(candidates))
+                        if candidates[next_idx].model_name != candidate.model_name
+                        and _candidate_key(candidates[next_idx]) != current_key
+                    ),
+                    None,
+                )
+                if alternate_idx is not None and alternate_idx != idx + 1:
+                    candidates[idx + 1], candidates[alternate_idx] = (
+                        candidates[alternate_idx],
+                        candidates[idx + 1],
+                    )
             if not is_last and (
                 is_rate_limited
                 or is_credit_error
+                or is_service_unavailable
                 or is_missing_key
                 or is_content_filtered
             ):
@@ -1416,6 +1446,8 @@ def _call_llm_endpoint(
                     if is_missing_key
                     else "was blocked by the provider's content filter"
                     if is_content_filtered
+                    else "returned HTTP 503 (service unavailable)"
+                    if is_service_unavailable
                     else "was rate limited"
                 )
                 log_message(
