@@ -889,6 +889,17 @@
         </select>
         <div class="toggle-hint" data-i18n="hintSupersampling">Each bubble's text is rendered at this multiple of its final size, then downscaled — higher looks sharper (especially on the hover-to-magnify crop) but renders slower.</div>
 
+        <div class="toggle-row" style="margin-top:14px">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelCombinePageImage">Combine into one page image</div>
+            <div class="toggle-hint" data-i18n="hintCombinePageImage">Only affects "AI reads the page image". Instead of sending one cropped image per text bubble, sends a single full-page image with each bubble numbered — fewer images per request, cheaper, but small/dense text may read less accurately since it's no longer zoomed in per bubble.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-combine-page-image" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
         <label class="label" style="margin-top:14px" data-i18n="labelLettering">Lettering</label>
         <div class="toggle-hint" data-i18n="hintLettering">How translated text is drawn in speech bubbles and Select text area boxes (text outside bubbles keeps its own style).</div>
         <div class="toggle-row">

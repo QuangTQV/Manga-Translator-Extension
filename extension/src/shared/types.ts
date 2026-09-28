@@ -147,6 +147,10 @@ export interface TranslateConfig {
   topK: number;
   maxTokens?: number;
   translationMode: 'one-step' | 'two-step';
+  // one-step only: sends one annotated full-page image (each text element
+  // numbered) instead of one cropped image per element — fewer images per
+  // request, at the cost of per-element legibility on a busy page.
+  combineIntoPageImage?: boolean;
   ocrMethod: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoningEffort?: string;
   specialInstructions?: string; // per-story notes (glossary, character relationships)
@@ -281,6 +285,7 @@ export interface TranslateRequest {
   top_k: number;
   max_tokens?: number;
   translation_mode: 'one-step' | 'two-step';
+  combine_into_page_image?: boolean;
   ocr_method: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoning_effort?: string;
   special_instructions?: string;
@@ -436,6 +441,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     topP: 0.95,
     topK: 1,
     translationMode: 'one-step',
+    combineIntoPageImage: true,
     ocrMethod: 'LLM',
     maxFontSize: 16,
     minFontSize: 8,

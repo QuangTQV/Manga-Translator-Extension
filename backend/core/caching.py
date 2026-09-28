@@ -244,6 +244,7 @@ class UnifiedCache:
             "output_language": config.output_language,
             "reading_direction": config.reading_direction,
             "translation_mode": config.translation_mode,
+            "combine_into_page_image": getattr(config, "combine_into_page_image", False),
             "send_full_page_context": config.send_full_page_context,
             "temperature": config.temperature,
             "top_k": config.top_k,

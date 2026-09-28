@@ -223,7 +223,7 @@ Mở popup extension và dùng các tab:
 | `Config` | Ngôn ngữ giao diện extension và backend URL. |
 | `Account` | Đăng nhập bằng email hoặc Google để dùng các tính năng tùy chọn theo tài khoản (CSDL truyện); cũng là nơi người dùng backend hosted tập trung xem gói/mức dùng. |
 | `Story DB` | Tùy chọn, cần đăng nhập ở tab `Account`. CSDL nhân vật, mối quan hệ, thuật ngữ, và ghi chú diễn biến cho từng truyện, đồng bộ theo tài khoản. |
-| `Pro` | Các tuỳ chọn nâng cao tách khỏi tab chính: độ nét chữ (supersampling), kiểu chữ (viết hoa, căn lề, màu chữ, viền) và từ điển thay thế trước/sau khi dịch. |
+| `Pro` | Các tuỳ chọn nâng cao tách khỏi tab chính: độ nét chữ (supersampling), **Gộp thành một ảnh trang** (mặc định bật — gửi 1 ảnh full-page có đánh số thay vì 1 ảnh crop cho mỗi bong bóng; chỉ có tác dụng khi `Text reading` đang để "AI đọc ảnh"), kiểu chữ (viết hoa, căn lề, màu chữ, viền) và từ điển thay thế trước/sau khi dịch. |
 
 Backend URL mặc định:
 
@@ -261,7 +261,7 @@ Dịch offline, không tốn phí API bằng cách trỏ provider `OpenAI-Compat
 **Cần biết**
 
 - Base URL do **backend** gọi, không phải trình duyệt. Nếu backend chạy trong Docker, dùng `http://host.docker.internal:11434/v1`; nếu model chạy ở máy khác, dùng địa chỉ LAN của máy đó (với Ollama, chạy kèm `OLLAMA_HOST=0.0.0.0`).
-- Mỗi trang gửi nhiều ảnh cùng lúc. Context mặc định của Ollama có thể quá nhỏ, biểu hiện là bản dịch bị thiếu hoặc lộn xộn — chạy với context lớn hơn, ví dụ `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Bật **Economy mode** cũng giúp (ít ảnh hơn, ảnh nhỏ hơn).
+- Mặc định mỗi trang chỉ gửi 1 ảnh full-page gộp (tab Pro, **Gộp thành một ảnh trang**, mặc định bật); tắt đi thì gửi từng ảnh riêng cho mỗi bong bóng, có thể nhiều ảnh cùng lúc. Dù kiểu nào, context mặc định của Ollama có thể quá nhỏ cho cả trang manga, biểu hiện là bản dịch bị thiếu hoặc lộn xộn — chạy với context lớn hơn, ví dụ `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`. Bật **Economy mode** cũng giúp (ảnh nhỏ hơn).
 - Model local 7-12B kém rõ rệt so với model cloud lớn khi gặp chữ nhỏ hoặc chữ cách điệu, và mỗi trang có thể mất vài chục giây nếu không có GPU mạnh. Nếu model nhỏ làm hỏng định dạng trả lời đánh số (bong bóng báo lỗi dịch), thử model lớn hơn hoặc giảm temperature.
 - Mọi tính năng khác (Story DB, từ điển thay thế, kiểu chữ, công cụ thủ công) hoạt động y hệt với model local.
 

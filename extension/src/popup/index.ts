@@ -134,6 +134,7 @@ const storyGraphInfo = qs<HTMLDivElement>('story-graph-info');
 const storyGraphConnectBtn = qs<HTMLButtonElement>('btn-graph-connect');
 const storyGraphResetBtn = qs<HTMLButtonElement>('btn-graph-reset');
 const economyModeToggle = qs<HTMLInputElement>('f-economy-mode');
+const combinePageImageToggle = qs<HTMLInputElement>('f-combine-page-image');
 const fontPackSelect = qs<HTMLSelectElement>('f-font-pack');
 const minFontSizeInput = qs<HTMLInputElement>('f-min-font-size');
 const maxFontSizeInput = qs<HTMLInputElement>('f-max-font-size');
@@ -420,6 +421,7 @@ async function loadAndBind(): Promise<void> {
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   storyRefImagesToggle.checked = settings.config.useStoryReferenceImages ?? false;
   economyModeToggle.checked = settings.config.economyMode ?? false;
+  combinePageImageToggle.checked = settings.config.combineIntoPageImage ?? true;
   inpaintingMethodSelect.value = settings.config.inpaintingMethod || 'auto';
   fluxRemoteUrlInput.value = settings.config.fluxRemoteBaseUrl ?? '';
   fluxRemoteTokenInput.value = settings.config.fluxRemoteToken ?? '';
@@ -501,7 +503,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
+  for (const el of [backendInput, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, combinePageImageToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -1336,6 +1338,7 @@ function collectAllSettings(): AppSettings {
       outsideTextEnabled: outsideTextToggle.checked,
       useStoryReferenceImages: storyRefImagesToggle.checked,
       economyMode: economyModeToggle.checked,
+      combineIntoPageImage: combinePageImageToggle.checked,
       fontDir: fontPackSelect.value || undefined,
       minFontSize: Math.max(1, parseInt(minFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.minFontSize),
       maxFontSize: Math.max(1, parseInt(maxFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.maxFontSize),

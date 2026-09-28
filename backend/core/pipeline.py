@@ -403,6 +403,67 @@ def _draw_centered_index(draw, bbox, value, font, color):
         )
 
 
+def _build_annotated_page_image(
+    pil_image: Image.Image,
+    sorted_bubble_data: List[Dict[str, Any]],
+    max_side_pixels: int,
+) -> Image.Image:
+    """Draw a numbered box around every text element directly on the page,
+    for `combine_into_page_image` — sending this single image instead of one
+    crop per element cuts a busy page's image count from N to 1, at the cost
+    of per-element legibility (a full page has far less pixel budget per
+    bubble than an individual crop does).
+
+    Resizes to `max_side_pixels` *before* drawing (reusing the same debug
+    box/label primitives as `_write_component_order_debug_image`, but onto
+    the real page instead of a blank canvas) so line width and label size
+    are calibrated to the resolution the model actually receives, rather
+    than being drawn crisp at full resolution and then shrunk illegibly.
+    """
+    width, height = pil_image.size
+    longest_side = max(width, height, 1)
+    scale = min(1.0, max_side_pixels / longest_side)
+    base = pil_image.convert("RGB")
+    if scale < 1.0:
+        new_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+        annotated = base.resize(new_size, Image.LANCZOS)
+    else:
+        annotated = base.copy()
+
+    draw = ImageDraw.Draw(annotated)
+    font_size = max(14, round(min(annotated.size) * 0.028))
+    font = _load_debug_font(font_size)
+    box_width = max(2, round(font_size * 0.15))
+    for index, item in enumerate(sorted_bubble_data, start=1):
+        bbox = item.get("bbox")
+        if not bbox:
+            continue
+        scaled_bbox = [coord * scale for coord in bbox]
+        _draw_dashed_rectangle(draw, scaled_bbox, (255, 0, 0), width=box_width)
+        # The number badge is anchored at the box's top-left CORNER, not its
+        # center: manga bubble text is usually placed at/near the visual
+        # center of a small bubble, so a centered badge — as
+        # _write_component_order_debug_image draws on its blank debug
+        # canvas, where this never mattered — would sit directly on top of
+        # the characters the model most needs to read on the real page.
+        # A corner badge instead falls on the bubble's blank margin.
+        label = str(index)
+        left, top, right, bottom = draw.textbbox((0, 0), label, font=font)
+        label_w, label_h = right - left, bottom - top
+        pad = max(2, round(font_size * 0.2))
+        badge_w = label_w + pad * 2
+        badge_h = label_h + pad * 2
+        # Centered on the corner point itself (half in/half out of the box)
+        # so it reads as attached to that specific box; clamped so it never
+        # drifts past the page edge for a bubble flush against the border.
+        bx0 = max(0, scaled_bbox[0] - badge_w / 2)
+        by0 = max(0, scaled_bbox[1] - badge_h / 2)
+        badge_bbox = (bx0, by0, bx0 + badge_w, by0 + badge_h)
+        draw.rectangle(badge_bbox, fill=(255, 0, 0))
+        _draw_centered_index(draw, badge_bbox, index, font, (255, 255, 255))
+    return annotated
+
+
 def _normalize_debug_mask(mask, image_size):
     """Normalize a debug mask into a full-image boolean array."""
     if mask is None:
@@ -1206,6 +1267,60 @@ def translate_and_render(
                     for bubble in sorted_bubble_data
                     if "image_b64" in bubble and "mime_type" in bubble
                 ]
+
+                # combine_into_page_image only applies to one-step LLM OCR —
+                # two-step/local OCR never sends bubble images to the LLM at
+                # all, so there is nothing to combine. Per-bubble crops above
+                # are still computed either way (cheap local work; other
+                # debug/edit features read bubble["image_b64"]) — only
+                # whether they get SENT changes below.
+                annotated_page_b64 = None
+                annotated_page_mime_type = None
+                if (
+                    config.translation.combine_into_page_image
+                    and config.translation.translation_mode == "one-step"
+                    and config.translation.ocr_method == "LLM"
+                    and sorted_bubble_data
+                ):
+                    try:
+                        effective_page_max_side = scale_length(
+                            config.translation.context_image_max_side_pixels,
+                            None,
+                            minimum=512,
+                            maximum=4096,
+                        )
+                        annotated_page_pil = _build_annotated_page_image(
+                            pil_image_processed,
+                            sorted_bubble_data,
+                            effective_page_max_side,
+                        )
+                        annotated_page_cv = pil_to_cv2(annotated_page_pil)
+                        is_success, annotated_buffer = cv2.imencode(
+                            cv2_ext, annotated_page_cv
+                        )
+                        if not is_success:
+                            raise ImageProcessingError(
+                                f"Annotated page image encoding to {cv2_ext} failed"
+                            )
+                        annotated_page_b64 = base64.b64encode(
+                            annotated_buffer
+                        ).decode("utf-8")
+                        annotated_page_mime_type = mime_type
+                        log_message(
+                            "Encoded single annotated page image "
+                            f"({len(sorted_bubble_data)} numbered regions) "
+                            "instead of per-bubble crops",
+                            verbose=verbose,
+                        )
+                    except Exception as e:
+                        log_message(
+                            "Failed to build annotated page image, falling "
+                            f"back to per-bubble crops: {e}",
+                            always_print=True,
+                        )
+                        annotated_page_b64 = None
+                        annotated_page_mime_type = None
+
                 translated_texts = []
                 _provider_tag = f"[{config.translation.provider}:"
                 # Always captured (independent of whether the caller passed
@@ -1281,6 +1396,8 @@ def translate_and_render(
                                 previous_context_texts=previous_context_texts,
                                 ocr_texts_output=_bubble_ocr_texts,
                                 memory_note_output=memory_note_out,
+                                annotated_page_b64=annotated_page_b64,
+                                annotated_page_mime_type=annotated_page_mime_type,
                                 debug=verbose,
                             )
                         except TranslationError as e:

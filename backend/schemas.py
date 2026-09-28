@@ -186,6 +186,7 @@ class TranslateOptions(BaseModel):
     top_k: int = 40
     max_tokens: Optional[int] = None
     translation_mode: str = "one-step"
+    combine_into_page_image: bool = True
     ocr_method: str = "LLM"
     reasoning_effort: Optional[str] = None
     special_instructions: Optional[str] = None
