@@ -17,7 +17,13 @@ from core.services.translation import (
     generate_support_chat_reply,
     test_api_key,
 )
-from core.websearch import WebSearchError, ensure_searxng_running, search_searxng
+from core.websearch import (
+    NO_USABLE_RESULTS,
+    WebSearchError,
+    build_story_search_query,
+    ensure_searxng_running,
+    search_searxng,
+)
 from fastapi import APIRouter, Depends, HTTPException, Request
 from PIL import Image
 from pipeline.wrapper import (
@@ -53,7 +59,6 @@ from schemas import (
 # one-off call regardless of how many/how large the pages the user selected.
 SUGGEST_INSTRUCTIONS_MAX_IMAGES = 8
 SUGGEST_INSTRUCTIONS_MAX_DIMENSION = 1024
-NO_WEB_SEARCH_RESULTS = "No usable results were returned."
 
 router = APIRouter(prefix="", tags=["translate"])
 
@@ -643,7 +648,7 @@ async def suggest_instructions(
             )
         try:
             web_search_results = await asyncio.to_thread(
-                search_searxng, req.story_title
+                search_searxng, build_story_search_query(req.story_title)
             )
         except WebSearchError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
@@ -677,7 +682,9 @@ async def test_web_search(
         results = await asyncio.to_thread(search_searxng, query)
     except WebSearchError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    count = 0 if results == NO_WEB_SEARCH_RESULTS else results.count("\n\n") + 1
+    count = (
+        0 if results.startswith(NO_USABLE_RESULTS) else results.count("\n\n") + 1
+    )
     return WebSearchTestResponse(query=query, result_count=count, results=results)
 
 

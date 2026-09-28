@@ -20,7 +20,7 @@ from core.story_context import (
     merge_story_update,
     save_story,
 )
-from core.websearch import WebSearchError, search_searxng
+from core.websearch import WebSearchError, build_story_search_query, search_searxng
 from endpoints.translate import _apply_shared_llm_config, _config_for_request
 from fastapi import APIRouter, Depends, HTTPException
 from schemas import (
@@ -143,7 +143,7 @@ async def update_story_from_description(
 
     web_search_results = None
     if req.enable_web_search and req.web_search_provider == "searxng":
-        search_query = " ".join(filter(None, [req.story_title, req.description]))
+        search_query = build_story_search_query(req.story_title, req.description)
         try:
             web_search_results = await asyncio.to_thread(search_searxng, search_query)
         except WebSearchError as e:

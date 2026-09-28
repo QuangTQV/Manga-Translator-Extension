@@ -1246,8 +1246,13 @@ async function handleTestWebSearch(): Promise<void> {
     }
     const count = result.result_count ?? 0;
     webSearchTestStatus.className = `bk-test-status ${count ? 'ok' : 'fail'}`;
-    webSearchTestStatus.textContent = t(uiLanguage, count ? 'statusTestWebSearchCount' : 'statusTestWebSearchEmpty', { count });
-    webSearchTestStatus.title = result.query ?? query;
+    // Keep this badge short — it sits in a tight flex row next to the
+    // input/button. The full "connected but empty" sentence goes in the
+    // title tooltip instead; the detailed backend diagnostic (e.g. which
+    // SearXNG engines were blocked) is already shown below in the results
+    // <pre>, so it doesn't need repeating here too.
+    webSearchTestStatus.textContent = t(uiLanguage, 'statusTestWebSearchCount', { count });
+    webSearchTestStatus.title = count ? (result.query ?? query) : t(uiLanguage, 'statusTestWebSearchEmpty');
     webSearchTestResults.textContent = result.results ?? '';
     webSearchTestResults.style.display = 'block';
   } finally {

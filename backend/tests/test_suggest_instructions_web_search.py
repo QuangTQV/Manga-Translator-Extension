@@ -13,6 +13,7 @@ import main
 import pytest
 from core.config import TranslationConfig
 from core.services.translation import _dispatch_llm_call, generate_character_notes
+from core.websearch import WebSearchError
 from fastapi.testclient import TestClient
 from utils.exceptions import TranslationError
 
@@ -128,6 +129,143 @@ def test_searxng_mode_does_not_enable_the_provider_native_tool():
     assert call.call_args.kwargs["enable_web_search"] is False
 
 
+def test_searxng_web_search_section_offers_one_followup_search():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    prompt = _capture_prompt(
+        config=config,
+        images_b64=["img"],
+        output_language="Vietnamese",
+        web_search_results="1. weak first-round result",
+    )
+    assert "you may run" in prompt
+    assert "SEARCH:" in prompt
+
+
+def test_searxng_followup_round_runs_once_when_model_requests_more_search():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **_kwargs):
+        prompts.append(prompt_text)
+        if len(prompts) == 1:
+            return "SEARCH: Attack on Titan characters relationships wiki"
+        return "- Eren is the protagonist"
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch(
+            "core.services.translation.search_searxng",
+            return_value="1. AoT Wiki\nURL: https://example.org\nSnippet: Eren Yeager is the protagonist.",
+        ) as fake_search,
+    ):
+        result = generate_character_notes(
+            config=config,
+            images_b64=["img"],
+            output_language="Vietnamese",
+            web_search_results="1. weak first-round result",
+        )
+
+    assert len(prompts) == 2
+    fake_search.assert_called_once_with("Attack on Titan characters relationships wiki")
+    assert result == "- Eren is the protagonist"
+    # Round 2 must carry the follow-up results and not offer a further one.
+    assert "Eren Yeager is the protagonist" in prompts[1]
+    assert "you may run" not in prompts[1]
+
+
+def test_searxng_followup_search_failure_still_produces_a_final_answer():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **_kwargs):
+        prompts.append(prompt_text)
+        if len(prompts) == 1:
+            return "SEARCH: better query"
+        return "- final note despite failed follow-up search"
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch(
+            "core.services.translation.search_searxng",
+            side_effect=WebSearchError("SearXNG unreachable"),
+        ),
+    ):
+        result = generate_character_notes(
+            config=config, images_b64=["img"], output_language="Vietnamese"
+        )
+
+    assert len(prompts) == 2
+    assert "Second search attempt failed" in prompts[1]
+    assert result == "- final note despite failed follow-up search"
+
+
+def test_no_followup_round_when_model_answers_normally():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **_kwargs):
+        prompts.append(prompt_text)
+        return "- a normal note, no follow-up needed"
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch("core.services.translation.search_searxng") as fake_search,
+    ):
+        result = generate_character_notes(
+            config=config, images_b64=["img"], output_language="Vietnamese"
+        )
+
+    assert len(prompts) == 1
+    fake_search.assert_not_called()
+    assert result == "- a normal note, no follow-up needed"
+
+
+def test_no_followup_round_when_provider_native_search_is_used():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="provider",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **_kwargs):
+        prompts.append(prompt_text)
+        return "SEARCH: not a real follow-up in provider mode"
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch("core.services.translation.search_searxng") as fake_search,
+    ):
+        result = generate_character_notes(
+            config=config, images_b64=["img"], output_language="Vietnamese"
+        )
+
+    assert len(prompts) == 1
+    fake_search.assert_not_called()
+    assert result == "SEARCH: not a real follow-up in provider mode"
+
+
 def test_suggest_route_runs_local_search_and_requires_a_title(monkeypatch):
     import endpoints.translate as translate_module
 
@@ -161,7 +299,9 @@ def test_suggest_route_runs_local_search_and_requires_a_title(monkeypatch):
     }
     response = client.post("/suggest-instructions", json=body)
     assert response.status_code == 200, response.text
-    assert seen == {"query": "My Manga", "source": "searxng", "results": "My Manga"}
+    assert seen["source"] == "searxng"
+    assert seen["results"] == seen["query"]
+    assert seen["query"] == "My Manga"
 
     body.pop("story_title")
     response = client.post("/suggest-instructions", json=body)
