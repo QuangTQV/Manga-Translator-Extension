@@ -51,6 +51,7 @@ const eraserBtn = qs<HTMLButtonElement>('btn-eraser');
 const autoBtn = qs<HTMLButtonElement>('btn-auto');
 const saveBtn = qs<HTMLButtonElement>('btn-save');
 const saveConfigBtn = qs<HTMLButtonElement>('btn-save-config');
+const resetPreferencesBtn = qs<HTMLButtonElement>('btn-reset-preferences');
 const openLiveAiBtn = qs<HTMLButtonElement>('btn-open-live-ai');
 const clearCacheBtn = qs<HTMLButtonElement>('btn-clear-cache');
 
@@ -417,6 +418,24 @@ async function loadAndBind(): Promise<void> {
   backendInput.value = settings.backendUrl;
   urlDisplay.textContent = settings.backendUrl.replace(/^https?:\/\//, '');
   renderLanguageSelects();
+  renderConfigSettings();
+  settingsLoaded = true;
+
+  renderAccountView();
+  if (settings.accountToken) void refreshAccountStatus();
+
+  renderStoryDbView();
+  if (settings.accountToken) void loadStoryList();
+
+  bind();
+  // Check SearXNG status if already selected
+  if (webSearchSourceSelect.value === 'searxng') {
+    void handleWebSearchSourceChange();
+  }
+  await checkHealth(settings.backendUrl);
+}
+
+function renderConfigSettings(): void {
   useStoryDbToggle.checked = settings.config.useStoryDb ?? false;
   outsideTextToggle.checked = settings.config.outsideTextEnabled ?? false;
   storyRefImagesToggle.checked = settings.config.useStoryReferenceImages ?? false;
@@ -435,12 +454,6 @@ async function loadAndBind(): Promise<void> {
   maxFontSizeInput.value = String(settings.config.maxFontSize ?? 16);
   supersamplingSelect.value = String(settings.config.supersamplingFactor ?? 4);
   void loadFontPackOptions(settings.backendUrl, settings.config.fontDir);
-
-  renderAccountView();
-  if (settings.accountToken) void refreshAccountStatus();
-
-  renderStoryDbView();
-  if (settings.accountToken) void loadStoryList();
 
   renderProviderGroups(settings.config.providerGroups ?? []);
   updateDuplicateKeyWarning();
@@ -472,14 +485,6 @@ async function loadAndBind(): Promise<void> {
   suggestStoryTitleInput.value = settings.config.suggestStoryTitle ?? '';
   suggestWebSearchToggle.checked = settings.config.suggestWebSearch ?? false;
   webSearchSourceSelect.value = settings.config.webSearchProvider ?? 'provider';
-
-  settingsLoaded = true;
-  bind();
-  // Check SearXNG status if already selected
-  if (webSearchSourceSelect.value === 'searxng') {
-    void handleWebSearchSourceChange();
-  }
-  await checkHealth(settings.backendUrl);
 }
 
 function bind(): void {
@@ -488,6 +493,7 @@ function bind(): void {
 
   saveBtn.addEventListener('click', async () => { await saveAndReport('statusSettingsSaved'); });
   saveConfigBtn.addEventListener('click', async () => { await saveAndReport('statusSettingsSaved'); });
+  resetPreferencesBtn.addEventListener('click', () => { void handleResetPreferences(); });
   saveLlmBtn.addEventListener('click', async () => { await saveAndReport('statusLlmSettingsSaved'); });
 
   extensionEnabledToggle.addEventListener('change', () => {
@@ -737,6 +743,44 @@ function bind(): void {
     ev.preventDefault();
     if (ev.shiftKey) handleStoryRedo(); else handleStoryUndo();
   });
+}
+
+async function handleResetPreferences(): Promise<void> {
+  const previous = settings;
+  settings = normalizeSettings({
+    ...settings,
+    extensionEnabled: DEFAULT_SETTINGS.extensionEnabled,
+    config: {
+      ...DEFAULT_SETTINGS.config,
+      providerGroups: settings.config.providerGroups,
+      // Keep the optional remote inpainting connection details; these are
+      // service credentials/URLs, not translation preferences.
+      fluxRemoteBaseUrl: settings.config.fluxRemoteBaseUrl,
+      fluxRemoteToken: settings.config.fluxRemoteToken,
+      // Preserve user-authored content and replacement rules as well.
+      specialInstructions: settings.config.specialInstructions,
+      llmInstructions: settings.config.llmInstructions,
+      preReplacements: settings.config.preReplacements,
+      postReplacements: settings.config.postReplacements,
+      suggestStoryTitle: settings.config.suggestStoryTitle,
+    },
+  });
+  extensionEnabledToggle.checked = settings.extensionEnabled;
+  applyExtensionEnabledState();
+  renderLanguageSelects();
+  renderConfigSettings();
+
+  const saved = await autoSave();
+  if (saved) {
+    setStatus(t(uiLanguage, 'statusPreferencesReset'), 'ok');
+  } else {
+    settings = previous;
+    extensionEnabledToggle.checked = settings.extensionEnabled;
+    applyExtensionEnabledState();
+    renderLanguageSelects();
+    renderConfigSettings();
+    setStatus(t(uiLanguage, 'statusSaveFailed'), 'err');
+  }
 }
 
 async function saveAndReport(successKey: I18nKey): Promise<void> {
@@ -2229,17 +2273,20 @@ interface StoryUpdateMessageResult {
 async function handleStoryUpdateFromDescription(): Promise<void> {
   const description = storyUpdateDescriptionInput.value.trim();
   if (!description) {
+    storyUpdateStatus.className = 'story-update-status error';
     storyUpdateStatus.textContent = t(uiLanguage, 'errorStoryUpdateNoDescription');
     return;
   }
   const providerInfo = firstEnabledProvider();
   if (!providerInfo) {
+    storyUpdateStatus.className = 'story-update-status error';
     storyUpdateStatus.textContent = t(uiLanguage, 'errorNoProviderConfigured');
     return;
   }
 
   storyUpdateFromDescriptionBtn.disabled = true;
-  storyUpdateStatus.textContent = t(uiLanguage, 'statusStoryUpdating');
+  storyUpdateStatus.className = 'story-update-status pending';
+  storyUpdateStatus.textContent = t(uiLanguage, storyUpdateWebSearchToggle.checked ? 'statusStorySearchingWeb' : 'statusStoryUpdating');
   try {
     const result = await storyMessage<StoryUpdateMessageResult>('STORY_UPDATE_FROM_DESCRIPTION', {
       body: {
@@ -2258,6 +2305,7 @@ async function handleStoryUpdateFromDescription(): Promise<void> {
       },
     });
     if (!result.ok || !result.characters || !result.relationships) {
+      storyUpdateStatus.className = 'story-update-status error';
       storyUpdateStatus.textContent = `${t(uiLanguage, 'errorStoryUpdateFailed')}: ${result.error ?? ''}`;
       return;
     }
@@ -2268,8 +2316,10 @@ async function handleStoryUpdateFromDescription(): Promise<void> {
     }
     storyUpdateDescriptionInput.value = '';
     scheduleStoryDraftSave(); // the merged result isn't saved server-side until Save story — protect it the same as any other unsaved edit
+    storyUpdateStatus.className = 'story-update-status success';
     storyUpdateStatus.textContent = t(uiLanguage, 'statusStoryUpdated');
   } catch (e) {
+    storyUpdateStatus.className = 'story-update-status error';
     storyUpdateStatus.textContent = e instanceof Error ? e.message : String(e);
   } finally {
     storyUpdateFromDescriptionBtn.disabled = false;
