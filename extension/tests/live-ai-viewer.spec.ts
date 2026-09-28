@@ -134,6 +134,38 @@ test.describe('Live AI log viewer', () => {
     await expect(page.locator('#empty')).toContainText('No call matches');
   });
 
+  test('shows token totals for visible calls and updates them with filters', async ({ context, extensionId }) => {
+    await context.route('**/admin/live-ai-log*', async (route) => {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          entries: [
+            entry(2, {
+              call_type: 'translate', input_tokens: 200, input_tokens_estimated: true,
+              output_tokens: 20, output_tokens_estimated: true,
+              cached_tokens: null,
+            }),
+            entry(1, {
+              call_type: 'support_chat', input_tokens: 100, output_tokens: 10,
+              cached_tokens: 30,
+            }),
+          ],
+        }),
+      });
+    });
+
+    const page = await openViewer(context, extensionId);
+    const totals = page.locator('#token-totals');
+    await expect(totals).toContainText('input ~300 (2/2)');
+    await expect(totals).toContainText('output ~30 (2/2)');
+    await expect(totals).toContainText('cache 30 (1/2)');
+
+    await page.locator('#type-filter').selectOption('support_chat');
+    await expect(totals).toContainText('input 100 (1/1)');
+    await expect(totals).toContainText('output 10 (1/1)');
+    await expect(totals).toContainText('cache 30 (1/1)');
+  });
+
   test('auto-refresh asks only for entries newer than the newest one seen, and puts them on top', async ({ context, extensionId }) => {
     const requests: URL[] = [];
     let second = false;

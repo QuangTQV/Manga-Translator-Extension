@@ -32,6 +32,7 @@ const statusFilter = qs<HTMLSelectElement>('status-filter');
 const searchInput = qs<HTMLInputElement>('search');
 const clearBtn = qs<HTMLButtonElement>('btn-clear');
 const summaryEl = qs<HTMLDivElement>('summary');
+const tokenTotalsEl = qs<HTMLDivElement>('token-totals');
 const bannerEl = qs<HTMLDivElement>('banner');
 const emptyEl = qs<HTMLDivElement>('empty');
 const listEl = qs<HTMLElement>('list');
@@ -349,6 +350,14 @@ function applyFilters(): void {
   let shown = 0;
   let errors = 0;
   let latencySum = 0;
+  let inputTotal = 0;
+  let inputCalls = 0;
+  let inputEstimated = false;
+  let outputTotal = 0;
+  let outputCalls = 0;
+  let outputEstimated = false;
+  let cachedTotal = 0;
+  let cachedCalls = 0;
   for (const card of cards) {
     const visible =
       (type === 'all' || card.entry.call_type === type) &&
@@ -359,11 +368,35 @@ function applyFilters(): void {
       shown += 1;
       latencySum += card.entry.latency_ms;
       if (card.entry.error) errors += 1;
+      if (typeof card.entry.input_tokens === 'number') {
+        inputTotal += card.entry.input_tokens;
+        inputCalls += 1;
+        inputEstimated ||= Boolean(card.entry.input_tokens_estimated);
+      }
+      if (typeof card.entry.output_tokens === 'number') {
+        outputTotal += card.entry.output_tokens;
+        outputCalls += 1;
+        outputEstimated ||= Boolean(card.entry.output_tokens_estimated);
+      }
+      if (typeof card.entry.cached_tokens === 'number') {
+        cachedTotal += card.entry.cached_tokens;
+        cachedCalls += 1;
+      }
     }
   }
   summaryEl.textContent = cards.length === 0
     ? ''
     : tt('liveAiSummary', { shown, total: cards.length, errors, avg: shown ? formatLatency(latencySum / shown) : '—' });
+  tokenTotalsEl.textContent = shown === 0 ? '' : tt('liveAiTokenTotals', {
+    calls: shown,
+    input: formatTokenCount(inputCalls ? inputTotal : null, inputEstimated),
+    inputCalls,
+    output: formatTokenCount(outputCalls ? outputTotal : null, outputEstimated),
+    outputCalls,
+    cache: formatTokens(cachedCalls ? cachedTotal : null),
+    cacheCalls,
+  });
+  tokenTotalsEl.title = tt('liveAiTokenTotalsTitle');
 
   const showEmpty = shown === 0 && lastError === null;
   emptyEl.classList.toggle('show', showEmpty);
