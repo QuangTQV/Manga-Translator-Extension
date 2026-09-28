@@ -10,6 +10,7 @@ import pytest
 from core.config import TranslationConfig
 from core.services.translation import generate_story_update
 from core.story_context import StoryUpdateParseError, merge_story_update
+from core.websearch import WebSearchError
 from fastapi.testclient import TestClient
 
 client = TestClient(main.app, raise_server_exceptions=False)
@@ -189,6 +190,105 @@ def test_searxng_results_are_prompted_as_untrusted_and_provider_search_is_not_re
     assert "chapter boundary above" in captured["prompt"]
     assert "https://example.org" in captured["prompt"]
     assert "web search tool available" not in captured["prompt"]
+    assert "you may run" in captured["prompt"]  # follow-up offer on round 1
+
+
+def test_searxng_followup_round_runs_once_then_forces_a_final_json_answer():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **kwargs):
+        prompts.append(prompt_text)
+        if len(prompts) == 1:
+            return "SEARCH: Akira Hina relationship reveal"
+        return EXAMPLE_REPLY
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch(
+            "core.services.translation.search_searxng",
+            return_value="1. Wiki\nURL: https://example.org/wiki\nSnippet: Hina is revealed as the villain.",
+        ) as fake_search,
+    ):
+        result = generate_story_update(
+            config,
+            "Chapter 39 reveal.",
+            [],
+            [],
+            "Vietnamese",
+            story_title="My Manga",
+            web_search_results="1. weak first-round result",
+        )
+
+    assert len(prompts) == 2
+    fake_search.assert_called_once_with("Akira Hina relationship reveal")
+    assert result.strip() == EXAMPLE_REPLY.strip()
+    # The round-2 prompt carries the follow-up results and must not offer
+    # a second follow-up (hard-capped at one extra round).
+    assert "Hina is revealed as the villain" in prompts[1]
+    assert "you may run" not in prompts[1]
+
+
+def test_searxng_followup_search_failure_still_produces_a_final_answer():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="searxng",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **kwargs):
+        prompts.append(prompt_text)
+        if len(prompts) == 1:
+            return "SEARCH: better query"
+        return EXAMPLE_REPLY
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch(
+            "core.services.translation.search_searxng",
+            side_effect=WebSearchError("SearXNG unreachable"),
+        ),
+    ):
+        result = generate_story_update(
+            config, "Chapter 39 reveal.", [], [], "Vietnamese"
+        )
+
+    assert len(prompts) == 2
+    assert "Second search attempt failed" in prompts[1]
+    assert result.strip() == EXAMPLE_REPLY.strip()
+
+
+def test_no_followup_round_when_provider_native_search_is_used():
+    config = TranslationConfig(
+        provider="Google",
+        google_api_key="k",
+        enable_web_search=True,
+        web_search_provider="provider",
+    )
+    prompts = []
+
+    def fake_call(config, parts, prompt_text, debug=False, system_prompt=None, **kwargs):
+        prompts.append(prompt_text)
+        return "SEARCH: this is not a real follow-up here, just model text"
+
+    with (
+        patch("core.services.translation._call_llm_endpoint", side_effect=fake_call),
+        patch("core.services.translation.search_searxng") as fake_search,
+    ):
+        result = generate_story_update(
+            config, "Chapter 39 reveal.", [], [], "Vietnamese"
+        )
+
+    assert len(prompts) == 1
+    fake_search.assert_not_called()
+    assert result.strip() == "SEARCH: this is not a real follow-up here, just model text"
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +423,7 @@ def test_web_search_off_by_default_and_does_not_require_a_title(monkeypatch):
     assert seen == {"enable_web_search": False, "story_title": None}
 
 
-def test_local_search_uses_title_and_description_and_forwards_results(monkeypatch):
+def test_local_search_uses_the_bare_title_and_forwards_results(monkeypatch):
     import endpoints.stories as stories_module
 
     seen = {}
@@ -360,6 +460,6 @@ def test_local_search_uses_title_and_description_and_forwards_results(monkeypatc
         },
     )
     assert resp.status_code == 200, resp.text
-    assert "My Manga" in seen["query"] and "chapter 39" in seen["query"]
+    assert seen["query"] == "My Manga"
     assert seen["source"] == "searxng"
     assert seen["results"] == seen["query"]

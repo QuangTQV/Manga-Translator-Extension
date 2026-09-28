@@ -9,8 +9,75 @@ server:
   limiter: false
   image_proxy: false
 
+outgoing:
+  # Self-hosted instances routinely see a slow-but-working engine reported
+  # as unresponsive at the stock ~2-3s per-engine timeout — bump both so a
+  # real response has time to land instead of being discarded as a timeout.
+  request_timeout: 8.0
+  max_request_timeout: 12.0
+  # Identifies this instance instead of looking like a bare/anonymous
+  # scraper; some engines are less aggressive about blocking a non-empty UA.
+  useragent_suffix: "MangaTranslatorExtension-SearXNG"
+
 engines:
   - name: wikidata
     disabled: true
   - name: wikipedia
     disabled: false
+  # Brave/DuckDuckGo/Startpage are the general-web engines SearXNG's own
+  # community most often reports as CAPTCHA'd or rate-limited from a
+  # self-hosted/non-residential IP (searxng/searxng#1651, #4435, #6402,
+  # discussion #6001) — confirmed directly against this project's own
+  # bundled instance too (all three "Suspended"/"CAPTCHA" while `bing`
+  # answered cleanly in the same test). Keeping a chronically-blocked
+  # engine enabled isn't just a silent no-op either: every search still
+  # waits out its timeout for zero results, so disabling them here is a
+  # latency win as well as a correctness one. If your network's IP isn't
+  # blocked by these, feel free to flip `disabled` back to false.
+  - name: brave
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: startpage
+    disabled: true
+  # Disabled by upstream SearXNG's own stock defaults unless explicitly
+  # turned on here — without this, disabling the three above leaves the
+  # "general" category with only `wikipedia` enabled, i.e. effectively no
+  # results for anything but an exact article title.
+  - name: bing
+    disabled: false
+    weight: 2
+  # Custom engine — no code, just SearXNG's generic json_engine pointed at
+  # MangaDex's own public search API (docs.searxng.org/dev/engines/json_engine.html).
+  # General web engines have very poor coverage of individual manga/manhwa
+  # titles: verified live, Bing returned zero (or unrelated) results for
+  # several real titles this project's own search-quality testing used,
+  # while MangaDex's full-text search matched instantly across every
+  # localized/romanized/native title variant (English, romaji, Vietnamese,
+  # ...) with a real English synopsis attached — exactly the character/plot
+  # info these callers are searching for in the first place. `title_query:
+  # "en"` (not `attributes/title/en`) is deliberate: json_engine's query
+  # syntax has no "try this path, else that one" fallback, but its actual
+  # matching behavior is a recursive search for the *first* occurrence of
+  # that key anywhere in the item — since MangaDex's schema always puts
+  # `attributes.title` before `attributes.altTitles` before
+  # `attributes.description`, this naturally prefers the main English
+  # title when one exists and falls back to the English alt-title
+  # otherwise (many entries, like the one that motivated this, only have a
+  # romaji main title). `contentRating` is pinned to safe/suggestive only,
+  # excluding MangaDex's erotica/pornographic categories — this feeds an
+  # LLM prompt automatically on every request, so it must not depend on
+  # any per-request safesearch setting.
+  - name: mangadex
+    engine: json_engine
+    shortcut: md
+    categories: [general]
+    search_url: >-
+      https://api.mangadex.org/manga?title={query}&limit=8&order[relevance]=desc&contentRating[]=safe&contentRating[]=suggestive
+    results_query: data
+    url_query: id
+    url_prefix: "https://mangadex.org/title/"
+    title_query: "en"
+    content_query: attributes/description/en
+    disabled: false
+    weight: 3

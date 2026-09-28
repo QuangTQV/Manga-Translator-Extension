@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     searxng_auto_start: bool = True
     web_search_timeout_seconds: float = Field(default=8.0, ge=1.0, le=30.0)
     web_search_max_results: int = Field(default=5, ge=1, le=10)
+    # A SearXNG snippet is only a 1-2 sentence blurb — not enough to draft
+    # character/relationship notes from. Fetch the actual page for the top
+    # few ranked results (reference sites are sorted first) and use its
+    # extracted text as the excerpt instead. Kept small: each fetch is an
+    # extra outbound request on top of the SearXNG call itself.
+    web_search_fetch_top_n: int = Field(default=2, ge=0, le=5)
+    web_search_fetch_timeout_seconds: float = Field(default=5.0, ge=1.0, le=15.0)
     # Caps how many translation pipeline runs (single + batch combined) may
     # execute concurrently, regardless of how many requests are in flight —
     # the ML pipeline is GPU/VRAM-bound, so unbounded concurrency across
