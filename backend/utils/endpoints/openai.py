@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from utils.live_ai_usage import record_token_usage
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
 from utils.model_metadata import get_gpt5_generation, is_gpt5_series
@@ -170,6 +171,7 @@ def call_openai_endpoint(
             log_message("Processing OpenAI response", verbose=debug)
             try:
                 result = response.json()
+                record_token_usage(result.get("usage"))
 
                 # Prefer convenience field if available
                 output_text = result.get("output_text")

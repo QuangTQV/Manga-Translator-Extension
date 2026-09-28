@@ -21,8 +21,8 @@ when the switch is off none of it runs at all.
 """
 from __future__ import annotations
 
-import base64
 import binascii
+import base64
 import hashlib
 import json
 import os
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from config import settings
-
+from utils.live_ai_usage import estimate_token_usage
 _lock = threading.Lock()
 
 # Roughly caps the log file's size: once it would exceed this, the current
@@ -266,6 +266,9 @@ def log_ai_call(
     response_text: Optional[str],
     error: Optional[str],
     latency_ms: float,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    cached_tokens: Optional[int] = None,
 ) -> None:
     """Checks the enabled flag first so this costs nothing on the hot path
     for everyone who hasn't opted in. Every exception here is swallowed —
@@ -275,6 +278,20 @@ def log_ai_call(
     if not settings.live_ai_log_enabled:
         return
     try:
+        input_tokens_estimated = input_tokens is None
+        output_tokens_estimated = output_tokens is None
+        if input_tokens_estimated or output_tokens_estimated:
+            estimated_input, estimated_output = estimate_token_usage(
+                provider,
+                system_prompt,
+                prompt_text,
+                parts_for_size_estimate,
+                response_text,
+            )
+            if input_tokens_estimated:
+                input_tokens = estimated_input
+            if output_tokens_estimated:
+                output_tokens = estimated_output
         entry = {
             "timestamp": time.time(),
             "provider": provider,
@@ -287,6 +304,11 @@ def log_ai_call(
             "response_text": response_text,
             "error": error,
             "latency_ms": round(latency_ms, 1),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_tokens": cached_tokens,
+            "input_tokens_estimated": input_tokens_estimated,
+            "output_tokens_estimated": output_tokens_estimated,
         }
         with _pending_lock:
             backlog = _pending

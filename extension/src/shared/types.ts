@@ -552,6 +552,11 @@ export interface LiveAiLogEntry {
   response_text?: string | null;
   error?: string | null;
   latency_ms: number;
+  input_tokens?: number | null; // provider-reported; absent when the provider omits usage
+  output_tokens?: number | null;
+  cached_tokens?: number | null; // provider-reported cached input tokens, when available
+  input_tokens_estimated?: boolean;
+  output_tokens_estimated?: boolean;
 }
 
 export interface LiveAiLogResult {

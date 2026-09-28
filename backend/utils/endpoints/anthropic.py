@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from utils.live_ai_usage import record_token_usage
 from core.config import calculate_reasoning_budget
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
@@ -189,6 +190,7 @@ def call_anthropic_endpoint(
             log_message("Processing Anthropic response", verbose=debug)
             try:
                 result = response.json()
+                record_token_usage(result.get("usage"))
 
                 if result.get("type") == "error":
                     error_data = result.get("error", {})

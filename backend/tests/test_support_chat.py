@@ -66,7 +66,9 @@ def test_reply_includes_docs_conversation_and_language_instruction(monkeypatch):
     assert captured["call_type"] == "support_chat"
     assert "Answer in Vietnamese." in captured["system_prompt"]
     assert "How do I set my API key?" in captured["prompt_text"]
-    assert "MangaTranslator" in captured["prompt_text"]  # docs made it into the prompt
+    assert "MangaTranslator" in captured["system_prompt"]  # docs are in the cacheable prefix
+    assert "## PROJECT DOCUMENTATION" in captured["system_prompt"]
+    assert "## PROJECT DOCUMENTATION" not in captured["prompt_text"]
 
 
 def test_multi_turn_history_is_flattened_into_the_prompt(monkeypatch):

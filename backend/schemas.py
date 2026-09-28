@@ -545,6 +545,11 @@ class LiveAiLogEntry(BaseModel):
     response_text: Optional[str] = None
     error: Optional[str] = None
     latency_ms: float
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None
+    input_tokens_estimated: bool = False
+    output_tokens_estimated: bool = False
 
 
 class LiveAiLogResponse(BaseModel):

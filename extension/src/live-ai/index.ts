@@ -84,6 +84,15 @@ function formatLatency(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+function formatTokens(count: number | null | undefined): string {
+  return count == null ? '—' : new Intl.NumberFormat(lang).format(count);
+}
+
+function formatTokenCount(count: number | null | undefined, estimated?: boolean): string {
+  const formatted = formatTokens(count);
+  return estimated && count != null ? `~${formatted}` : formatted;
+}
+
 function relativeTime(timestampSeconds: number): string {
   const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
   const seconds = Math.round(Date.now() / 1000 - timestampSeconds);
@@ -273,6 +282,15 @@ function buildCard(entry: LiveAiLogEntry, fresh: boolean): Card {
   latency.className = 'lat';
   latency.textContent = formatLatency(entry.latency_ms);
   meta.append(latency);
+  const tokens = document.createElement('span');
+  tokens.className = 'tokens';
+  tokens.textContent = tt('liveAiTokens', {
+    input: formatTokenCount(entry.input_tokens, entry.input_tokens_estimated),
+    output: formatTokenCount(entry.output_tokens, entry.output_tokens_estimated),
+    cache: formatTokens(entry.cached_tokens),
+  });
+  tokens.title = tt('liveAiTokensTitle');
+  meta.append(tokens);
   if (entry.images_count > 0) {
     const images = document.createElement('span');
     images.className = 'imgs';

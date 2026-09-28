@@ -23,6 +23,7 @@ from core.services.translation import _call_llm_endpoint
 # happens to start with "test_".
 from core.services.translation import test_api_key as call_test_api_key
 from main import app
+from utils.live_ai_usage import clear_token_usage, current_token_usage, record_token_usage
 
 client = TestClient(app)
 
@@ -67,6 +68,21 @@ def test_log_ai_call_writes_a_json_line_when_enabled(monkeypatch):
     assert entry["error"] is None
     assert entry["latency_ms"] == 123.4
     assert entry["images_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        ({"input_tokens": 120, "output_tokens": 10, "cache_read_input_tokens": 80}, (200, 10, 80)),
+        ({"prompt_tokens": 120, "completion_tokens": 10, "prompt_tokens_details": {"cached_tokens": 80}}, (120, 10, 80)),
+        ({"prompt_tokens": 120, "completion_tokens": 10, "prompt_cache_hit_tokens": 80}, (120, 10, 80)),
+        ({"promptTokenCount": 120, "candidatesTokenCount": 10, "cachedContentTokenCount": 80}, (120, 10, 80)),
+    ],
+)
+def test_provider_cached_token_usage_is_captured(usage, expected):
+    clear_token_usage()
+    record_token_usage(usage)
+    assert current_token_usage() == expected
 
 
 def test_log_ai_call_never_stores_raw_image_data_only_count_and_kb(monkeypatch):

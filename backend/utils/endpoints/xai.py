@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from utils.live_ai_usage import record_token_usage
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
 from utils.rate_limit import extract_retry_after_seconds
@@ -146,6 +147,7 @@ def call_xai_endpoint(
             log_message("Processing xAI response", verbose=debug)
             try:
                 result = response.json()
+                record_token_usage(result.get("usage"))
 
                 finish_reason = "unknown"
                 if "output" in result and isinstance(result["output"], list):

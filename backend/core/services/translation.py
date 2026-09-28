@@ -21,6 +21,7 @@ from core.image.ocr_detection import (
     extract_text_with_paddle_ocr_vl,
 )
 from core.live_ai_log import log_ai_call
+from utils.live_ai_usage import clear_token_usage, current_token_usage
 from core.text.replacements import apply_rules, format_rules_for_prompt, parse_rules
 from PIL import Image
 from utils.endpoints import (
@@ -1684,6 +1685,7 @@ def _call_llm_endpoint_impl(
     suggest_instructions/test_key) comes from _live_ai_call_type, not a
     parameter here — see that ContextVar's comment for why."""
     call_type = _live_ai_call_type.get()
+    clear_token_usage()
     start = time.time()
     try:
         result = _dispatch_llm_call(
@@ -1700,6 +1702,9 @@ def _call_llm_endpoint_impl(
             response_text=None,
             error=str(e),
             latency_ms=(time.time() - start) * 1000,
+            input_tokens=(current_token_usage() or (None, None, None))[0],
+            output_tokens=(current_token_usage() or (None, None, None))[1],
+            cached_tokens=(current_token_usage() or (None, None, None))[2],
         )
         raise
     log_ai_call(
@@ -1712,6 +1717,9 @@ def _call_llm_endpoint_impl(
         response_text=result,
         error=None,
         latency_ms=(time.time() - start) * 1000,
+        input_tokens=(current_token_usage() or (None, None, None))[0],
+        output_tokens=(current_token_usage() or (None, None, None))[1],
+        cached_tokens=(current_token_usage() or (None, None, None))[2],
     )
     return result
 
@@ -3516,8 +3524,8 @@ recording (e.g. it's just a correction or a style note).
 # backend-API-integration reference, not the typical "how do I use this"
 # question this feature targets) rather than a real RAG/embeddings setup:
 # combined they're small enough (a few hundred lines) to just send in full
-# on every request, and the model reads/answers cross-lingually regardless
-# of which language the docs themselves are written in.
+# on every request. Keep them in the stable system-prompt prefix so providers
+# with automatic or explicit prompt caching can reuse them across chat turns.
 _SUPPORT_CHAT_DOC_PATHS = ("README.md", "docs/HUONG-DAN-CHAY.md")
 _support_chat_docs_cache: Optional[str] = None
 
@@ -3563,6 +3571,9 @@ def generate_support_chat_reply(
         raise TranslationError("No message provided.")
 
     docs = _load_support_chat_docs()
+    # Keep the documentation in the invariant prefix. Per-request settings
+    # (such as answer language) follow it, and conversation content remains in
+    # prompt_text, so repeated support-chat calls can match the same prefix.
     system_prompt = (
         "You are a support assistant embedded in the MangaTranslator Extension "
         "(a browser extension + local backend that translates manga/comic pages "
@@ -3571,7 +3582,9 @@ def generate_support_chat_reply(
         "documentation provided below. If the documentation doesn't cover "
         "something, say so plainly rather than guessing or inventing steps. "
         "Keep answers concise and practical — concrete steps, not a lecture."
-        + (f" Answer in {ui_language}." if ui_language else "")
+        "\n\n## PROJECT DOCUMENTATION\n"
+        + docs
+        + (f"\n\nAnswer in {ui_language}." if ui_language else "")
     )
 
     conversation = "\n\n".join(
@@ -3580,9 +3593,6 @@ def generate_support_chat_reply(
     )
 
     prompt_text = f"""
-## PROJECT DOCUMENTATION
-{docs}
-
 ## CONVERSATION SO FAR
 {conversation}
 
