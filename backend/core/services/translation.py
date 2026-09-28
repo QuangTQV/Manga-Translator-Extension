@@ -72,6 +72,8 @@ OPENAI_COMPATIBLE_MAX_MEDIA_ITEMS = 10
 # The page image is resent only for a targeted structural repair. Keep this
 # deliberately small: each attempt is another paid provider request.
 COMBINE_PAGE_IMAGE_MAX_REPAIR_ATTEMPTS = 1
+COMBINE_PAGE_IMAGE_REPAIR_CROP_MAX_SIDE = 640
+COMBINE_PAGE_IMAGE_REPAIR_CROP_JPEG_QUALITY = 55
 
 
 def _is_vietnamese_output(output_language: Optional[str]) -> bool:
@@ -1864,6 +1866,73 @@ def _inspect_combined_page_response(
     return entries, sorted(repair_ids), out_of_range
 
 
+def _combined_page_crop_repair_ids(
+    response_text: Optional[str], repair_ids: List[int]
+) -> List[int]:
+    """Select only missing/illegible source-text rows for crop-based repair.
+
+    Pure numbering/format problems are repaired against the numbered page;
+    crops are reserved for rows where the model had no usable transcription.
+    """
+    if not response_text:
+        return list(repair_ids)
+    pattern = re.compile(
+        r'^\s*(\d+)\s*[:.]\s*"?\s*(.*?)\s*"?\s*(?=\s*\n\s*\d+\s*[:.]|\s*$)',
+        re.MULTILINE | re.DOTALL,
+    )
+    rows: Dict[int, List[str]] = {}
+    for number_text, row in pattern.findall(response_text):
+        number = int(number_text)
+        rows.setdefault(number, []).append(row.strip())
+
+    crop_ids = []
+    for region_id in repair_ids:
+        region_rows = rows.get(region_id, [])
+        # A wholly omitted row has no transcription, so a crop is needed to
+        # recover its source text. Duplicate rows are a numbering ambiguity;
+        # leave those to the annotated-page repair instead.
+        if not region_rows:
+            crop_ids.append(region_id)
+            continue
+        if len(region_rows) != 1 or "||" not in region_rows[0]:
+            continue
+        original = region_rows[0].split("||", 1)[0].strip()
+        if not original or "[OCR FAILED]" in original.upper():
+            crop_ids.append(region_id)
+    return crop_ids
+
+
+def _encode_low_cost_repair_crop(image_b64: str) -> Optional[str]:
+    """Downscale/re-encode one detected text crop before a repair request."""
+    try:
+        image_bytes = base64.b64decode(image_b64.split(",", 1)[-1])
+        with Image.open(BytesIO(image_bytes)) as source:
+            crop = source.convert("RGB")
+        width, height = crop.size
+        scale = min(
+            1.0,
+            COMBINE_PAGE_IMAGE_REPAIR_CROP_MAX_SIDE / max(width, height, 1),
+        )
+        if scale < 1.0:
+            crop = crop.resize(
+                (max(1, round(width * scale)), max(1, round(height * scale))),
+                Image.LANCZOS,
+            )
+        encoded = BytesIO()
+        crop.save(
+            encoded,
+            format="JPEG",
+            quality=COMBINE_PAGE_IMAGE_REPAIR_CROP_JPEG_QUALITY,
+            optimize=True,
+        )
+        return base64.b64encode(encoded.getvalue()).decode("ascii")
+    except Exception as e:
+        log_message(
+            f"Could not make a low-cost repair crop: {e}", verbose=True
+        )
+        return None
+
+
 _MEMORY_NOTE_PATTERN = re.compile(
     r"\n?[ \t]*MEMORY NOTE:[ \t]*(.*?)[ \t]*$",
     re.IGNORECASE | re.DOTALL,
@@ -3131,9 +3200,49 @@ For each {task_unit}, you must perform two steps:
                     _inspect_combined_page_response(response_text, total_elements)
                 )
                 if repair_ids and COMBINE_PAGE_IMAGE_MAX_REPAIR_ATTEMPTS:
+                    crop_repair_ids = _combined_page_crop_repair_ids(
+                        response_text, repair_ids
+                    )
+                    repair_parts = []
+                    use_low_cost_crops = (
+                        not had_out_of_range
+                        and bool(crop_repair_ids)
+                        and set(crop_repair_ids) == set(repair_ids)
+                    )
+                    if use_low_cost_crops:
+                        for region_id in crop_repair_ids:
+                            if region_id > len(images_b64):
+                                repair_parts = []
+                                break
+                            crop_b64 = _encode_low_cost_repair_crop(
+                                images_b64[region_id - 1]
+                            )
+                            if not crop_b64:
+                                repair_parts = []
+                                break
+                            repair_parts.append(
+                                {"inline_data": {"mime_type": "image/jpeg", "data": crop_b64}}
+                            )
+                        use_low_cost_crops = len(repair_parts) == len(crop_repair_ids)
+                    if not use_low_cost_crops:
+                        # Structural/numbering issues need the page overview;
+                        # source-text failures use only their compact crops.
+                        repair_parts = base_parts[:1]
+
+                    repair_image_note = (
+                        "The attached images are low-resolution crops, in this order: "
+                        + "; ".join(
+                            f"crop {i} = original numbered region {region_id}"
+                            for i, region_id in enumerate(crop_repair_ids, start=1)
+                        )
+                        + ". Read each crop and return the row using its original region number."
+                        if use_low_cost_crops
+                        else "Re-read only the requested numbered regions from the attached annotated page image."
+                    )
                     log_message(
                         "Combined-page response has structural issues; making one "
-                        f"targeted repair call for region(s) {repair_ids}"
+                        f"targeted repair call for region(s) {repair_ids} using "
+                        + ("low-resolution crops" if use_low_cost_crops else "the page image")
                         + (" (out-of-range index found)" if had_out_of_range else ""),
                         always_print=True,
                     )
@@ -3142,7 +3251,7 @@ For each {task_unit}, you must perform two steps:
 
 ## STRUCTURAL REPAIR
 The previous response did not provide a valid row for numbered region(s): {', '.join(map(str, repair_ids))}.
-Re-read only those numbered regions from the attached annotated page image. Return corrected rows for those region numbers, each exactly in this format:
+{repair_image_note} Return corrected rows for those region numbers, each exactly in this format:
 <region number>: <original text> || <translation>
 Do not change the already valid rows shown below. Do not invent text for an unreadable region; use `[OCR FAILED]` for its original text and translation.
 
@@ -3155,15 +3264,21 @@ Do not change the already valid rows shown below. Do not invent text for an unre
                         + "For this repair call, output only the requested region number(s), "
                         "not a fresh list for the whole page. Keep the original transcription/translation "
                         "format and all translation rules. The previous response contains the existing "
-                        "PRONOUN MAP; follow it. Do not generate a new MEMORY NOTE."
+                        "PRONOUN MAP; follow it. Do not generate a new MEMORY NOTE. "
+                        + (
+                            "The attached images are individual low-resolution crops, not a page image; "
+                            "use the user prompt's crop-to-region mapping."
+                            if use_low_cost_crops
+                            else "Use the attached annotated page image for the requested region numbers."
+                        )
                     )
                     try:
-                        # The single annotated page is base_parts[0]. Do not resend
-                        # per-bubble crops, previous pages, or character-reference
-                        # images for this bounded structural repair call.
+                        # For OCR failures, send only compact crops for affected
+                        # regions; for numbering/format repair, resend the single
+                        # page overview. Never resend all original bubble crops.
                         repair_response = _call_llm_endpoint(
                             config,
-                            base_parts[:1],
+                            repair_parts,
                             repair_prompt,
                             debug,
                             system_prompt=repair_system_prompt,

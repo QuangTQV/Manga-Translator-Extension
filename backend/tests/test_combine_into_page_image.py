@@ -6,6 +6,9 @@ for fewer images (see core/pipeline.py:_build_annotated_page_image and
 core/services/translation.py:call_translation_api_batch's `single_page_image`
 branch)."""
 
+import base64
+from io import BytesIO
+
 import core.services.translation as tr
 from core.config import TranslationConfig
 from core.pipeline import _build_annotated_page_image
@@ -38,6 +41,13 @@ def _capture_call(monkeypatch, response_text):
 
     monkeypatch.setattr(tr, "_call_llm_endpoint", fake_call)
     return captured
+
+
+def _png_b64(size=(1200, 800)):
+    image = Image.new("RGB", size, (255, 255, 255))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +177,8 @@ def test_single_page_image_sends_exactly_one_image_part(monkeypatch):
     assert "3 text regions" in captured["prompt"]
 
 
-def test_single_page_image_repairs_only_missing_rows_once_without_crops(monkeypatch):
+def test_single_page_image_repairs_missing_row_with_small_compressed_crop(monkeypatch):
+    crops = [_png_b64() for _ in range(3)]
     calls = []
 
     def fake_call(cfg, parts, prompt, *args, **kwargs):
@@ -179,7 +190,7 @@ def test_single_page_image_repairs_only_missing_rows_once_without_crops(monkeypa
     monkeypatch.setattr(tr, "_call_llm_endpoint", fake_call)
     translations = tr.call_translation_api_batch(
         _config(),
-        ["crop1", "crop2", "crop3"],
+        crops,
         "",
         ["image/png"] * 3,
         "image/png",
@@ -192,10 +203,19 @@ def test_single_page_image_repairs_only_missing_rows_once_without_crops(monkeypa
     assert len(calls) == 2
     repair_parts, repair_prompt, repair_system_prompt = calls[1]
     assert len(repair_parts) == 1
-    assert repair_parts[0]["inline_data"]["data"] == "ANNOTATED_PAGE_DATA"
+    repaired_image = repair_parts[0]["inline_data"]
+    assert repaired_image["data"] != crops[1]
+    assert repaired_image["mime_type"] == "image/jpeg"
+    decoded = base64.b64decode(repaired_image["data"])
+    with Image.open(BytesIO(decoded)) as image:
+        assert image.format == "JPEG"
+        assert max(image.size) == tr.COMBINE_PAGE_IMAGE_REPAIR_CROP_MAX_SIDE
+    assert len(decoded) < len(base64.b64decode(crops[1]))
     assert "region(s): 2" in repair_prompt
+    assert "crop 1 = original numbered region 2" in repair_prompt
     assert "Do not change the already valid rows" in repair_prompt
     assert "STRUCTURAL REPAIR OVERRIDE" in repair_system_prompt
+    assert "individual low-resolution crops" in repair_system_prompt
 
 
 def test_single_page_image_does_not_retry_more_than_once(monkeypatch):
