@@ -119,12 +119,21 @@ async def region_translate(req: RegionTranslateRequest, account=Depends(verify_t
     # This route always has the source text, so the user's pre rules apply
     # exactly here (vs. one-step page translation, where they're a hint).
     text = apply_rules(text, tconf.pre_replacements)
+    user_instruction = (req.instruction or "").strip()
+    instruction_section = (
+        "## USER TRANSLATION GUIDANCE\n"
+        "Follow this guidance for this selected area, unless it conflicts with the source text.\n"
+        f"{user_instruction}\n"
+        if user_instruction
+        else ""
+    )
 
     prompt = f"""
 Translate this text from a manga page into {req.output_language}.
 Source language: {req.input_language}. Keep it natural and short enough to fit the same speech bubble.
+If the selection contains multiple distinct speech bubbles or text snippets, translate every one in reading order, keep them separate, and do not merge their meanings. Preserve paragraph breaks where they separate snippets.
 Output ONLY the translated text — no quotes, notes or explanations.
-{_format_story_context(tconf)}{_format_special_instructions(tconf)}
+{instruction_section}{_format_story_context(tconf)}{_format_special_instructions(tconf)}
 ## TEXT
 {text}
 """.strip()

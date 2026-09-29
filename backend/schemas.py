@@ -599,6 +599,7 @@ class RegionOcrResponse(BaseModel):
 
 class RegionTranslateRequest(TranslateOptions):
     text: str
+    instruction: Optional[str] = Field(default=None, max_length=2000)
 
 
 class RegionTranslateResponse(BaseModel):

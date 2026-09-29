@@ -510,6 +510,9 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
       </details>
       <label>${tr('regionOriginalLabel')}</label>
       <textarea id="orig"></textarea>
+      <label>${tr('regionAiInstructionLabel')}</label>
+      <textarea id="ai-instruction" placeholder="${tr('regionAiInstructionPlaceholder')}"></textarea>
+      <div class="status">${tr('regionMultipleTextHint')}</div>
       <div class="row"><button id="ai" type="button">${tr('regionTranslateAi')}</button></div>
       <div class="row" style="justify-content:space-between;align-items:center">
         <label style="margin:0">${tr('regionTranslationLabel')}</label>
@@ -530,6 +533,7 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
     </div>`;
   const $ = <T extends HTMLElement>(id: string): T => shadow.getElementById(id) as T;
   const orig = $<HTMLTextAreaElement>('orig');
+  const aiInstruction = $<HTMLTextAreaElement>('ai-instruction');
   const trans = $<HTMLTextAreaElement>('trans');
   const status = $<HTMLDivElement>('status');
   const aiBtn = $<HTMLButtonElement>('ai');
@@ -705,7 +709,10 @@ async function openEditor(img: HTMLImageElement, rawUrl: string, sel: Rect, seed
     setBusy(true);
     setStatus(tr('regionTranslating'));
     try {
-      const out = await api<{ translation: string }>('/region/translate', { text });
+      const out = await api<{ translation: string }>('/region/translate', {
+        text,
+        instruction: aiInstruction.value.trim() || undefined,
+      });
       trans.value = out.translation;
       setStatus('');
     } catch (e) {

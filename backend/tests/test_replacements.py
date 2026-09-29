@@ -140,6 +140,29 @@ def test_region_translate_applies_pre_and_post_rules(monkeypatch):
     assert resp.json() == {"translation": "Hello Akira"}
 
 
+def test_region_translate_includes_user_instruction_and_keeps_multiple_snippets_separate(monkeypatch):
+    import endpoints.regions as regions
+
+    captured = {}
+
+    def fake_call(config, parts, prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        return "Translation one\n\nTranslation two"
+
+    monkeypatch.setattr(regions, "_call_llm_endpoint", fake_call)
+    resp = client.post("/region/translate", json={
+        **OPTS,
+        "text": "Source bubble one\n\nSource bubble two",
+        "instruction": "Keep the character's blunt speaking style.",
+    })
+
+    assert resp.status_code == 200
+    assert "Keep the character's blunt speaking style." in captured["prompt"]
+    assert "translate every one in reading order, keep them separate" in captured["prompt"]
+    assert "Source bubble one\n\nSource bubble two" in captured["prompt"]
+    assert resp.json() == {"translation": "Translation one\n\nTranslation two"}
+
+
 # ---------------------------------------------------------------------------
 # Page pipeline: post rules land in the rendered bubbles (needs the YOLO
 # detector weights; skipped on a fresh checkout without them).
