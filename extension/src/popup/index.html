@@ -14,7 +14,7 @@
       min-height: 460px;
       max-height: 680px;
       overflow: auto;
-      resize: both;
+      resize: none;
       font-family: Inter, system-ui, sans-serif;
       background: #080c18;
       color: #dde6f5;
@@ -620,10 +620,7 @@
     }
     /* Treat the popup as one quiet glass pane, not a stack of competing cards.
        Keep text-bearing controls much more opaque than the surrounding shell. */
-    .popup {
-      position: relative;
-      margin: 8px;
-      padding: 16px 15px 18px;
+    body {
       border: 1px solid rgba(211, 225, 250, 0.2);
       border-radius: 22px;
       background:
@@ -632,6 +629,16 @@
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.13), inset 0 0 0 1px rgba(195,215,250,0.025), 0 18px 42px rgba(0,0,0,0.36);
       backdrop-filter: blur(28px) saturate(135%);
       -webkit-backdrop-filter: blur(28px) saturate(135%);
+    }
+    .popup {
+      margin: 0;
+      padding: 16px 15px 18px;
+      border: 0;
+      border-radius: inherit;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
     .popup-subtitle { color: #b7c5dc; }
     .label { color: #c3cfe2; font-size: 12px; }
@@ -705,12 +712,28 @@
     .health-badge { color: #c0cce0; }
     .health-badge.ok { color: #8ef0b1; }
     .settings-save-status[data-state="saved"] { color: #bfd9c9; }
+    .popup-resize-handle {
+      position: fixed;
+      right: 2px;
+      bottom: 2px;
+      z-index: 2147483647;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: 0;
+      border-radius: 0 0 8px 0;
+      background: linear-gradient(135deg, transparent 48%, rgba(191,219,254,.3) 49% 54%, transparent 55% 66%, rgba(191,219,254,.52) 67% 72%, transparent 73%);
+      cursor: nwse-resize;
+      touch-action: none;
+    }
+    .popup-resize-handle:hover { background-color: rgba(147,197,253,.1); }
     @media (prefers-reduced-transparency: reduce) {
-      .popup, .tabs, .config-section, .master-toggle-row, #popup-status,
+      body, .popup, .tabs, .config-section, .master-toggle-row, #popup-status,
       .health-badge, .btn-open-window {
         backdrop-filter: none; -webkit-backdrop-filter: none;
       }
-      .popup { background: #111722; }
+      body { background: #111722; }
+      .popup { background: transparent; }
       .tabs { background: transparent; }
       .tabs { background: #111b30; }
       .config-section { background: #111b30; }

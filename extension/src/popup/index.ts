@@ -523,16 +523,10 @@ function initSliders(): void {
   topKSlider.addEventListener('input', () => { topKVal.textContent = topKSlider.value; });
 }
 
-// The popup's body has CSS `resize: both` so the user can drag its bottom-right
-// corner to make it bigger/smaller (a native browser resize-handle, same
-// mechanism as a resizable <textarea>). In practice this is unreliable on a
-// Chrome MV3 action popup — the browser continuously re-measures the popup's
-// "natural" content size and can snap it back, so the handle sometimes just
-// doesn't appear or doesn't visibly do anything (reported by the repo owner
-// after this was first shipped). Left in as a harmless bonus for when it does
-// work, but `#btn-open-window` below is the reliable way to get an actually,
-// freely resizable window: it opens the same page as a real `chrome.windows`
-// popup-type window, which the OS resizes normally like any other window.
+// The action popup uses a fixed, custom bottom-right drag handle because the
+// browser's native body resize grip follows the end of long scrollable content.
+// For larger workspaces, `#btn-open-window` opens a standalone OS window whose
+// frame can be resized normally.
 const POPUP_SIZE_KEY = 'mtPopupSize';
 let popupSizeSaveTimer: number | undefined;
 
@@ -548,6 +542,49 @@ async function restorePopupSize(): Promise<void> {
 }
 
 function initPopupResize(): void {
+  // The browser's native CSS resize grip on `body` follows the scrollable
+  // content edge, so on long tabs it can disappear below the viewport. Keep
+  // our own grip fixed to the visible bottom-right corner instead.
+  document.body.style.resize = 'none';
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'popup-resize-handle';
+  handle.setAttribute('aria-label', 'Resize popup');
+  handle.title = 'Drag to resize popup';
+  document.documentElement.append(handle);
+
+  let dragStart: { x: number; y: number; width: number; height: number } | null = null;
+  handle.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    dragStart = {
+      x: event.clientX,
+      y: event.clientY,
+      width: document.body.getBoundingClientRect().width,
+      height: document.body.getBoundingClientRect().height,
+    };
+    handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener('pointermove', (event) => {
+    if (!dragStart) return;
+    const width = Math.max(340, Math.min(720, dragStart.width + event.clientX - dragStart.x));
+    const height = Math.max(460, Math.min(680, dragStart.height + event.clientY - dragStart.y));
+    document.body.style.width = `${Math.round(width)}px`;
+    document.body.style.height = `${Math.round(height)}px`;
+  });
+  const stopResize = (): void => { dragStart = null; };
+  handle.addEventListener('pointerup', stopResize);
+  handle.addEventListener('pointercancel', stopResize);
+  handle.addEventListener('keydown', (event) => {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const rect = document.body.getBoundingClientRect();
+    const step = event.shiftKey ? 48 : 16;
+    const widthDelta = event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0;
+    const heightDelta = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0;
+    document.body.style.width = `${Math.max(340, Math.min(720, rect.width + widthDelta))}px`;
+    document.body.style.height = `${Math.max(460, Math.min(680, rect.height + heightDelta))}px`;
+  });
+
   const observer = new ResizeObserver((entries) => {
     const entry = entries[0];
     if (!entry) return;
