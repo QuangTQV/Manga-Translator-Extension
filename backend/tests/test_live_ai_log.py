@@ -73,16 +73,23 @@ def test_log_ai_call_writes_a_json_line_when_enabled(monkeypatch):
 @pytest.mark.parametrize(
     ("usage", "expected"),
     [
-        ({"input_tokens": 120, "output_tokens": 10, "cache_read_input_tokens": 80}, (200, 10, 80)),
-        ({"prompt_tokens": 120, "completion_tokens": 10, "prompt_tokens_details": {"cached_tokens": 80}}, (120, 10, 80)),
-        ({"prompt_tokens": 120, "completion_tokens": 10, "prompt_cache_hit_tokens": 80}, (120, 10, 80)),
-        ({"promptTokenCount": 120, "candidatesTokenCount": 10, "cachedContentTokenCount": 80}, (120, 10, 80)),
+        ({"input_tokens": 120, "output_tokens": 10, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 20}, (220, 10, 80, 20)),
+        ({"prompt_tokens": 120, "completion_tokens": 10, "prompt_tokens_details": {"cached_tokens": 80, "cache_write_tokens": 12}}, (120, 10, 80, 12)),
+        ({"prompt_tokens": 120, "completion_tokens": 10, "prompt_cache_hit_tokens": 80}, (120, 10, 80, None)),
+        ({"promptTokenCount": 120, "candidatesTokenCount": 10, "cachedContentTokenCount": 80}, (120, 10, 80, None)),
+        ({"input_tokens": 100, "output_tokens": 4, "cache_creation": {"ephemeral_5m_input_tokens": 15, "ephemeral_1h_input_tokens": 5}}, (120, 4, None, 20)),
     ],
 )
 def test_provider_cached_token_usage_is_captured(usage, expected):
     clear_token_usage()
     record_token_usage(usage)
     assert current_token_usage() == expected
+
+
+def test_openai_cache_write_tokens_at_usage_root_are_captured():
+    clear_token_usage()
+    record_token_usage({"prompt_tokens": 100, "completion_tokens": 5, "cache_write_tokens": 25})
+    assert current_token_usage() == (100, 5, None, 25)
 
 
 def test_log_ai_call_never_stores_raw_image_data_only_count_and_kb(monkeypatch):

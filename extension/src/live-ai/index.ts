@@ -289,6 +289,7 @@ function buildCard(entry: LiveAiLogEntry, fresh: boolean): Card {
     input: formatTokenCount(entry.input_tokens, entry.input_tokens_estimated),
     output: formatTokenCount(entry.output_tokens, entry.output_tokens_estimated),
     cache: formatTokens(entry.cached_tokens),
+    write: formatTokens(entry.cache_write_tokens),
   });
   tokens.title = tt('liveAiTokensTitle');
   meta.append(tokens);
@@ -358,6 +359,8 @@ function applyFilters(): void {
   let outputEstimated = false;
   let cachedTotal = 0;
   let cachedCalls = 0;
+  let cacheWriteTotal = 0;
+  let cacheWriteCalls = 0;
   for (const card of cards) {
     const visible =
       (type === 'all' || card.entry.call_type === type) &&
@@ -382,6 +385,10 @@ function applyFilters(): void {
         cachedTotal += card.entry.cached_tokens;
         cachedCalls += 1;
       }
+      if (typeof card.entry.cache_write_tokens === 'number') {
+        cacheWriteTotal += card.entry.cache_write_tokens;
+        cacheWriteCalls += 1;
+      }
     }
   }
   summaryEl.textContent = cards.length === 0
@@ -395,6 +402,8 @@ function applyFilters(): void {
     outputCalls,
     cache: formatTokens(cachedCalls ? cachedTotal : null),
     cacheCalls: cachedCalls,
+    write: formatTokens(cacheWriteCalls ? cacheWriteTotal : null),
+    writeCalls: cacheWriteCalls,
   });
   tokenTotalsEl.title = tt('liveAiTokenTotalsTitle');
 

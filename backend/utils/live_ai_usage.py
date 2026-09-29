@@ -9,7 +9,7 @@ import unicodedata
 from typing import Any, Optional
 
 _token_usage: contextvars.ContextVar[
-    Optional[tuple[Optional[int], Optional[int], Optional[int]]]
+    Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]]
 ] = contextvars.ContextVar("live_ai_token_usage", default=None)
 
 
@@ -52,6 +52,39 @@ def record_token_usage(usage: Any) -> None:
             value = details.get("cached_tokens")
             if isinstance(value, int):
                 cached_tokens = value
+    cache_write_tokens = next(
+        (
+            usage.get(key)
+            for key in ("cache_creation_input_tokens", "cache_write_tokens")
+            if isinstance(usage.get(key), int)
+        ),
+        None,
+    )
+    if cache_write_tokens is None:
+        for details_key in ("prompt_tokens_details", "input_tokens_details", "cache_creation"):
+            details = usage.get(details_key)
+            if not isinstance(details, dict):
+                continue
+            value = next(
+                (
+                    details.get(key)
+                    for key in ("cache_write_tokens", "cache_creation_input_tokens", "cache_creation_tokens")
+                    if isinstance(details.get(key), int)
+                ),
+                None,
+            )
+            if value is not None:
+                cache_write_tokens = value
+                break
+            # Newer Anthropic usage shape splits writes by cache TTL.
+            ttl_values = [
+                details.get(key)
+                for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+                if isinstance(details.get(key), int)
+            ]
+            if ttl_values:
+                cache_write_tokens = sum(ttl_values)
+                break
     if cached_tokens is None:
         value = usage.get("cachedContentTokenCount")
         if isinstance(value, int):
@@ -69,11 +102,16 @@ def record_token_usage(usage: Any) -> None:
             for key in ("cache_read_input_tokens", "cache_creation_input_tokens")
             if isinstance((value := usage.get(key)), int)
         )
+        # Anthropic's newer cache_creation object replaces the legacy aggregate
+        # field and is likewise excluded from input_tokens.
+        if not isinstance(usage.get("cache_creation_input_tokens"), int):
+            if isinstance(usage.get("cache_creation"), dict):
+                input_tokens += cache_write_tokens or 0
     if input_tokens is not None or output_tokens is not None:
-        _token_usage.set((input_tokens, output_tokens, cached_tokens))
+        _token_usage.set((input_tokens, output_tokens, cached_tokens, cache_write_tokens))
 
 
-def current_token_usage() -> Optional[tuple[Optional[int], Optional[int], Optional[int]]]:
+def current_token_usage() -> Optional[tuple[Optional[int], Optional[int], Optional[int], Optional[int]]]:
     return _token_usage.get()
 
 

@@ -1748,9 +1748,10 @@ def _call_llm_endpoint_impl(
             response_text=None,
             error=str(e),
             latency_ms=(time.time() - start) * 1000,
-            input_tokens=(current_token_usage() or (None, None, None))[0],
-            output_tokens=(current_token_usage() or (None, None, None))[1],
-            cached_tokens=(current_token_usage() or (None, None, None))[2],
+            input_tokens=(current_token_usage() or (None, None, None, None))[0],
+            output_tokens=(current_token_usage() or (None, None, None, None))[1],
+            cached_tokens=(current_token_usage() or (None, None, None, None))[2],
+            cache_write_tokens=(current_token_usage() or (None, None, None, None))[3],
         )
         raise
     log_ai_call(
@@ -1763,9 +1764,10 @@ def _call_llm_endpoint_impl(
         response_text=result,
         error=None,
         latency_ms=(time.time() - start) * 1000,
-        input_tokens=(current_token_usage() or (None, None, None))[0],
-        output_tokens=(current_token_usage() or (None, None, None))[1],
-        cached_tokens=(current_token_usage() or (None, None, None))[2],
+        input_tokens=(current_token_usage() or (None, None, None, None))[0],
+        output_tokens=(current_token_usage() or (None, None, None, None))[1],
+        cached_tokens=(current_token_usage() or (None, None, None, None))[2],
+        cache_write_tokens=(current_token_usage() or (None, None, None, None))[3],
     )
     return result
 

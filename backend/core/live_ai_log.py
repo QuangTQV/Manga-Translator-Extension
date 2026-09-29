@@ -269,6 +269,7 @@ def log_ai_call(
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
     cached_tokens: Optional[int] = None,
+    cache_write_tokens: Optional[int] = None,
 ) -> None:
     """Checks the enabled flag first so this costs nothing on the hot path
     for everyone who hasn't opted in. Every exception here is swallowed —
@@ -307,6 +308,7 @@ def log_ai_call(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cached_tokens": cached_tokens,
+            "cache_write_tokens": cache_write_tokens,
             "input_tokens_estimated": input_tokens_estimated,
             "output_tokens_estimated": output_tokens_estimated,
         }
