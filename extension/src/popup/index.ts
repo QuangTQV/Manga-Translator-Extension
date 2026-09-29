@@ -528,14 +528,18 @@ function initSliders(): void {
 // For larger workspaces, `#btn-open-window` opens a standalone OS window whose
 // frame can be resized normally.
 const POPUP_SIZE_KEY = 'mtPopupSize';
+const POPUP_MIN_WIDTH = 340;
+const POPUP_MAX_WIDTH = 720;
+const POPUP_MIN_HEIGHT = 460;
+const POPUP_MAX_HEIGHT = 900;
 let popupSizeSaveTimer: number | undefined;
 
 async function restorePopupSize(): Promise<void> {
   try {
     const raw = await chrome.storage.local.get(POPUP_SIZE_KEY);
     const saved = raw[POPUP_SIZE_KEY] as { w?: number; h?: number } | undefined;
-    if (saved?.w) document.body.style.width = `${saved.w}px`;
-    if (saved?.h) document.body.style.height = `${saved.h}px`;
+    if (saved?.w) document.body.style.width = `${Math.max(POPUP_MIN_WIDTH, Math.min(POPUP_MAX_WIDTH, saved.w))}px`;
+    if (saved?.h) document.body.style.height = `${Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, saved.h))}px`;
   } catch {
     // chrome.storage unavailable (shouldn't happen in the real extension) — keep the CSS default size.
   }
@@ -551,39 +555,46 @@ function initPopupResize(): void {
   handle.className = 'popup-resize-handle';
   handle.setAttribute('aria-label', 'Resize popup');
   handle.title = 'Drag to resize popup';
-  document.documentElement.append(handle);
+  const heightHandle = document.createElement('button');
+  heightHandle.type = 'button';
+  heightHandle.className = 'popup-resize-height-handle';
+  heightHandle.setAttribute('aria-label', 'Resize popup height');
+  heightHandle.title = 'Drag to resize popup height';
+  document.documentElement.append(handle, heightHandle);
 
-  let dragStart: { x: number; y: number; width: number; height: number } | null = null;
-  handle.addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    dragStart = {
-      x: event.clientX,
-      y: event.clientY,
-      width: document.body.getBoundingClientRect().width,
-      height: document.body.getBoundingClientRect().height,
-    };
-    handle.setPointerCapture(event.pointerId);
-  });
-  handle.addEventListener('pointermove', (event) => {
-    if (!dragStart) return;
-    const width = Math.max(340, Math.min(720, dragStart.width + event.clientX - dragStart.x));
-    const height = Math.max(460, Math.min(680, dragStart.height + event.clientY - dragStart.y));
-    document.body.style.width = `${Math.round(width)}px`;
-    document.body.style.height = `${Math.round(height)}px`;
-  });
-  const stopResize = (): void => { dragStart = null; };
-  handle.addEventListener('pointerup', stopResize);
-  handle.addEventListener('pointercancel', stopResize);
-  handle.addEventListener('keydown', (event) => {
+  const attachResize = (target: HTMLButtonElement, heightOnly: boolean): void => {
+    let dragStart: { x: number; y: number; width: number; height: number } | null = null;
+    target.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      const rect = document.body.getBoundingClientRect();
+      dragStart = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
+      target.setPointerCapture(event.pointerId);
+    });
+    target.addEventListener('pointermove', (event) => {
+      if (!dragStart) return;
+      const width = heightOnly
+        ? dragStart.width
+        : Math.max(POPUP_MIN_WIDTH, Math.min(POPUP_MAX_WIDTH, dragStart.width + event.clientX - dragStart.x));
+      const height = Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, dragStart.height + event.clientY - dragStart.y));
+      document.body.style.width = `${Math.round(width)}px`;
+      document.body.style.height = `${Math.round(height)}px`;
+    });
+    const stopResize = (): void => { dragStart = null; };
+    target.addEventListener('pointerup', stopResize);
+    target.addEventListener('pointercancel', stopResize);
+    target.addEventListener('keydown', (event) => {
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     const rect = document.body.getBoundingClientRect();
     const step = event.shiftKey ? 48 : 16;
-    const widthDelta = event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0;
+      const widthDelta = heightOnly ? 0 : event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0;
     const heightDelta = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0;
-    document.body.style.width = `${Math.max(340, Math.min(720, rect.width + widthDelta))}px`;
-    document.body.style.height = `${Math.max(460, Math.min(680, rect.height + heightDelta))}px`;
-  });
+      document.body.style.width = `${Math.max(POPUP_MIN_WIDTH, Math.min(POPUP_MAX_WIDTH, rect.width + widthDelta))}px`;
+      document.body.style.height = `${Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, rect.height + heightDelta))}px`;
+    });
+  };
+  attachResize(handle, false);
+  attachResize(heightHandle, true);
 
   const observer = new ResizeObserver((entries) => {
     const entry = entries[0];

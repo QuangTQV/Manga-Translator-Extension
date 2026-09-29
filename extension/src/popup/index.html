@@ -12,7 +12,7 @@
       min-width: 340px;
       max-width: 720px;
       min-height: 460px;
-      max-height: 680px;
+      max-height: 900px;
       overflow: auto;
       resize: none;
       font-family: Inter, system-ui, sans-serif;
@@ -727,6 +727,23 @@
       touch-action: none;
     }
     .popup-resize-handle:hover { background-color: rgba(147,197,253,.1); }
+    .popup-resize-height-handle {
+      position: fixed;
+      left: 50%;
+      bottom: 3px;
+      z-index: 2147483647;
+      width: 36px;
+      height: 9px;
+      padding: 0;
+      border: 0;
+      border-radius: 99px;
+      background: rgba(191,219,254,.36);
+      box-shadow: 0 0 0 3px rgba(5,10,20,.42);
+      transform: translateX(-50%);
+      cursor: ns-resize;
+      touch-action: none;
+    }
+    .popup-resize-height-handle:hover { background: rgba(219,234,254,.8); }
     @media (prefers-reduced-transparency: reduce) {
       body, .popup, .tabs, .config-section, .master-toggle-row, #popup-status,
       .health-badge, .btn-open-window {
