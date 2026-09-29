@@ -197,7 +197,7 @@ def _build_system_prompt_translation(
     crop_ref = "the region numbered" if single_page_image else "crop"
     crop_noun = "numbered region" if single_page_image else "crop"
     full_page_confusion_note = (
-        "" if single_page_image else " or from the full-page reference image"
+        "" if single_page_image else " or the full-page reference image"
     )
 
     if input_language and input_language.strip().lower() != "auto":
@@ -230,41 +230,19 @@ def _build_system_prompt_translation(
   - If text is indecipherable, you must return the exact token: `[OCR FAILED]`."""
 
     previous_context_rule = ""
-    if previous_context_image_count > 0 and previous_context_text_count > 0:
+    if previous_context_image_count > 0 or previous_context_text_count > 0:
         previous_context_rule = """
-- **Previous Page Context:** Earlier source-page images and transcripts are visual/narrative context only; do not transcribe, translate, number, or count them. Use them to maintain consistency:
-  - **Proper Nouns:** Keep character names, place names, organizations, technique/skill/title names, honorifics, and stylized terms consistent with established usage.
-  - **Character Voice:** Preserve each character's established voice, register, and pronoun choices.
-  - **Referents:** Disambiguate callbacks, ongoing beats, or unclear references using prior visuals and dialogue."""  # noqa
-    elif previous_context_image_count > 0:
-        previous_context_rule = """
-- **Previous Page Reference:** Earlier source pages are visual/narrative context only — do not transcribe, translate, number, or count them. Use them to maintain consistency:
-  - **Proper Nouns:** Keep character names, place names, organizations, technique/skill/title names, honorifics, and stylized terms spelled exactly as they appeared previously.
-  - **Character Voice:** Preserve each character's established voice, register, and pronoun choices.
-  - **Referents:** Disambiguate callbacks, ongoing beats, or unclear references using prior context."""  # noqa
-    elif previous_context_text_count > 0:
-        previous_context_rule = """
-- **Previous Page Transcripts:** Earlier source-page transcribed text is provided as narrative context only — do not translate, number, or count it. Use it to maintain consistency:
-  - **Proper Nouns:** Keep character names, place names, organizations, technique/skill/title names, honorifics, and stylized terms aligned with their established usage.
-  - **Character Voice:** Preserve each character's established voice, register, and pronoun choices.
-  - **Referents:** Disambiguate callbacks, ongoing beats, or unclear references using prior dialogue."""  # noqa
+- **Previous Pages:** Reference images/transcripts are context only; never transcribe, translate, number, or count them. Use them to keep names/terms, character voice and pronouns consistent, and to resolve callbacks or unclear references."""
 
     vietnamese_pronoun_rule = ""
     if _is_vietnamese_output(output_language):
         vietnamese_pronoun_rule = """
-- **Vietnamese Pronouns (xưng hô):** Before translating any dialogue, work out for every distinct speaker-listener pair: (1) who is speaking, (2) who they're speaking to, (3) that pair's apparent age gap, gender, and relationship. Then pick ONE pronoun pair for that speaker-listener direction, write it down in the required `PRONOUN MAP:` section (see OUTPUT SCHEMA below), and reuse it for every line between them:
-  - **Evidence priority — text over art:** manga art is unreliable for judging age/relationship — character designs routinely draw people who are actually years apart (senpai/kohai, siblings, teacher/student) as visually the same age, and a "young-looking" style can make every character look like a peer regardless of their real age. Rank evidence in this order and let a higher-ranked signal override a lower one when they conflict: (1) explicit address terms/honorifics used in the dialogue itself (-san/-chan/-kun/-senpai, name suffixes, family terms — see the override below), (2) source-language register — self-referential pronouns (e.g. Japanese ore/boku/watashi/atashi), sentence-final particles, keigo/politeness level, blunt vs. formal phrasing, (3) narrative/story context (established roles like teacher, senior, sibling), (4) apparent age/build from the art, used only as a tiebreaker when the above give no signal.
-  - **Decisive override — family address terms:** if a line's own source text contains a family address term — "onii-chan"/"onii-san"/"aniki" (older brother), "onee-chan"/"onee-san" (older sister), "otouto" (younger brother), "imouto" (younger sister), or an English equivalent like "bro"/"sis"/"big brother"/"big sis" — that line's speaker-listener pair IS siblings, full stop. This overrides any guess about who the characters are from art or from a different panel's dialogue, even if a same-looking character elsewhere on the page seemed to be a classmate/stranger — a page can have several visually similar characters, and the address term in the line itself is stronger evidence than a cross-panel identity guess. Translate the address term itself as the real Vietnamese family term ("anh"/"chị"/"em"), not left as "onii-chan" untranslated.
-  - Close friends, classmates, same apparent age, casual tone → "tớ"/"cậu" or "mình"/"cậu".
-  - Very close friends, rivals, or rough/blunt speech → "tao"/"mày".
-  - Noticeable age gap, romantic partners, or siblings → "anh"/"em" or "chị"/"em" (the older speaker says "anh"/"chị", the younger says "em").
-  - Family members → the real family term ("con", "mẹ", "bố"/"ba", "ông", "bà", "anh", "chị", "em"...) — never "tôi"/"bạn" for family.
-  - Genuine strangers *and* explicitly formal/business settings (job interviews, customer service, addressing a superior at work) → "tôi"/"bạn" or "anh/chị"/"em".
-  - Relationship genuinely cannot be determined from any of the evidence above → default to "cậu"/"tớ", NOT "tôi"/"bạn". "tôi"/"bạn" is not a safe default for "unclear" — it reads as two adults who have never met, which is rarely what an unclear-but-clearly-young-and-casual scene actually is.
-  Treat "tôi"/"bạn" as reserved for the two named cases above (genuine strangers, explicit formal/business register) — never as a fallback for "not sure". It is wrong far more often than it's right in casual manga dialogue. If forced to guess between two options, prefer the warmer/more casual one over the formal one, since most manga dialogue is casual.
-  - **Applying the pair correctly:** the two terms are not interchangeable decorations — each one replaces a specific grammatical role from the source. The speaker's own term replaces "I"/"me"; the listener's term replaces "you". Map them to what the source sentence actually says, don't mechanically insert both terms into every line. A line that only addresses the listener (no "I" role in the source) — e.g. "What have you been writing?" — takes ONLY the listener's term, as the subject: "Anh đã viết gì vậy?". Adding the speaker's own term as a false subject — "Em đã viết gì vậy, anh?" — reverses who the question is about and is wrong, not just stylistically off.
-  - **Before finalizing your answer**, re-scan every `[pair]`-tagged line against the `PRONOUN MAP:` entry for that same speaker-listener direction and fix any line where the actual pronoun words used don't match the mapped pair — a tag can be technically present while the sentence itself drifted to a different pair's wording; the words must match the tag, not just the bracket.
-  - **Identify pairs by name, not appearance, whenever a name is available:** a physical descriptor ("girl, short hair" / "boy, glasses") only describes what one panel/crop happens to show — the same two characters can look different pair-to-pair from a different angle, a closer crop, or a change of outfit, and an unrelated character can coincidentally match an old descriptor. A name (from dialogue itself, an honorific attached to a name, or Story Notes/context below) stays the same across the whole story and is what actually identifies who's speaking. Whenever at least one speaker or listener's name is known — from this page's dialogue, from Story Notes, or from earlier context — use that name (or "the girl named X", etc.) as their `PRONOUN MAP:` descriptor instead of a physical description, so the same two people are recognizable as the same pair from any page or angle. Fall back to a physical descriptor only when truly no name is available anywhere."""  # noqa
+  - **Vietnamese Pronouns (xưng hô):** choose one pair per speaker → listener direction. **Evidence priority:** dialogue address terms/honorifics (especially family terms) > source-language register (pronouns, particles, politeness) > story/context > appearance. manga art is unreliable for age/relationship; use it only when stronger evidence is absent.
+  - **Family terms override visual guesses:** a family address term in the line (e.g. *onii-chan*, *onee-san*, *aniki*, *otouto*, *imouto*, bro/sis) establishes a sibling relationship for that pair; translate it with the appropriate Vietnamese kinship term.
+  - **Choose by relationship and register:** casual peers/close friends → "tớ-cậu" or "mình-cậu"; rough/intimate speech → "tao-mày"; older/younger, partners, or siblings → the appropriate "anh/chị-em" or family terms. If unclear, default to "cậu"/"tớ", NOT "tôi"/"bạn"; reserve "tôi/bạn" for genuine strangers or clearly formal/business speech, and prefer casual over formal when guessing.
+  - **Apply grammatically:** the speaker's term maps to "I/me", the listener's to "you"; use only roles present in the source line.
+  - **Identify pairs by name, not appearance, whenever a name is available.** Names from the page, Story Notes, or prior context remain stable across crops/pages; use physical descriptions only when no name is known.
+  - **Before finalizing your answer**, re-scan every `[pair]`-tagged line against the `PRONOUN MAP:` and fix any mismatch between its tag and actual pronouns."""
 
     natural_style_rule = (
         """
@@ -280,7 +258,7 @@ def _build_system_prompt_translation(
 - **Reading Context:** The {input_type} are presented in a {direction} reading order. Do not reorder them.
 {source_language_rule}
 - **Cohesion:** Treat the input lines as a continuous narrative. Ensure the translation flows logically and naturally as a cohesive whole.{cohesion_visual}
-- **Index Integrity:** Cohesion is about tone and flow, never about which numbered item a line belongs to. Item `i`'s transcription/translation must come only from {crop_ref} `i` itself — never from a similar-looking line you recall from a different {crop_noun}{full_page_confusion_note}. Plain rectangular narration/caption boxes in different panels often look nearly identical; do not let that similarity, or the narrative logic of the page, cause you to swap which numbered item a piece of text is attached to. Before writing item `i`, re-check that the text you're about to write is actually what appears in {crop_ref} `i`, not just narratively where it "should" go next.
+- **Index Integrity:** Cohesion affects tone, not item assignment: item `i` must come only from {crop_ref} `i`, not similar text from another {crop_noun}{full_page_confusion_note}. Verify against its source; never assign by narrative order.
 - **Fidelity:** Focus on intent; translate functionally rather than literally.
 - **Conciseness:** Keep translations idiomatic and concise.{natural_style_rule}
 - **Emphasis:** If the source text is visually emphasized (bold, slanted, etc.), mirror that emphasis using the STYLING GUIDE.
@@ -312,13 +290,13 @@ You must use the following markdown-style markers to convey emphasis:
 
     pronoun_map_instruction = (
         """
-- **Before the numbered list**, output a section titled exactly `PRONOUN MAP:` — one short line per distinct speaker-listener pair appearing ANYWHERE in this batch, each line starting with `-` (a dash, never a digit — digits are reserved for the list below), format `- <speaker> -> <listener>: <chosen pronoun pair>` (e.g. `- Yuki -> Kaito: tớ-cậu`, or `- girl, short hair -> boy, glasses: tớ-cậu` only if neither name is known — see the "identify pairs by name" rule above). Base each line on the reasoning from the Vietnamese Pronouns rule above — actually work through speaker/listener/relationship for each pair here, don't skip straight to a guess. List EVERY distinct pair that exchanges dialogue in this batch, even ones with only one line — do not omit minor pairs or collapse different pairs into one. One line per distinct pair (not per dialogue line, not per image). If a line has no clear second party (narration, SFX, monologue), skip it. This section is required whenever any dialogue is present.
-- **Every numbered line below** that involves a pair from `PRONOUN MAP:` must start with that exact pair in brackets, e.g. `[em-anh]`, before the translated text — see OUTPUT SCHEMA format. This is a hard constraint: once a pair is written in `PRONOUN MAP:`, every later line between those two speakers reuses it verbatim, no matter how many other lines/pairs come in between and no matter what feels more natural in isolation. Do not silently drift back to "mình"/"cậu" or any other default for a pair you already mapped. Lines with no clear second party use `[-]` instead."""
+- Before the numbered list, output `PRONOUN MAP:` with one `- <speaker> -> <listener>: <pair>` line for every distinct dialogue pair in this batch. Use names when known; omit narration, SFX, and lines without a clear listener.
+- Prefix each dialogue row with its mapped pair in brackets (e.g. `[em-anh]`); use `[-]` when no pair applies. Reuse each pair exactly throughout the batch."""
         if is_vietnamese_output
         else ""
     )
     pronoun_map_echo_instruction = (
-        """ Immediately after that sentence, on its own line, add `XƯNG HÔ:` followed by every pair from this page's `PRONOUN MAP:` restated verbatim in the same `- <speaker> -> <listener>: <pair>` format (omit this line entirely if `PRONOUN MAP:` was empty) — this is how a later page knows the relationship was already decided instead of re-guessing from scratch."""
+        """ Add `XƯNG HÔ:` on the next line with the page's `PRONOUN MAP` pairs verbatim (omit it if the map is empty), so later pages can reuse them."""
         if context_memory_enabled and is_vietnamese_output
         else ""
     )
@@ -355,8 +333,7 @@ You must use the following markdown-style markers to convey emphasis:
     )
     numbered_region_integrity = (
         """
-- **Number integrity:** Treat each printed box number as a fixed ID. Return every ID from `1` through the stated number of marked regions exactly once, with no missing, duplicate, or extra IDs. Never renumber, merge, split, or move text between regions.
-- Keep each region's transcription and translation together on its own single numbered line. If a region is unreadable, still return its ID and use `[OCR FAILED]` as specified; never omit it."""
+- **Number integrity:** Return IDs `1..N` exactly once; never add, omit, duplicate, renumber, merge, split, or move text between regions. Keep each region's transcription and translation on its own line; for unreadable text, keep its ID and use `[OCR FAILED]`."""
         if single_page_image
         else ""
     )
@@ -3201,9 +3178,7 @@ The target language is {output_language}. Use the appropriate translation approa
 {context_memory_section}
 {story_context_section}
 ## TASK
-For each {task_unit}, you must perform two steps:
-1.  **Transcribe:** Extract the original text exactly as it appears.
-2.  **Translate:** Translate the text you just transcribed into {output_language}, applying your translation and styling rules.{special_instructions_section}
+For each {task_unit}, transcribe its text and translate it into {output_language}, following the system rules.{special_instructions_section}
 """  # noqa
 
             one_step_system = _build_system_prompt_translation(
