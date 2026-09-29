@@ -202,10 +202,10 @@ export interface TranslateConfig {
   // the user's own values (see shared/economy.ts).
   economyMode?: boolean;
   // Which algorithm removes outside-bubble text once outsideTextEnabled is
-  // on: "auto" (lightweight OpenCV, default), "flux_klein_4b" (local GPU),
+  // on: "lama" (default; best-device GPU/CPU), "auto" (lightweight OpenCV), "flux_klein_4b" (local GPU),
   // "flux_klein_4b_remote"/"flux_klein_9b_remote" (POSTs to fluxRemoteBaseUrl — see
   // backend/flux_worker.py — instead of loading Flux on this machine), or
-  // "none". Unset behaves exactly like "auto" (today's only behavior).
+  // "none". Unset uses LaMa.
   inpaintingMethod?: string;
   // Base URL of a backend/flux_worker.py instance (e.g. a Kaggle notebook
   // GPU tunneled out via cloudflared) — only sent/used when
@@ -462,6 +462,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     sendFullPageContext: true,
     imageDetail: 'auto',
     outsideTextEnabled: false,
+    inpaintingMethod: 'lama',
     preTranslate: false,
     previousContextEnabled: false,
     contextMemoryEnabled: false,

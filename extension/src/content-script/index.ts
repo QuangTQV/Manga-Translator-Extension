@@ -5122,7 +5122,7 @@ function buildTranslateRequest(
     // flux_remote_base_url.
     inpainting_method: settings.config.inpaintingMethod?.endsWith('_remote')
       ? settings.config.inpaintingMethod.replace(/_remote$/, '')
-      : (settings.config.inpaintingMethod || undefined),
+      : (settings.config.inpaintingMethod || 'lama'),
     flux_remote_base_url: settings.config.inpaintingMethod?.endsWith('_remote')
       ? (settings.config.fluxRemoteBaseUrl || undefined)
       : undefined,

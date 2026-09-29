@@ -225,7 +225,7 @@ class TranslateOptions(BaseModel):
     economy_mode: bool = False  # cut LLM spend: downscale the full-page context image and lower its media resolution (the client also turns off the costlier context options)
     outside_text_enabled: bool = False
     inpainting_method: Optional[str] = (
-        None  # "auto" (default) | "lama" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "auto"; "lama" also makes /region/render and /region/erase use LaMa
+        None  # "lama" (default) | "auto" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "lama"; "lama" also makes /region/render and /region/erase use LaMa
     )
     flux_remote_token: Optional[str] = (
         None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one

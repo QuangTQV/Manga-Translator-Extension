@@ -649,7 +649,7 @@ function renderConfigSettings(): void {
     ?? (settings.config.combinePageImageMaxSide === 1024 ? 'low'
       : (settings.config.combinePageImageMaxSide ?? 1536) >= 2048 ? 'high' : 'auto');
   updateCombinePageImageResolutionVisibility();
-  inpaintingMethodSelect.value = settings.config.inpaintingMethod || 'auto';
+  inpaintingMethodSelect.value = settings.config.inpaintingMethod || 'lama';
   fluxRemoteUrlInput.value = settings.config.fluxRemoteBaseUrl ?? '';
   fluxRemoteTokenInput.value = settings.config.fluxRemoteToken ?? '';
   updateInpaintingMethodVisibility();
@@ -1626,7 +1626,7 @@ function collectAllSettings(): AppSettings {
       minFontSize: Math.max(1, parseInt(minFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.minFontSize),
       maxFontSize: Math.max(1, parseInt(maxFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.maxFontSize),
       supersamplingFactor: parseInt(supersamplingSelect.value, 10) || DEFAULT_SETTINGS.config.supersamplingFactor,
-      inpaintingMethod: inpaintingMethodSelect.value || 'auto',
+      inpaintingMethod: inpaintingMethodSelect.value || 'lama',
       fluxRemoteBaseUrl: fluxRemoteUrlInput.value.trim() || undefined,
       fluxRemoteToken: fluxRemoteTokenInput.value.trim() || undefined,
       // One select drives the (translationMode, ocrMethod) pair the backend takes:
