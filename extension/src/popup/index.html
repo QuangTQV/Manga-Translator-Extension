@@ -465,6 +465,51 @@
     .toggle-slider::before { width: 16px; height: 16px; }
     .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
     #popup-status { bottom: 10px; padding: 9px 13px; border-radius: 10px; backdrop-filter: blur(12px); }
+    .settings-save-status { display: flex; align-items: center; gap: 7px; min-height: 16px; font-size: 10px; color: #8291aa; }
+    .settings-save-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #66758d; flex: 0 0 auto; }
+    .settings-save-status[data-state="saving"] { color: #93c5fd; }
+    .settings-save-status[data-state="saving"]::before { background: #60a5fa; animation: save-pulse 1s ease-in-out infinite; }
+    .settings-save-status[data-state="saved"] { color: #8ea49b; }
+    .settings-save-status[data-state="saved"]::before { background: #4ade80; }
+    .settings-save-status[data-state="error"] { color: #fca5a5; }
+    .settings-save-status[data-state="error"]::before { background: #f87171; }
+    @keyframes save-pulse { 50% { opacity: .35; } }
+    .settings-search {
+      display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 10px;
+      border: 1px solid rgba(187,204,235,.15); border-radius: 10px;
+      background: rgba(5,9,17,.78); box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+    }
+    .settings-search:focus-within { border-color: rgba(96,165,250,.65); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+    .settings-search-icon { color: #70819d; font-size: 14px; line-height: 1; }
+    .settings-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: #e5ecf8; background: transparent; font: inherit; font-size: 12px; }
+    .settings-search input::placeholder { color: #71809a; }
+    .settings-search-clear { display: none; padding: 2px 5px; border: 0; border-radius: 5px; color: #a7b5ca; background: transparent; cursor: pointer; }
+    .settings-search.has-query .settings-search-clear { display: block; }
+    .settings-search-clear:hover { color: #fff; background: rgba(255,255,255,.08); }
+    .settings-search-feedback { min-height: 0; margin: -6px 2px -2px; color: #8fa0bb; font-size: 10px; }
+    .settings-search-feedback:empty { display: none; }
+    .settings-search-results { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow-y: auto; margin-top: -7px; }
+    .settings-search-results:empty { display: none; }
+    .settings-search-result {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+      padding: 8px 10px; border: 1px solid rgba(187,204,235,.1); border-radius: 8px;
+      color: #dbe6f7; background: rgba(20,29,45,.92); text-align: left; cursor: pointer;
+      transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+    }
+    .settings-search-result:hover, .settings-search-result:focus-visible { background: rgba(38,54,80,.96); border-color: rgba(96,165,250,.38); }
+    .settings-search-result:active { transform: scale(.99); }
+    .settings-search-result-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
+    .settings-search-result-tab { flex: 0 0 auto; color: #91a2c1; font-size: 9px; }
+    .settings-search-target { animation: settings-search-target 900ms ease-out; }
+    @keyframes settings-search-target { 0%, 100% { outline-color: transparent; } 20%, 75% { outline: 2px solid rgba(96,165,250,.68); outline-offset: 3px; } }
+    .search-hidden { display: none !important; }
+    .advanced-settings { margin-top: 2px; border: 1px solid rgba(187,204,235,.11); border-radius: 9px; background: rgba(5,9,17,.2); }
+    .advanced-settings > summary { padding: 10px 11px; color: #a9bad8; font-size: 11px; font-weight: 700; cursor: pointer; list-style: none; }
+    .advanced-settings > summary::-webkit-details-marker { display: none; }
+    .advanced-settings > summary::after { content: '＋'; float: right; color: #8291aa; }
+    .advanced-settings[open] > summary::after { content: '−'; }
+    .advanced-settings[open] > summary { border-bottom: 1px solid rgba(187,204,235,.1); }
+    .advanced-settings-content { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
     /* Liquid-glass surfaces: layered cool light, translucent material and a
        fine specular edge. Keep the controls themselves opaque enough to read. */
     body {
@@ -569,6 +614,7 @@
         <span id="health-badge" class="health-badge" data-i18n="healthChecking">Checking</span>
       </div>
     </div>
+    <div id="settings-save-status" class="settings-save-status" role="status" aria-live="polite"></div>
 
     <div id="master-toggle-row" class="master-toggle-row">
       <div class="master-toggle-copy">
@@ -589,6 +635,13 @@
       <button class="tab-btn" data-tab="storydb" data-i18n="tabStoryDb">Story DB</button>
       <button class="tab-btn" data-tab="pro" data-i18n="tabPro">Pro</button>
     </div>
+    <div class="settings-search" id="settings-search-wrap">
+      <span class="settings-search-icon" aria-hidden="true">⌕</span>
+      <input id="settings-search" type="search" autocomplete="off" aria-label="Search settings" data-i18n-placeholder="placeholderSettingsSearch" data-i18n-aria-label="labelSearchSettings" aria-describedby="settings-search-feedback" />
+      <button id="settings-search-clear" class="settings-search-clear" type="button" aria-label="Clear search" data-i18n-aria-label="labelClearSettingsSearch">×</button>
+    </div>
+    <div id="settings-search-feedback" class="settings-search-feedback" role="status" aria-live="polite"></div>
+    <div id="settings-search-results" class="settings-search-results" role="listbox" aria-label="Matching settings" data-i18n-aria-label="labelSettingsSearchResults"></div>
 
     <div id="tab-translate" class="tab-pane active">
       <div class="config-section">
@@ -771,6 +824,10 @@
           <div id="duplicate-key-warning" class="model-error" style="display:none"></div>
         </div>
 
+        <details class="advanced-settings">
+          <summary data-i18n="labelAdvancedLlmSettings">Advanced LLM settings</summary>
+          <div class="advanced-settings-content">
+
         <div class="llm-fields-row">
           <div class="field">
             <label class="label" data-i18n="labelRotationStrategy">Rotation Order</label>
@@ -858,6 +915,8 @@
           <div class="toggle-hint" data-i18n="hintLlmInstructions">Applies to every translation regardless of manga/story — general style or behavior rules. For per-story notes (cast, relationships), use Story Notes in the Translate tab instead.</div>
           <textarea id="f-llm-instructions" class="textarea" placeholder="e.g. Prefer literal translation of idioms, keep sentence length short..." data-i18n-placeholder="placeholderLlmInstructions"></textarea>
         </div>
+          </div>
+        </details>
       </div>
 
       <div class="actions">

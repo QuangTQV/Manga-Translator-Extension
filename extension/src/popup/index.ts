@@ -163,12 +163,21 @@ const supportChatSendBtn = qs<HTMLButtonElement>('btn-send-support-chat');
 const supportChatCloseBtn = qs<HTMLButtonElement>('btn-close-support-chat');
 const supportChatClearBtn = qs<HTMLButtonElement>('btn-clear-support-chat');
 const statusEl = qs<HTMLDivElement>('popup-status');
+const settingsSaveStatusEl = qs<HTMLDivElement>('settings-save-status');
+const settingsSearchInput = qs<HTMLInputElement>('settings-search');
+const settingsSearchWrap = qs<HTMLDivElement>('settings-search-wrap');
+const settingsSearchClearBtn = qs<HTMLButtonElement>('settings-search-clear');
+const settingsSearchFeedback = qs<HTMLDivElement>('settings-search-feedback');
+const settingsSearchResults = qs<HTMLDivElement>('settings-search-results');
 const urlDisplay = qs<HTMLDivElement>('backend-url-display');
 
 let settings: AppSettings = normalizeSettings();
 let uiLanguage: UiLanguage = 'en';
 let healthState: HealthState = 'checking';
 let isBound = false;
+let settingsSaveRevision = 0;
+let settingsSaveState: 'idle' | 'saving' | 'saved' | 'error' = 'idle';
+let tabBeforeSettingsSearch: string | null = null;
 // blur/beforeunload trigger autoSave(), which persists whatever is currently
 // in the form fields. Those listeners are registered before the async
 // settings load resolves, so if the popup loses focus (or is closed) in
@@ -256,7 +265,12 @@ function applyI18n(): void {
     const key = el.dataset.i18nPlaceholder as I18nKey | undefined;
     if (key) el.placeholder = t(uiLanguage, key);
   });
+  document.querySelectorAll<HTMLElement>('[data-i18n-aria-label]').forEach((el) => {
+    const key = el.dataset.i18nAriaLabel as I18nKey | undefined;
+    if (key) el.setAttribute('aria-label', t(uiLanguage, key));
+  });
   setHealthState(healthState);
+  renderAutoSaveStatus();
   setAutoButtonState(autoBtn.classList.contains('active'));
   setInstructionsExpandedState(instructionsInput.classList.contains('textarea-expanded'));
   openWindowBtn.title = t(uiLanguage, 'titleOpenPopupWindow');
@@ -295,14 +309,199 @@ function setAutoButtonState(active: boolean): void {
 function initTabs(): void {
   document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
-      btn.classList.add('active');
-      const pane = document.getElementById(`tab-${btn.dataset.tab}`);
-      pane?.classList.add('active');
+      activateTab(btn.dataset.tab ?? 'translate');
       await autoSave();
     });
   });
+}
+
+function activateTab(tabName: string): void {
+  document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((button) => {
+    button.classList.toggle('active', button.dataset.tab === tabName);
+  });
+  document.querySelectorAll<HTMLElement>('.tab-pane').forEach((pane) => {
+    pane.classList.toggle('active', pane.id === `tab-${tabName}`);
+  });
+}
+
+function initSettingsSearch(): void {
+  const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab-btn'));
+  const panes = Array.from(document.querySelectorAll<HTMLElement>('.tab-pane'));
+
+  const clearSearch = (): void => {
+    settingsSearchInput.value = '';
+    settingsSearchWrap.classList.remove('has-query');
+    settingsSearchFeedback.textContent = '';
+    settingsSearchResults.replaceChildren();
+    panes.forEach((pane) => {
+      pane.querySelectorAll<HTMLElement>('.field, .toggle-row').forEach((row) => row.classList.remove('search-hidden'));
+      pane.querySelectorAll<HTMLDetailsElement>('details[data-search-opened="true"]').forEach((details) => {
+        details.open = false;
+        delete details.dataset.searchOpened;
+      });
+    });
+    tabButtons.forEach((button) => { button.hidden = false; });
+    if (tabBeforeSettingsSearch) activateTab(tabBeforeSettingsSearch);
+    tabBeforeSettingsSearch = null;
+  };
+
+  const jumpToSetting = (tabName: string, row: HTMLElement): void => {
+    const details = row.closest<HTMLDetailsElement>('details');
+    // Keep the destination disclosure open after clearing the temporary search.
+    if (details) delete details.dataset.searchOpened;
+    tabBeforeSettingsSearch = null;
+    clearSearch();
+    if (details) details.open = true;
+    activateTab(tabName);
+    window.requestAnimationFrame(() => {
+      row.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+      row.classList.add('settings-search-target');
+      window.setTimeout(() => row.classList.remove('settings-search-target'), 950);
+      row.querySelector<HTMLElement>('input, select, textarea, button')?.focus({ preventScroll: true });
+    });
+  };
+
+  settingsSearchInput.addEventListener('input', () => {
+    const query = normalizeSettingsSearch(settingsSearchInput.value);
+    settingsSearchWrap.classList.toggle('has-query', query.length > 0);
+    if (!query) {
+      clearSearch();
+      return;
+    }
+    if (!tabBeforeSettingsSearch) {
+      tabBeforeSettingsSearch = document.querySelector<HTMLButtonElement>('.tab-btn.active')?.dataset.tab ?? 'translate';
+    }
+
+    let totalMatches = 0;
+    const matchingTabs = new Set<string>();
+    const results: Array<{ tabName: string; tabLabel: string; row: HTMLElement; label: string; score: number }> = [];
+    for (const pane of panes) {
+      const rows = Array.from(pane.querySelectorAll<HTMLElement>('.field, .toggle-row'))
+        .filter((row) => !row.parentElement?.closest('.field, .toggle-row'));
+      let paneMatches = 0;
+      for (const row of rows) {
+        let ancestor = row.parentElement;
+        let conditionallyHidden = row.style.display === 'none';
+        while (!conditionallyHidden && ancestor && ancestor !== pane) {
+          conditionallyHidden = ancestor.style.display === 'none';
+          ancestor = ancestor.parentElement;
+        }
+        if (conditionallyHidden) {
+          row.classList.remove('search-hidden');
+          continue;
+        }
+        const score = settingsSearchMatchScore(query, row.textContent ?? '');
+        const matches = score > 0;
+        row.classList.toggle('search-hidden', !matches);
+        if (matches) {
+          paneMatches += 1;
+          row.closest('details:not([open])')?.setAttribute('data-search-opened', 'true');
+          const details = row.closest<HTMLDetailsElement>('details[data-search-opened="true"]');
+          if (details) details.open = true;
+          const tabName = pane.id.replace(/^tab-/, '');
+          const tabButton = tabButtons.find((button) => button.dataset.tab === tabName);
+          const labelElement = row.querySelector<HTMLElement>('.label, .toggle-title');
+          results.push({
+            tabName,
+            tabLabel: tabButton?.textContent?.trim() || tabName,
+            row,
+            label: labelElement?.textContent?.trim() || row.textContent?.trim().replace(/\s+/g, ' ').slice(0, 70) || tabName,
+            score,
+          });
+        }
+      }
+      totalMatches += paneMatches;
+      const tabName = pane.id.replace(/^tab-/, '');
+      if (paneMatches > 0) matchingTabs.add(tabName);
+    }
+
+    if (matchingTabs.size > 0) {
+      tabButtons.forEach((button) => { button.hidden = !matchingTabs.has(button.dataset.tab ?? ''); });
+      const activeName = document.querySelector<HTMLButtonElement>('.tab-btn.active')?.dataset.tab;
+      if (!activeName || !matchingTabs.has(activeName)) activateTab(matchingTabs.values().next().value ?? 'translate');
+      settingsSearchFeedback.textContent = t(uiLanguage, 'statusSettingsSearchCount', { count: totalMatches });
+      results.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+      settingsSearchResults.replaceChildren(...results.slice(0, 12).map((result) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'settings-search-result';
+        button.setAttribute('role', 'option');
+        const label = document.createElement('span');
+        label.className = 'settings-search-result-label';
+        label.textContent = result.label;
+        const tabLabel = document.createElement('span');
+        tabLabel.className = 'settings-search-result-tab';
+        tabLabel.textContent = result.tabLabel;
+        button.append(label, tabLabel);
+        button.addEventListener('click', () => jumpToSetting(result.tabName, result.row));
+        return button;
+      }));
+    } else {
+      // Keep navigation available for correction, but avoid leaving an empty
+      // hidden-tab row after a query with no hits.
+      tabButtons.forEach((button) => { button.hidden = false; });
+      activateTab(tabBeforeSettingsSearch ?? 'translate');
+      settingsSearchFeedback.textContent = t(uiLanguage, 'statusSettingsSearchEmpty');
+      settingsSearchResults.replaceChildren();
+    }
+  });
+
+  settingsSearchClearBtn.addEventListener('click', clearSearch);
+}
+
+function normalizeSettingsSearch(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+const SETTINGS_SEARCH_SYNONYMS: Array<{ triggers: string[]; aliases: string }> = [
+  { triggers: ['font size', 'text size', 'lettering'], aliases: 'co chu kich thuoc chu font size text size' },
+  { triggers: ['economy', 'cost', 'price'], aliases: 'tiet kiem chi phi gia re economy cost price cheap' },
+  { triggers: ['api key', 'api token', 'provider'], aliases: 'khoa key ma khoa credential token provider model' },
+  { triggers: ['reading direction', 'right to left', 'left to right'], aliases: 'huong doc phai trai manga comic reading direction' },
+  { triggers: ['combine page', 'page image', 'full page'], aliases: 'gop trang gop anh toan trang combine page image' },
+  { triggers: ['translate', 'translation', 'language'], aliases: 'dich ngon ngu ban dich translate translation language' },
+  { triggers: ['erase', 'inpainting'], aliases: 'xoa chu tay xoa lam sach erase inpainting' },
+];
+
+function settingsSearchMatchScore(query: string, rowText: string): number {
+  if (!query) return 0;
+  let text = normalizeSettingsSearch(rowText);
+  for (const synonym of SETTINGS_SEARCH_SYNONYMS) {
+    if (synonym.triggers.some((trigger) => text.includes(trigger))) text += ` ${synonym.aliases}`;
+  }
+  if (text.includes(query)) return 100 + query.length;
+
+  const queryTerms = query.split(/\s+/).filter(Boolean);
+  const words = text.split(/\s+/).filter(Boolean);
+  let score = 0;
+  for (const term of queryTerms) {
+    let best = 0;
+    for (const word of words) {
+      if (word === term) best = Math.max(best, 12);
+      else if (term.length >= 2 && word.startsWith(term)) best = Math.max(best, 9);
+      else if (term.length >= 4 && editDistanceAtMost(term, word, term.length >= 7 ? 2 : 1)) best = Math.max(best, 5);
+    }
+    if (!best) return 0;
+    score += best;
+  }
+  return score;
+}
+
+function editDistanceAtMost(a: string, b: string, limit: number): boolean {
+  if (Math.abs(a.length - b.length) > limit) return false;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMinimum = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      rowMinimum = Math.min(rowMinimum, current[j]);
+    }
+    if (rowMinimum > limit) return false;
+    previous = current;
+  }
+  return previous[b.length] <= limit;
 }
 
 function initSliders(): void {
@@ -392,6 +591,7 @@ function initStandaloneWindow(): void {
 
 async function init(): Promise<void> {
   initTabs();
+  initSettingsSearch();
   initSliders();
   if (isStandaloneWindow) {
     initStandaloneWindow();
@@ -421,6 +621,7 @@ async function loadAndBind(): Promise<void> {
   renderLanguageSelects();
   renderConfigSettings();
   settingsLoaded = true;
+  setAutoSaveState('saved');
 
   renderAccountView();
   if (settings.accountToken) void refreshAccountStatus();
@@ -1352,10 +1553,30 @@ async function handleWebSearchSourceChange(): Promise<void> {
 
 async function autoSave(): Promise<boolean> {
   if (!settingsLoaded) return false;
+  const revision = ++settingsSaveRevision;
+  setAutoSaveState('saving');
   const next = collectAllSettings();
   const saved = await saveSettings(next);
   if (saved) settings = next;
+  if (revision === settingsSaveRevision) setAutoSaveState(saved ? 'saved' : 'error');
   return saved;
+}
+
+function setAutoSaveState(state: 'saving' | 'saved' | 'error'): void {
+  settingsSaveState = state;
+  renderAutoSaveStatus();
+}
+
+function renderAutoSaveStatus(): void {
+  settingsSaveStatusEl.dataset.state = settingsSaveState;
+  const key: I18nKey | null = settingsSaveState === 'saving'
+    ? 'statusAutoSaveSaving'
+    : settingsSaveState === 'saved'
+      ? 'statusAutoSaveSaved'
+      : settingsSaveState === 'error'
+        ? 'statusAutoSaveFailed'
+        : null;
+  settingsSaveStatusEl.textContent = key ? t(uiLanguage, key) : '';
 }
 
 function collectAllSettings(): AppSettings {
