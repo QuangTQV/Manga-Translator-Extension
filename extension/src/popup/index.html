@@ -618,15 +618,104 @@
       backdrop-filter: blur(24px) saturate(160%);
       -webkit-backdrop-filter: blur(24px) saturate(160%);
     }
+    /* Treat the popup as one quiet glass pane, not a stack of competing cards.
+       Keep text-bearing controls much more opaque than the surrounding shell. */
+    .popup {
+      position: relative;
+      margin: 8px;
+      padding: 16px 15px 18px;
+      border: 1px solid rgba(211, 225, 250, 0.2);
+      border-radius: 22px;
+      background:
+        radial-gradient(ellipse 280px 170px at 12% -8%, rgba(125, 164, 225, 0.11), transparent 80%),
+        linear-gradient(145deg, rgba(24, 34, 51, 0.78), rgba(12, 18, 29, 0.84) 56%, rgba(19, 20, 32, 0.8));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.13), inset 0 0 0 1px rgba(195,215,250,0.025), 0 18px 42px rgba(0,0,0,0.36);
+      backdrop-filter: blur(28px) saturate(135%);
+      -webkit-backdrop-filter: blur(28px) saturate(135%);
+    }
+    .popup-subtitle { color: #b7c5dc; }
+    .label { color: #c3cfe2; font-size: 12px; }
+    .toggle-title { color: #e2eaf7; font-size: 12px; }
+    .toggle-hint, .master-toggle-hint { color: #b5c3d9; font-size: 12px; line-height: 1.52; }
+    .advanced-settings-hint, .suggest-web-search-hint, .sc-assets-label,
+    .settings-search-feedback, .settings-save-status { color: #b0bfd6; font-size: 11.5px; }
+    .popup-footer { color: #9eafc9; font-size: 11px; }
+    .tab-btn { font-size: 12px; }
+    .btn, .btn-secondary, .btn-add-fallback, .btn-fetch-models, .btn-test-all, .btn-test-key { font-size: 12px; }
+    .settings-search-result-label { font-size: 12px; }
+    .settings-search-result-tab { color: #b1bfd5; font-size: 10.5px; }
+    /* Flatten nested surfaces: the popup shell is the glass; controls get
+       their own compact affordance, while sections rely on spacing. */
+    .tabs {
+      padding: 0;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .tab-btn.active {
+      border-color: rgba(191, 219, 254, 0.12);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.11), 0 2px 8px rgba(0,0,0,0.12);
+    }
+    .config-section {
+      padding: 8px 2px;
+      overflow: visible;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .config-section::before { display: none; }
+    .config-section:focus-within { border-color: transparent; box-shadow: none; }
+    .master-toggle-row {
+      padding: 8px 3px 10px;
+      border: 0;
+      border-bottom: 1px solid rgba(134,239,172,0.24);
+      border-radius: 0;
+      background: linear-gradient(90deg, rgba(22,163,74,0.09), transparent 88%);
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .master-toggle-row.disabled {
+      border-bottom-color: rgba(248,113,113,0.3);
+      background: linear-gradient(90deg, rgba(220,38,38,0.1), transparent 88%);
+    }
+    .input, .select, .textarea { font-size: 14px; }
+    .tabs {
+      background: linear-gradient(120deg, rgba(34, 46, 66, 0.76), rgba(21, 28, 43, 0.84) 58%, rgba(31, 29, 46, 0.76));
+      border-color: rgba(207, 222, 247, 0.2);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 10px 24px rgba(0,0,0,0.24);
+    }
+    .config-section {
+      background: linear-gradient(145deg, rgba(29, 40, 59, 0.66), rgba(17, 24, 38, 0.72) 58%, rgba(25, 25, 39, 0.67));
+      border-color: rgba(198, 216, 246, 0.17);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.085), 0 10px 26px rgba(0,0,0,0.22);
+    }
+    .input, .select, .textarea, .settings-search {
+      background-color: rgba(5, 10, 20, 0.86);
+      border-color: rgba(194, 214, 246, 0.23);
+      color: #f0f5ff;
+    }
+    .input::placeholder, .textarea::placeholder, .settings-search input::placeholder { color: #9aaac3; }
+    .health-badge { color: #c0cce0; }
+    .health-badge.ok { color: #8ef0b1; }
+    .settings-save-status[data-state="saved"] { color: #bfd9c9; }
     @media (prefers-reduced-transparency: reduce) {
-      .tabs, .config-section, .master-toggle-row, #popup-status,
+      .popup, .tabs, .config-section, .master-toggle-row, #popup-status,
       .health-badge, .btn-open-window {
         backdrop-filter: none; -webkit-backdrop-filter: none;
       }
+      .popup { background: #111722; }
+      .tabs { background: transparent; }
       .tabs { background: #111b30; }
       .config-section { background: #111b30; }
-      .master-toggle-row { background: #12352a; }
-      .master-toggle-row.disabled { background: #3a1b27; }
+      .master-toggle-row { background: linear-gradient(90deg, rgba(22,101,52,.16), transparent 88%); }
+      .master-toggle-row.disabled { background: linear-gradient(90deg, rgba(127,29,29,.18), transparent 88%); }
       #popup-status { background: #162239; }
     }
     @media (prefers-reduced-motion: reduce) {
