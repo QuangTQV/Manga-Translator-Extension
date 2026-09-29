@@ -1,6 +1,7 @@
 import json
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -8,6 +9,7 @@ from utils.live_ai_usage import record_token_usage
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
 from utils.model_metadata import get_gpt5_generation, is_gpt5_series
+from utils.prompt_cache import stable_prompt_cache_key
 from utils.rate_limit import extract_retry_after_seconds
 
 
@@ -23,6 +25,7 @@ def call_openai_endpoint(
     base_delay: float = 1.0,
     enable_web_search: bool = False,
     base_url: str = "https://api.openai.com/v1",
+    enable_prompt_cache_key: bool = False,
 ) -> Optional[str]:
     """
     Calls an OpenAI-wire-compatible Responses API endpoint with the provided data and handles retries.
@@ -96,6 +99,12 @@ def call_openai_endpoint(
     }
     if system_prompt:
         payload["instructions"] = system_prompt
+        # This adapter is also used by Azure AI Foundry's Responses surface;
+        # only send OpenAI's cache-routing hint to the first-party API.
+        if enable_prompt_cache_key or urlparse(base_url).hostname == "api.openai.com":
+            payload["prompt_cache_key"] = stable_prompt_cache_key(
+                "openai", model_name, system_prompt
+            )
     if enable_web_search:
         payload["tools"] = [{"type": "web_search"}]
     payload = {k: v for k, v in payload.items() if v is not None}

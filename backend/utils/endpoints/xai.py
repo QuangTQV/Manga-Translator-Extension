@@ -7,6 +7,7 @@ import requests
 from utils.live_ai_usage import record_token_usage
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
+from utils.prompt_cache import stable_prompt_cache_key
 from utils.rate_limit import extract_retry_after_seconds
 
 
@@ -120,6 +121,10 @@ def call_xai_endpoint(
     }
 
     payload["max_output_tokens"] = generation_config.get("max_tokens", 4096)
+    if system_prompt:
+        payload["prompt_cache_key"] = stable_prompt_cache_key(
+            "xai", model_name, system_prompt
+        )
 
     model_lower = (model_name or "").lower()
     if "multi-agent" in model_lower:

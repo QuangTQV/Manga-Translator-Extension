@@ -7,6 +7,7 @@ import requests
 from utils.live_ai_usage import record_token_usage
 from utils.exceptions import TranslationError, ValidationError
 from utils.logging import log_message
+from utils.prompt_cache import stable_prompt_cache_key
 from utils.rate_limit import extract_retry_after_seconds
 
 # OpenRouter model metadata cache & reasoning detection
@@ -131,7 +132,25 @@ def call_openrouter_endpoint(
         else None
     )
     if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+        is_anthropic_model = metadata.get("is_anthropic_model", False)
+        if is_anthropic_model:
+            # Anthropic-backed OpenRouter models require an explicit cache
+            # breakpoint; other providers use their own automatic caching.
+            messages.append({
+                "role": "system",
+                "content": [{
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+            })
+        else:
+            messages.append({"role": "system", "content": system_prompt})
+        payload_session_id = stable_prompt_cache_key(
+            "openrouter", model_name, system_prompt
+        )
+    else:
+        payload_session_id = None
     for part in image_parts:
         if (
             "inline_data" in part
@@ -154,6 +173,10 @@ def call_openrouter_endpoint(
         "messages": messages,
         "max_tokens": generation_config.get("max_tokens", 4096),
     }
+    if payload_session_id:
+        # Stable session stickiness routes pages with the same system prefix
+        # to the same upstream cache without exposing prompt contents.
+        payload["session_id"] = payload_session_id
 
     if enable_web_search:
         if not model_name.endswith(":online"):

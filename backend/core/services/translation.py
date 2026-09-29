@@ -1564,6 +1564,7 @@ def _dispatch_llm_call(
                     system_prompt=system_prompt,
                     debug=debug,
                     base_url=endpoint,
+                    enable_prompt_cache_key=True,
                     enable_web_search=provider_web_search,
                     **extra_call_kwargs,
                 )
