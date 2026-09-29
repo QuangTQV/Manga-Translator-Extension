@@ -28,7 +28,8 @@ def test_index_integrity_rule_is_present():
         output_language="English", mode="one-step", reading_direction="rtl"
     )
     assert "Index Integrity" in prompt
-    assert "never from a similar-looking line you recall from a different crop" in prompt
+    assert "item `i` must come only from crop `i`" in prompt
+    assert "similar text from another crop or the full-page reference image" in prompt
 
 
 def test_index_integrity_rule_present_regardless_of_full_page_context():

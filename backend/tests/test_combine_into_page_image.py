@@ -184,19 +184,17 @@ def test_single_page_image_system_prompt_talks_about_numbered_regions():
     assert "region numbered `i`" in prompt
     assert "one line per numbered region" in prompt
     assert "numbered regions' order" in prompt
-    assert "every ID from `1` through the stated number of marked regions exactly once" in prompt
-    assert "Never renumber, merge, split, or move text between regions" in prompt
+    assert "IDs `1..N` exactly once" in prompt
+    assert "never add, omit, duplicate, renumber, merge, split, or move text between regions" in prompt
 
 
-def test_default_system_prompt_unchanged_when_single_page_image_omitted():
-    # Regression guard: the wording refactor for single_page_image must not
-    # alter a single character of the existing one-step/two-step prompts.
+def test_default_system_prompt_keeps_crop_and_reference_assignment_clear():
     one_step = tr._build_system_prompt_translation(
         output_language="English", mode="one-step", reading_direction="rtl"
     )
     assert "image crops" in one_step
-    assert "crop `i` itself" in one_step
-    assert "different crop or from the full-page reference image" in one_step
+    assert "item `i` must come only from crop `i`" in one_step
+    assert "not similar text from another crop or the full-page reference image" in one_step
     assert "one line per input image" in one_step
     assert "numbered region" not in one_step
 

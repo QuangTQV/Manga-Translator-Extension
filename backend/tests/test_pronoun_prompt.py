@@ -42,7 +42,7 @@ def test_unclear_relationship_defaults_to_casual_pair_not_toi_ban():
         output_language="Vietnamese", mode="one-step", reading_direction="rtl"
     )
     assert 'default to "cậu"/"tớ", NOT "tôi"/"bạn"' in prompt
-    assert "reserved for the two named cases above" in prompt
+    assert 'reserve "tôi/bạn" for genuine strangers or clearly formal/business speech' in prompt
 
 
 def test_self_check_instruction_present_for_vietnamese():
@@ -85,7 +85,7 @@ def test_identify_pairs_by_name_rule_present_for_vietnamese():
         output_language="Vietnamese", mode="one-step", reading_direction="rtl"
     )
     assert "Identify pairs by name, not appearance" in prompt
-    assert "stays the same across the whole story" in prompt
+    assert "remain stable across crops/pages" in prompt
 
 
 def test_identify_pairs_by_name_rule_absent_for_non_vietnamese():
