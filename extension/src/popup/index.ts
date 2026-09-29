@@ -691,6 +691,10 @@ function initStandaloneWindow(): void {
 }
 
 async function init(): Promise<void> {
+  // `body` has backdrop-filter for the glass UI, which makes it the containing
+  // block for fixed descendants. Keep the help overlay outside body so it is
+  // fixed to the popup viewport rather than scrolling with the tab content.
+  document.documentElement.appendChild(supportChatOverlay);
   initTabs();
   initSettingsSearch();
   initSliders();
