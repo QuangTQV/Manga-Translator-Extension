@@ -349,6 +349,26 @@
       border: 1px solid rgba(59,130,246,0.06); font-size: 11px; padding: 8px;
     }
     .btn-clear-cache:hover { color: #7a90b8; border-color: rgba(59,130,246,0.15); }
+    #btn-clear-cache {
+      min-height: 42px;
+      color: #dce9ff;
+      background: linear-gradient(110deg, rgba(52,91,151,.27), rgba(69,57,117,.22));
+      border: 1px solid rgba(147,197,253,.34);
+      font-size: 13px;
+      font-weight: 650;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    #btn-clear-cache:hover:not(:disabled) {
+      color: #fff;
+      background: linear-gradient(110deg, rgba(59,130,246,.34), rgba(124,58,237,.27));
+      border-color: rgba(191,219,254,.52);
+    }
+    #btn-clear-cache:disabled {
+      color: #c1cee2;
+      border-color: rgba(147,197,253,.25);
+      opacity: .78;
+      cursor: wait;
+    }
     /* Fixed to the popup's own viewport (not the scrolling document — the
        popup body has no internal scroll container, so a tall tab like
        Story DB can easily push the old in-flow status line below the fold,
