@@ -608,6 +608,46 @@ function initPopupResize(): void {
   observer.observe(document.body);
 }
 
+// Let wheel/trackpad scrolling over small, nested scroll areas move the popup
+// itself while there is still page content to reveal. Otherwise a long
+// textarea or settings-results list can consume the first gesture, making the
+// popup feel like it only scrolls on the second one. Keep the help-chat's own
+// message history independently scrollable while its overlay is open.
+function initPopupScrollPassthrough(): void {
+  document.addEventListener('wheel', (event) => {
+    if (event.defaultPrevented || event.deltaY === 0) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('#support-chat-overlay.open')) return;
+
+    const nestedScroller = target.closest<HTMLElement>([
+      '.textarea-auto',
+      '.replacements-textarea',
+      '.settings-search-results',
+      '#web-search-test-results',
+    ].join(','));
+    if (!nestedScroller) return;
+
+    const body = document.body;
+    const maxScrollTop = body.scrollHeight - body.clientHeight;
+    if (maxScrollTop <= 0) return;
+
+    const deltaMultiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? body.clientHeight
+        : 1;
+    const nextScrollTop = Math.max(0, Math.min(
+      maxScrollTop,
+      body.scrollTop + event.deltaY * deltaMultiplier,
+    ));
+    if (nextScrollTop === body.scrollTop) return;
+
+    event.preventDefault();
+    body.scrollTop = nextScrollTop;
+  }, { passive: false });
+}
+
 // A real chrome.windows popup-type window (as opposed to the action popup) is
 // freely, reliably resizable by dragging any of its OS-drawn edges — the same
 // page just runs with `?standalone=1` so it can fill that window instead of
@@ -659,6 +699,7 @@ async function init(): Promise<void> {
   } else {
     await restorePopupSize();
     initPopupResize();
+    initPopupScrollPassthrough();
     openWindowBtn.addEventListener('click', () => { void openInStandaloneWindow(); });
   }
   window.addEventListener('blur', () => { void autoSave(); });
