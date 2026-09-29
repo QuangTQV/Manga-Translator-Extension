@@ -464,6 +464,55 @@ def _build_annotated_page_image(
     return annotated
 
 
+def _resolve_combined_page_image_max_side(
+    image_size: Tuple[int, int],
+    regions: List[Dict[str, Any]],
+    resolution_mode: str,
+    legacy_max_side: int = 1536,
+) -> int:
+    """Choose a bounded page-image size from the user's preset and text boxes.
+
+    Auto targets roughly 30 output pixels across the short side of the lower
+    decile of detected regions, then rounds up to a small set of predictable
+    sizes. A region-count floor helps pages with many numbered labels stay
+    readable. This is local geometry only: it never makes another LLM call.
+    """
+    presets = {"low": 1024, "standard": 1536, "high": 2560}
+    if resolution_mode in presets:
+        return presets[resolution_mode]
+    if resolution_mode == "legacy":
+        return max(512, min(4096, int(legacy_max_side or 1536)))
+
+    longest_side = max(int(image_size[0]), int(image_size[1]), 1)
+    short_sides: List[float] = []
+    for region in regions:
+        bbox = region.get("bbox")
+        if bbox is None:
+            continue
+        try:
+            x1, y1, x2, y2 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            continue
+        short_side = min(abs(x2 - x1), abs(y2 - y1))
+        if math.isfinite(short_side) and short_side > 0:
+            short_sides.append(short_side)
+
+    # With no trustworthy boxes, use the familiar middle preset.
+    if not short_sides:
+        return 1536
+
+    short_sides.sort()
+    lower_decile_index = max(0, math.ceil(len(short_sides) * 0.1) - 1)
+    smallest_typical_region = short_sides[lower_decile_index]
+    required_side = 30 * longest_side / smallest_typical_region
+    region_count_floor = 2048 if len(short_sides) >= 60 else 1536 if len(short_sides) >= 35 else 1024
+    target = max(required_side, region_count_floor)
+    for preset in (1024, 1536, 2048, 2560):
+        if preset >= target:
+            return preset
+    return 2560
+
+
 def _normalize_debug_mask(mask, image_size):
     """Normalize a debug mask into a full-image boolean array."""
     if mask is None:
@@ -1283,8 +1332,14 @@ def translate_and_render(
                     and sorted_bubble_data
                 ):
                     try:
+                        requested_page_max_side = _resolve_combined_page_image_max_side(
+                            pil_image_processed.size,
+                            sorted_bubble_data,
+                            config.translation.combine_page_image_resolution,
+                            config.translation.combine_page_image_max_side_pixels,
+                        )
                         effective_page_max_side = scale_length(
-                            config.translation.context_image_max_side_pixels,
+                            requested_page_max_side,
                             None,
                             minimum=512,
                             maximum=4096,
@@ -1309,6 +1364,8 @@ def translate_and_render(
                         log_message(
                             "Encoded single annotated page image "
                             f"({len(sorted_bubble_data)} numbered regions) "
+                            f"at max side {effective_page_max_side}px "
+                            f"(resolution mode: {config.translation.combine_page_image_resolution}) "
                             "instead of per-bubble crops",
                             verbose=verbose,
                         )

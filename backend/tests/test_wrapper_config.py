@@ -171,6 +171,24 @@ def test_reading_direction_passes_through_to_sorting_config(direction):
     assert cfg.translation.reading_direction == direction
 
 
+def test_combine_page_image_max_side_pixels_defaults_to_1536():
+    cfg = _build_minimal_config()
+    assert cfg.translation.combine_page_image_max_side_pixels == 1536
+    assert cfg.translation.combine_page_image_resolution == "legacy"
+
+
+@pytest.mark.parametrize("mode", ["legacy", "auto", "low", "standard", "high"])
+def test_combine_page_image_resolution_passes_through(mode):
+    cfg = _build_minimal_config(combine_page_image_resolution=mode)
+    assert cfg.translation.combine_page_image_resolution == mode
+
+
+@pytest.mark.parametrize("max_side", [1024, 2048, 2560])
+def test_combine_page_image_max_side_pixels_passes_through(max_side):
+    cfg = _build_minimal_config(combine_page_image_max_side_pixels=max_side)
+    assert cfg.translation.combine_page_image_max_side_pixels == max_side
+
+
 def test_invalid_reading_direction_falls_back_to_rtl():
     cfg = _build_minimal_config(reading_direction="sideways")
     assert cfg.translation.reading_direction == "rtl"

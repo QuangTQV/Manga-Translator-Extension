@@ -151,6 +151,16 @@ class TranslationConfig:
     # Defaults on: the cost savings apply to every one-step LLM-OCR page,
     # and measured translation quality held up well in practice.
     combine_into_page_image: bool = True
+    # Separate from context_image_max_side_pixels on purpose: that one caps
+    # an OPTIONAL secondary reference image (send_full_page_context), where
+    # legibility doesn't matter since the model isn't asked to read text
+    # from it. Here the annotated page IS the only thing the model reads
+    # text from, so it defaults higher — still far cheaper per page than
+    # sending N per-bubble crops even at this size (see core/pipeline.py:
+    # _build_annotated_page_image and CLAUDE.md's "Combine into one page
+    # image" section for the token-cost comparison).
+    combine_page_image_max_side_pixels: int = 1536
+    combine_page_image_resolution: str = "legacy"
     reasoning_effort: Optional[str] = (
         None  # Default: Google uses "auto", Anthropic uses "none", others use "medium"
     )

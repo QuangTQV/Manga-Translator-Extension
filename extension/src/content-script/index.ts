@@ -5094,6 +5094,8 @@ function buildTranslateRequest(
     // or omitting it would let the backend's own true default override
     // their choice right back on.
     combine_into_page_image: settings.config.combineIntoPageImage ?? true,
+    combine_page_image_max_side_pixels: settings.config.combinePageImageMaxSide ?? 1536,
+    combine_page_image_resolution: settings.config.combinePageImageResolution ?? 'auto',
     reading_direction: settings.config.readingDirection ?? 'rtl',
     ocr_method: settings.config.ocrMethod,
     reasoning_effort: rotation.reasoning_effort,
@@ -5429,6 +5431,7 @@ function getDefaultSettings(): AppSettings {
       topK: 1,
       translationMode: 'one-step',
       combineIntoPageImage: true,
+      combinePageImageMaxSide: 1536,
       ocrMethod: 'LLM',
       maxFontSize: 32,
       minFontSize: 8,

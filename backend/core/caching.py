@@ -245,6 +245,12 @@ class UnifiedCache:
             "reading_direction": config.reading_direction,
             "translation_mode": config.translation_mode,
             "combine_into_page_image": getattr(config, "combine_into_page_image", False),
+            "combine_page_image_max_side_pixels": getattr(
+                config, "combine_page_image_max_side_pixels", None
+            ),
+            "combine_page_image_resolution": getattr(
+                config, "combine_page_image_resolution", "legacy"
+            ),
             "send_full_page_context": config.send_full_page_context,
             "temperature": config.temperature,
             "top_k": config.top_k,

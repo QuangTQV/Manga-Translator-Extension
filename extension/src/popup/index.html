@@ -1179,6 +1179,16 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="field" id="combine-page-image-resolution-row" style="margin-top:8px">
+          <label class="label" for="f-combine-page-image-resolution" data-i18n="labelCombinePageImageResolution">Combined page image resolution</label>
+          <select id="f-combine-page-image-resolution" class="select">
+            <option value="auto" data-i18n="combinePageResolutionAuto">Auto (adaptive)</option>
+            <option value="low" data-i18n="combinePageResolutionLow">Low — 1024 px</option>
+            <option value="standard" data-i18n="combinePageResolutionStandard">Standard — 1536 px</option>
+            <option value="high" data-i18n="combinePageResolutionHigh">High — 2560 px</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintCombinePageImageResolution">Higher keeps small/dense text more legible in the combined page image — still much cheaper than one image per bubble, but uses somewhat more tokens per page.</div>
+        </div>
 
         <label class="label" style="margin-top:14px" data-i18n="labelLettering">Lettering</label>
         <div class="toggle-hint" data-i18n="hintLettering">How translated text is drawn in speech bubbles and Select text area boxes (text outside bubbles keeps its own style).</div>

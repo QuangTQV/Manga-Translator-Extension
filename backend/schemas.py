@@ -187,6 +187,10 @@ class TranslateOptions(BaseModel):
     max_tokens: Optional[int] = None
     translation_mode: str = "one-step"
     combine_into_page_image: bool = True
+    combine_page_image_max_side_pixels: int = Field(default=1536, ge=512, le=4096)
+    # `legacy` preserves the numeric max-side behavior for older extensions;
+    # new clients send one of the adaptive/manual presets explicitly.
+    combine_page_image_resolution: Literal["legacy", "auto", "low", "standard", "high"] = "legacy"
     reading_direction: str = "rtl"
     ocr_method: str = "LLM"
     reasoning_effort: Optional[str] = None

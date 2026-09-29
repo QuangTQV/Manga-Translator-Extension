@@ -9,9 +9,10 @@ branch)."""
 import base64
 from io import BytesIO
 
+import pytest
 import core.services.translation as tr
 from core.config import TranslationConfig
-from core.pipeline import _build_annotated_page_image
+from core.pipeline import _build_annotated_page_image, _resolve_combined_page_image_max_side
 from PIL import Image
 
 
@@ -90,10 +91,82 @@ def test_combine_into_page_image_defaults_to_enabled():
     assert TranslationConfig(provider="Google", google_api_key="k").combine_into_page_image is True
 
 
+def test_combine_page_image_max_side_pixels_defaults_to_1536():
+    config = TranslationConfig(provider="Google", google_api_key="k")
+    assert config.combine_page_image_max_side_pixels == 1536
+
+
+def test_combine_page_image_max_side_pixels_is_separate_from_context_image_setting():
+    # Deliberately two different fields — see core/config.py's comment on
+    # combine_page_image_max_side_pixels for why they must not be merged.
+    config = TranslationConfig(provider="Google", google_api_key="k")
+    assert config.context_image_max_side_pixels != config.combine_page_image_max_side_pixels
+
+
+def test_translate_options_rejects_out_of_range_combine_page_image_max_side():
+    import pytest
+    from pydantic import ValidationError
+
+    from schemas import TranslateOptions
+
+    base = dict(input_language="Japanese", output_language="English", provider="Google")
+    TranslateOptions(**base, combine_page_image_max_side_pixels=512)  # lower bound ok
+    TranslateOptions(**base, combine_page_image_max_side_pixels=4096)  # upper bound ok
+    with pytest.raises(ValidationError):
+        TranslateOptions(**base, combine_page_image_max_side_pixels=511)
+    with pytest.raises(ValidationError):
+        TranslateOptions(**base, combine_page_image_max_side_pixels=4097)
+
+
+def test_combine_page_image_max_side_pixels_is_part_of_the_cache_key():
+    from core.caching import UnifiedCache
+
+    cache = UnifiedCache()
+    config_small = TranslationConfig(
+        provider="Google", google_api_key="k", temperature=0.0,
+        combine_into_page_image=True, combine_page_image_max_side_pixels=1024,
+    )
+    config_large = TranslationConfig(
+        provider="Google", google_api_key="k", temperature=0.0,
+        combine_into_page_image=True, combine_page_image_max_side_pixels=2048,
+    )
+    key_small = cache.get_translation_cache_key(["same-image-data"], "", config_small)
+    key_large = cache.get_translation_cache_key(["same-image-data"], "", config_large)
+    assert key_small != key_large
+
+
 def test_build_annotated_page_image_does_not_upscale_a_small_page():
     page = Image.new("RGB", (300, 200), (255, 255, 255))
     annotated = _build_annotated_page_image(page, [], max_side_pixels=1024)
     assert annotated.size == (300, 200)
+
+
+@pytest.mark.parametrize("mode,expected", [("low", 1024), ("standard", 1536), ("high", 2560)])
+def test_combined_page_resolution_presets(mode, expected):
+    assert _resolve_combined_page_image_max_side((3000, 4000), [], mode) == expected
+
+
+def test_combined_page_resolution_keeps_legacy_numeric_setting():
+    assert _resolve_combined_page_image_max_side((3000, 4000), [], "legacy", 2048) == 2048
+
+
+def test_combined_page_resolution_auto_uses_low_for_easy_page():
+    regions = [{"bbox": (i * 300, 100, i * 300 + 240, 300)} for i in range(6)]
+    assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 1024
+
+
+def test_combined_page_resolution_auto_raises_for_dense_small_text():
+    regions = [{"bbox": (i * 30, 100, i * 30 + 100, 200)} for i in range(40)]
+    assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 1536
+
+
+def test_combined_page_resolution_auto_uses_highest_bound_for_tiny_regions():
+    regions = [{"bbox": (i * 20, 100, i * 20 + 20, 120)} for i in range(60)]
+    assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 2560
+
+
+def test_combined_page_resolution_auto_falls_back_without_valid_boxes():
+    assert _resolve_combined_page_image_max_side((2000, 3000), [{"bbox": None}], "auto") == 1536
 
 
 # ---------------------------------------------------------------------------

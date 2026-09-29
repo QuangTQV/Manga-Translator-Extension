@@ -151,6 +151,12 @@ export interface TranslateConfig {
   // numbered) instead of one cropped image per element — fewer images per
   // request, at the cost of per-element legibility on a busy page.
   combineIntoPageImage?: boolean;
+  // Longest side (px) the combined page image is resized to before the
+  // numbered boxes are drawn — separate from the smaller default used for
+  // the optional send_full_page_context reference image, since this one is
+  // actually read for text.
+  combinePageImageMaxSide?: number;
+  combinePageImageResolution?: 'auto' | 'low' | 'standard' | 'high';
   readingDirection?: 'rtl' | 'ltr';
   ocrMethod: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoningEffort?: string;
@@ -287,6 +293,8 @@ export interface TranslateRequest {
   max_tokens?: number;
   translation_mode: 'one-step' | 'two-step';
   combine_into_page_image?: boolean;
+  combine_page_image_max_side_pixels?: number;
+  combine_page_image_resolution?: 'legacy' | 'auto' | 'low' | 'standard' | 'high';
   reading_direction?: 'rtl' | 'ltr';
   ocr_method: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoning_effort?: string;
@@ -444,6 +452,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     topK: 1,
     translationMode: 'one-step',
     combineIntoPageImage: true,
+    combinePageImageMaxSide: 1536,
+    combinePageImageResolution: 'auto',
     readingDirection: 'rtl',
     ocrMethod: 'LLM',
     maxFontSize: 32,
