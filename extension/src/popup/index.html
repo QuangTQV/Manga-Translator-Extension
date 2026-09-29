@@ -503,12 +503,31 @@
     .settings-search-target { animation: settings-search-target 900ms ease-out; }
     @keyframes settings-search-target { 0%, 100% { outline-color: transparent; } 20%, 75% { outline: 2px solid rgba(96,165,250,.68); outline-offset: 3px; } }
     .search-hidden { display: none !important; }
-    .advanced-settings { margin-top: 2px; border: 1px solid rgba(187,204,235,.11); border-radius: 9px; background: rgba(5,9,17,.2); }
-    .advanced-settings > summary { padding: 10px 11px; color: #a9bad8; font-size: 11px; font-weight: 700; cursor: pointer; list-style: none; }
+    .advanced-settings {
+      margin-top: 7px; overflow: hidden; border: 1px solid rgba(96,165,250,.34); border-radius: 11px;
+      background: linear-gradient(120deg, rgba(28,48,80,.62), rgba(24,25,48,.58));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.075), 0 7px 20px rgba(0,0,0,.16);
+      transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+    }
+    .advanced-settings:hover { border-color: rgba(125,174,255,.58); background: linear-gradient(120deg, rgba(34,58,94,.72), rgba(31,31,59,.68)); }
+    .advanced-settings[open] { border-color: rgba(125,174,255,.48); background: rgba(13,20,34,.66); }
+    .advanced-settings > summary {
+      display: flex; align-items: center; gap: 11px; min-height: 60px; padding: 10px 13px;
+      color: #eff6ff; font-size: 12px; font-weight: 750; cursor: pointer; list-style: none;
+    }
     .advanced-settings > summary::-webkit-details-marker { display: none; }
-    .advanced-settings > summary::after { content: '＋'; float: right; color: #8291aa; }
+    .advanced-settings > summary::after {
+      content: '＋'; display: grid; place-items: center; flex: 0 0 25px; height: 25px; margin-left: auto;
+      border: 1px solid rgba(147,197,253,.28); border-radius: 7px; color: #bfdbfe;
+      background: rgba(96,165,250,.12); font-size: 16px; font-weight: 500;
+    }
     .advanced-settings[open] > summary::after { content: '−'; }
-    .advanced-settings[open] > summary { border-bottom: 1px solid rgba(187,204,235,.1); }
+    .advanced-settings[open] > summary { border-bottom: 1px solid rgba(147,197,253,.18); }
+    .advanced-settings > summary:focus-visible { outline: 2px solid #93c5fd; outline-offset: -3px; border-radius: 10px; }
+    .advanced-settings-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 9px; color: #bfdbfe; background: linear-gradient(145deg, rgba(59,130,246,.28), rgba(124,58,237,.2)); box-shadow: inset 0 1px 0 rgba(255,255,255,.15); font-size: 16px; }
+    .advanced-settings-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+    .advanced-settings-title { color: #eff6ff; line-height: 1.25; }
+    .advanced-settings-hint { color: #a8bbd8; font-size: 10px; font-weight: 450; line-height: 1.35; }
     .advanced-settings-content { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
     /* Liquid-glass surfaces: layered cool light, translucent material and a
        fine specular edge. Keep the controls themselves opaque enough to read. */
@@ -825,7 +844,13 @@
         </div>
 
         <details class="advanced-settings">
-          <summary data-i18n="labelAdvancedLlmSettings">Advanced LLM settings</summary>
+          <summary>
+            <span class="advanced-settings-icon" aria-hidden="true">⚙</span>
+            <span class="advanced-settings-copy">
+              <span class="advanced-settings-title" data-i18n="labelAdvancedLlmSettings">Advanced LLM settings</span>
+              <span class="advanced-settings-hint" data-i18n="hintAdvancedLlmSettings">Affects model behavior, cost, and response speed</span>
+            </span>
+          </summary>
           <div class="advanced-settings-content">
 
         <div class="llm-fields-row">
