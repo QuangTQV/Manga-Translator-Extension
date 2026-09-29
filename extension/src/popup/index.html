@@ -403,14 +403,24 @@
     .tab-btn {
       min-height: 34px; padding: 7px 5px;
       color: #91a2c1; font-size: 11px;
+      transition: color 180ms ease, background 220ms ease, box-shadow 220ms ease, transform 220ms cubic-bezier(.2,.75,.25,1);
     }
     .tab-btn:hover { color: #e5ecf8; background: rgba(255,255,255,0.04); }
+    .tab-btn:active { transform: scale(0.97); }
     .tab-btn.active {
       color: #bfdbfe;
       background: linear-gradient(135deg, rgba(59,130,246,0.27), rgba(124,58,237,0.2));
       box-shadow: inset 0 0 0 1px rgba(96,165,250,0.2);
     }
-    .tab-pane.active { gap: 13px; }
+    .tab-pane.active {
+      gap: 13px;
+      animation: popup-tab-enter 280ms cubic-bezier(.2,.75,.25,1) both;
+      transform-origin: top center;
+    }
+    @keyframes popup-tab-enter {
+      from { opacity: 0; transform: translateY(8px) scale(.994); filter: blur(2px); }
+      to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
     .config-section {
       padding: 15px; gap: 14px;
       background: linear-gradient(155deg, rgba(17,28,51,0.96), rgba(12,19,36,0.96));
