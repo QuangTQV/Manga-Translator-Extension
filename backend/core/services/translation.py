@@ -353,6 +353,13 @@ You must use the following markdown-style markers to convey emphasis:
         if is_vietnamese_output
         else f"`i: <translated {output_language} text>`"
     )
+    numbered_region_integrity = (
+        """
+- **Number integrity:** Treat each printed box number as a fixed ID. Return every ID from `1` through the stated number of marked regions exactly once, with no missing, duplicate, or extra IDs. Never renumber, merge, split, or move text between regions.
+- Keep each region's transcription and translation together on its own single numbered line. If a region is unreadable, still return its ID and use `[OCR FAILED]` as specified; never omit it."""
+        if single_page_image
+        else ""
+    )
     pronoun_subject_reminder = (
         """
 - **Right before you write each translated line**, re-check: does the source line contain "I"/"me"? Does it contain "you"? Only insert a pronoun term for a role that's ACTUALLY present in that specific source line — a line with only "you" (no "I") gets only the listener's term, as its subject; do not add the speaker's own term as a second, unwarranted subject.
@@ -372,6 +379,7 @@ You must use the following markdown-style markers to convey emphasis:
 - The numbering must correspond to the {item_ref_order} order (1, 2, 3...).
 - For each item, provide both transcription and translation in the format:
   {one_step_format} where `i` is the {item_ref} number.
+{numbered_region_integrity}
 {memory_note_instruction}{pronoun_subject_reminder}
 - Do not include section headers, explanations, or formatting outside of this list{schema_exceptions}.
 """

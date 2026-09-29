@@ -478,6 +478,14 @@
           </label>
         </div>
         <div class="field">
+          <label class="label" for="f-reading-direction" data-i18n="labelReadingDirection">Reading direction</label>
+          <select id="f-reading-direction" class="select">
+            <option value="rtl" data-i18n="readingDirectionRtl">Right to left (Japanese manga)</option>
+            <option value="ltr" data-i18n="readingDirectionLtr">Left to right (comics)</option>
+          </select>
+          <div class="toggle-hint" data-i18n="hintReadingDirection">Controls the order used to number detected text regions before translation. This does not add an LLM call.</div>
+        </div>
+        <div class="field">
           <label class="label" for="f-text-reading" data-i18n="labelTextReading">Text reading</label>
           <select id="f-text-reading" class="select">
             <option value="llm" data-i18n="textReadingLlm">AI reads the page image (default)</option>

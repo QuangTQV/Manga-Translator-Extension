@@ -187,6 +187,7 @@ class TranslateOptions(BaseModel):
     max_tokens: Optional[int] = None
     translation_mode: str = "one-step"
     combine_into_page_image: bool = True
+    reading_direction: str = "rtl"
     ocr_method: str = "LLM"
     reasoning_effort: Optional[str] = None
     special_instructions: Optional[str] = None

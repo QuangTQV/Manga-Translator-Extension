@@ -42,6 +42,7 @@ const testFluxRemoteBtn = qs<HTMLButtonElement>('btn-test-flux-remote');
 const fluxRemoteTestStatus = qs<HTMLSpanElement>('flux-remote-test-status');
 const preTranslateToggle = qs<HTMLInputElement>('f-pre-translate');
 const textReadingSelect = qs<HTMLSelectElement>('f-text-reading');
+const readingDirectionSelect = qs<HTMLSelectElement>('f-reading-direction');
 const previousContextToggle = qs<HTMLInputElement>('f-previous-context');
 const contextMemoryToggle = qs<HTMLInputElement>('f-context-memory');
 const contextMemorySequentialToggle = qs<HTMLInputElement>('f-context-memory-sequential');
@@ -447,6 +448,7 @@ function renderConfigSettings(): void {
   updateInpaintingMethodVisibility();
   preTranslateToggle.checked = settings.config.preTranslate ?? false;
   textReadingSelect.value = settings.config.translationMode === 'two-step' && settings.config.ocrMethod !== 'LLM' ? settings.config.ocrMethod : 'llm';
+  readingDirectionSelect.value = settings.config.readingDirection ?? 'rtl';
   previousContextToggle.checked = settings.config.previousContextEnabled ?? false;
   contextMemoryToggle.checked = settings.config.contextMemoryEnabled ?? false;
   contextMemorySequentialToggle.checked = settings.config.contextMemorySequential ?? false;
@@ -509,7 +511,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, combinePageImageToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
+  for (const el of [backendInput, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, combinePageImageToggle, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, readingDirectionSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -1383,6 +1385,7 @@ function collectAllSettings(): AppSettings {
       useStoryReferenceImages: storyRefImagesToggle.checked,
       economyMode: economyModeToggle.checked,
       combineIntoPageImage: combinePageImageToggle.checked,
+      readingDirection: readingDirectionSelect.value as TranslateConfig['readingDirection'],
       fontDir: fontPackSelect.value || undefined,
       minFontSize: Math.max(1, parseInt(minFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.minFontSize),
       maxFontSize: Math.max(1, parseInt(maxFontSizeInput.value, 10) || DEFAULT_SETTINGS.config.maxFontSize),

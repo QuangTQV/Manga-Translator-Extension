@@ -151,6 +151,7 @@ export interface TranslateConfig {
   // numbered) instead of one cropped image per element — fewer images per
   // request, at the cost of per-element legibility on a busy page.
   combineIntoPageImage?: boolean;
+  readingDirection?: 'rtl' | 'ltr';
   ocrMethod: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoningEffort?: string;
   specialInstructions?: string; // per-story notes (glossary, character relationships)
@@ -286,6 +287,7 @@ export interface TranslateRequest {
   max_tokens?: number;
   translation_mode: 'one-step' | 'two-step';
   combine_into_page_image?: boolean;
+  reading_direction?: 'rtl' | 'ltr';
   ocr_method: 'LLM' | 'manga-ocr' | 'paddleocr-vl';
   reasoning_effort?: string;
   special_instructions?: string;
@@ -442,6 +444,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     topK: 1,
     translationMode: 'one-step',
     combineIntoPageImage: true,
+    readingDirection: 'rtl',
     ocrMethod: 'LLM',
     maxFontSize: 32,
     minFontSize: 8,

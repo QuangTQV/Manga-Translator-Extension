@@ -165,6 +165,17 @@ def test_missing_cooldown_defaults_to_fifteen():
     assert cfg.translation.cooldown_seconds == 15.0
 
 
+@pytest.mark.parametrize("direction", ["rtl", "ltr"])
+def test_reading_direction_passes_through_to_sorting_config(direction):
+    cfg = _build_minimal_config(reading_direction=direction)
+    assert cfg.translation.reading_direction == direction
+
+
+def test_invalid_reading_direction_falls_back_to_rtl():
+    cfg = _build_minimal_config(reading_direction="sideways")
+    assert cfg.translation.reading_direction == "rtl"
+
+
 def test_non_positive_api_key_weight_defaults_to_one():
     cfg = _build_minimal_config(api_key_weight=-3)
     assert cfg.translation.api_key_weight == 1.0

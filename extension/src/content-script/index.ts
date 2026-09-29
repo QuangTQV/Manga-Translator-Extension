@@ -5094,6 +5094,7 @@ function buildTranslateRequest(
     // or omitting it would let the backend's own true default override
     // their choice right back on.
     combine_into_page_image: settings.config.combineIntoPageImage ?? true,
+    reading_direction: settings.config.readingDirection ?? 'rtl',
     ocr_method: settings.config.ocrMethod,
     reasoning_effort: rotation.reasoning_effort,
     special_instructions: settings.config.specialInstructions || undefined,

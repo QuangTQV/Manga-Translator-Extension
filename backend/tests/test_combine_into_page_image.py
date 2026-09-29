@@ -111,6 +111,8 @@ def test_single_page_image_system_prompt_talks_about_numbered_regions():
     assert "region numbered `i`" in prompt
     assert "one line per numbered region" in prompt
     assert "numbered regions' order" in prompt
+    assert "every ID from `1` through the stated number of marked regions exactly once" in prompt
+    assert "Never renumber, merge, split, or move text between regions" in prompt
 
 
 def test_default_system_prompt_unchanged_when_single_page_image_omitted():
