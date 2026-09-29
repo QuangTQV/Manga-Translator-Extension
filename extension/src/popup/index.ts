@@ -623,8 +623,6 @@ function initPopupScrollPassthrough(): void {
     const nestedScroller = target.closest<HTMLElement>([
       '.textarea-auto',
       '.replacements-textarea',
-      '.settings-search-results',
-      '#web-search-test-results',
     ].join(','));
     if (!nestedScroller) return;
 
