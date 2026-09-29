@@ -318,10 +318,21 @@ function initTabs(): void {
 }
 
 function activateTab(tabName: string): void {
-  document.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((button) => {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab-btn'));
+  const panes = Array.from(document.querySelectorAll<HTMLElement>('.tab-pane'));
+  const previousPane = panes.find((pane) => pane.classList.contains('active'));
+  const nextPane = panes.find((pane) => pane.id === `tab-${tabName}`);
+  if (!nextPane) return;
+  if (nextPane !== previousPane) {
+    const previousIndex = previousPane ? panes.indexOf(previousPane) : panes.indexOf(nextPane);
+    const nextIndex = panes.indexOf(nextPane);
+    nextPane.style.setProperty('--tab-enter-x', `${nextIndex > previousIndex ? 4 : -4}px`);
+  }
+
+  buttons.forEach((button) => {
     button.classList.toggle('active', button.dataset.tab === tabName);
   });
-  document.querySelectorAll<HTMLElement>('.tab-pane').forEach((pane) => {
+  panes.forEach((pane) => {
     pane.classList.toggle('active', pane.id === `tab-${tabName}`);
   });
 }
