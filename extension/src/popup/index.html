@@ -377,6 +377,173 @@
     .master-toggle-hint { font-size: 10px; color: #6b7fa8; margin-top: 2px; line-height: 1.4; }
     body.mt-extension-disabled .tabs,
     body.mt-extension-disabled .tab-pane { opacity: 0.4; pointer-events: none; }
+
+    /* Shared popup polish: stronger contrast, clearer surfaces and visible
+       keyboard focus, without changing the existing tab or settings flow. */
+    :root { color-scheme: dark; }
+    body {
+      background:
+        radial-gradient(ellipse at 8% -12%, rgba(59,130,246,0.13), transparent 38%),
+        #080c18;
+      color: #e5ecf8;
+    }
+    .popup { padding: 16px 16px 18px; gap: 13px; }
+    .popup-header { align-items: center; padding: 2px 1px 3px; }
+    .popup-title { font-size: 21px; letter-spacing: -0.035em; }
+    .popup-subtitle { font-size: 12px; color: #91a2c1; line-height: 1.4; }
+    .health-badge { font-size: 11px; padding: 6px 10px; }
+    .tabs {
+      position: sticky; top: 0; z-index: 10;
+      gap: 3px; padding: 4px;
+      background: rgba(8,14,28,0.94);
+      border-color: rgba(122,162,255,0.18);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+      backdrop-filter: blur(12px);
+    }
+    .tab-btn {
+      min-height: 34px; padding: 7px 5px;
+      color: #91a2c1; font-size: 11px;
+    }
+    .tab-btn:hover { color: #e5ecf8; background: rgba(255,255,255,0.04); }
+    .tab-btn.active {
+      color: #bfdbfe;
+      background: linear-gradient(135deg, rgba(59,130,246,0.27), rgba(124,58,237,0.2));
+      box-shadow: inset 0 0 0 1px rgba(96,165,250,0.2);
+    }
+    .tab-pane.active { gap: 13px; }
+    .config-section {
+      padding: 15px; gap: 14px;
+      background: linear-gradient(155deg, rgba(17,28,51,0.96), rgba(12,19,36,0.96));
+      border-color: rgba(122,162,255,0.19); border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.13);
+    }
+    .label { color: #a9bad8; font-size: 11px; letter-spacing: 0.035em; }
+    .toggle-title { color: #d1dcf0; font-size: 11.5px; }
+    .toggle-hint { color: #91a2c1; font-size: 11px; line-height: 1.48; }
+    .input, .select, .textarea {
+      min-height: 38px; padding: 9px 11px;
+      color: #e5ecf8; font-size: 13px;
+      background: rgba(5,10,22,0.72);
+      border-color: rgba(122,162,255,0.2); border-radius: 9px;
+    }
+    .textarea { min-height: 58px; }
+    .input:hover, .select:hover, .textarea:hover { border-color: rgba(122,162,255,0.38); }
+    .input:focus, .select:focus, .textarea:focus {
+      border-color: #60a5fa;
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+    }
+    .btn { min-height: 42px; border-radius: 10px; transition: filter 0.15s, transform 0.15s, border-color 0.15s; }
+    .btn-primary { box-shadow: 0 5px 18px rgba(59,130,246,0.28); }
+    .btn-primary:hover:not(:disabled), .btn-auto:hover:not(:disabled) { filter: brightness(1.08); }
+    button:not(:disabled) { transition: filter 0.15s, background-color 0.15s, border-color 0.15s, color 0.15s; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    :focus-visible {
+      outline: 2px solid #93c5fd;
+      outline-offset: 2px;
+    }
+    .toggle input:focus-visible + .toggle-slider {
+      outline: 2px solid #93c5fd; outline-offset: 3px;
+    }
+    input[type="checkbox"], input[type="radio"] { accent-color: #60a5fa; }
+    .master-toggle-row {
+      padding: 11px 13px; border-radius: 12px;
+      background: rgba(22,163,74,0.11); border-color: rgba(74,222,128,0.27);
+    }
+    .master-toggle-row.disabled { background: rgba(220,38,38,0.11); border-color: rgba(248,113,113,0.35); }
+    .master-toggle-hint { color: #91a2c1; font-size: 11px; line-height: 1.45; }
+    .toggle { width: 40px; height: 22px; }
+    .toggle-slider::before { width: 16px; height: 16px; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
+    #popup-status { bottom: 10px; padding: 9px 13px; border-radius: 10px; backdrop-filter: blur(12px); }
+    /* Liquid-glass surfaces: layered cool light, translucent material and a
+       fine specular edge. Keep the controls themselves opaque enough to read. */
+    body {
+      background-color: #070a12;
+      background-image:
+        radial-gradient(ellipse 220px 180px at 100% 0%, rgba(91, 111, 168, 0.09), transparent 78%),
+        radial-gradient(ellipse 260px 220px at 0% 45%, rgba(45, 92, 145, 0.07), transparent 80%),
+        linear-gradient(145deg, #070a12 0%, #0a0e18 54%, #080b13 100%);
+      background-attachment: fixed;
+    }
+    .popup-header { position: relative; }
+    .health-badge, .btn-open-window {
+      backdrop-filter: blur(14px) saturate(145%);
+      -webkit-backdrop-filter: blur(14px) saturate(145%);
+    }
+    .tabs {
+      background: linear-gradient(115deg, rgba(25, 34, 51, 0.72), rgba(14, 20, 32, 0.78) 55%, rgba(21, 21, 35, 0.7));
+      border: 1px solid rgba(183, 202, 237, 0.12);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.075), 0 12px 30px rgba(0,0,0,0.28);
+      backdrop-filter: blur(22px) saturate(125%);
+      -webkit-backdrop-filter: blur(22px) saturate(125%);
+    }
+    .tab-btn.active {
+      background: linear-gradient(125deg, rgba(59, 91, 142, 0.42), rgba(76, 62, 112, 0.32));
+      border: 1px solid rgba(191, 219, 254, 0.17);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 15px rgba(0,0,0,0.18);
+    }
+    .config-section {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(145deg, rgba(23, 31, 47, 0.88), rgba(13, 18, 29, 0.91) 58%, rgba(18, 19, 32, 0.88));
+      border: 1px solid rgba(187, 204, 235, 0.12);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.075), 0 14px 34px rgba(0,0,0,0.3);
+      backdrop-filter: blur(24px) saturate(120%);
+      -webkit-backdrop-filter: blur(24px) saturate(120%);
+    }
+    .config-section::before {
+      content: ''; position: absolute; inset: 0 0 auto; height: 44px;
+      background: linear-gradient(180deg, rgba(218,232,255,0.032), transparent);
+      pointer-events: none;
+    }
+    .config-section:focus-within {
+      border-color: rgba(147, 197, 253, 0.34);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 14px 34px rgba(0,0,0,0.24), 0 0 24px rgba(59,130,246,0.07);
+    }
+    .input, .select, .textarea, .fallback-provider-row, .story-graph {
+      background-color: rgba(5, 11, 24, 0.56);
+      border-color: rgba(190, 214, 255, 0.16);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+    }
+    .master-toggle-row {
+      background: linear-gradient(120deg, rgba(13, 49, 38, 0.62), rgba(11, 31, 31, 0.72));
+      border-color: rgba(134, 239, 172, 0.2);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 9px 24px rgba(0,0,0,0.2);
+      backdrop-filter: blur(18px) saturate(125%);
+      -webkit-backdrop-filter: blur(18px) saturate(125%);
+    }
+    .master-toggle-row.disabled {
+      background: linear-gradient(120deg, rgba(127, 29, 29, 0.3), rgba(69, 22, 37, 0.4));
+      border-color: rgba(252, 165, 165, 0.28);
+    }
+    .btn-secondary, .btn-clear-cache, .btn-add-fallback, .btn-fetch-models,
+    .btn-icon-expand, .btn-test-key, .btn-move, .btn-test-all {
+      backdrop-filter: blur(12px) saturate(140%);
+      -webkit-backdrop-filter: blur(12px) saturate(140%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    #popup-status {
+      background: rgba(22, 34, 57, 0.78);
+      border-color: rgba(191, 219, 254, 0.22);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 12px 34px rgba(0,0,0,0.38);
+      backdrop-filter: blur(24px) saturate(160%);
+      -webkit-backdrop-filter: blur(24px) saturate(160%);
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .tabs, .config-section, .master-toggle-row, #popup-status,
+      .health-badge, .btn-open-window {
+        backdrop-filter: none; -webkit-backdrop-filter: none;
+      }
+      .tabs { background: #111b30; }
+      .config-section { background: #111b30; }
+      .master-toggle-row { background: #12352a; }
+      .master-toggle-row.disabled { background: #3a1b27; }
+      #popup-status { background: #162239; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
   </style>
 </head>
 <body>
