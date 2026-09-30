@@ -17,6 +17,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 # repo id (or plain filename for direct URL downloads) -> (label, approx MB)
 _KNOWN: Dict[str, Tuple[str, int]] = {
     "JosephCatrambone/big-lama-torchscript": ("LaMa inpainting", 206),
+    "anime-manga-big-lama.pt": ("LaMa Manga inpainting", 204),
     "kha-white/manga-ocr-base": ("manga-ocr", 890),
     "PaddlePaddle/PaddleOCR-VL-1.5": ("PaddleOCR-VL", 1930),
 }

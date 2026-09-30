@@ -225,7 +225,7 @@ class TranslateOptions(BaseModel):
     economy_mode: bool = False  # cut LLM spend: downscale the full-page context image and lower its media resolution (the client also turns off the costlier context options)
     outside_text_enabled: bool = False
     inpainting_method: Optional[str] = (
-        None  # "lama" (default) | "auto" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "lama"; "lama" also makes /region/render and /region/erase use LaMa
+        None  # "lama_manga" (default) | "lama" | "auto" | "flux_klein_4b" | "flux_klein_9b" | "flux_kontext" | "opencv" | "none" — omitted means "lama_manga"; "lama"/"lama_manga" also make /region/render and /region/erase use the matching LaMa variant
     )
     flux_remote_token: Optional[str] = (
         None  # shared secret for the remote worker (X-Flux-Worker-Token), if it was started with one
@@ -684,7 +684,7 @@ class EraseRequest(BaseModel):
     image: str  # raw base64 of the image to erase from
     mask: str  # raw base64 PNG; any non-black pixel marks "erase here" — what a freehand brush stroke composited to black naturally produces
     inpainting_method: Optional[str] = (
-        None  # "lama" uses LaMa; anything else keeps OpenCV (the extension sends its Inpainting quality setting)
+        None  # "lama" or "lama_manga" use the matching LaMa variant; anything else keeps OpenCV (the extension sends its Inpainting quality setting)
     )
 
 

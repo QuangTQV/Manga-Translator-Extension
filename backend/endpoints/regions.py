@@ -172,7 +172,8 @@ async def region_render(req: RegionRenderRequest, account=Depends(verify_token))
         warnings: List[dict] = []
         image = render_regions(
             base, draw_regions, config.rendering.font_dir, config.rendering,
-            use_lama=req.inpainting_method == "lama",
+            use_lama=req.inpainting_method in ("lama", "lama_manga"),
+            lama_manga=req.inpainting_method == "lama_manga",
             fonts_base_dir=settings.fonts_base_dir,
             warnings=warnings,
         )
@@ -198,7 +199,9 @@ async def region_erase(req: EraseRequest, account=Depends(verify_token)) -> Eras
 
     def work() -> str:
         return encode_png(erase_mask(
-            decode_image(req.image), decode_image(req.mask), use_lama=req.inpainting_method == "lama",
+            decode_image(req.image), decode_image(req.mask),
+            use_lama=req.inpainting_method in ("lama", "lama_manga"),
+            lama_manga=req.inpainting_method == "lama_manga",
         ))
 
     try:

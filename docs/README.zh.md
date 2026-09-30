@@ -127,7 +127,7 @@ Extension 使用你提供的 LLM、API key、model 和 Base URL。你可以连�
 | 翻译进度 | 一个小的动态标记会显示当前正在实际翻译中的页面，与仍在自动翻译队列中等待的页面区分开来。 |
 | 重试提示 | 某页连续 3 次自动翻译失败后，会显示一个小红色徽标——点击即可立即重试。 |
 | 气泡外文字 | 默认使用轻量 cleanup 处理 SFX/旁白等气泡外文字。 |
-| LaMa 去字 | 介于轻量 OpenCV cleanup 与 Flux 之间：在 Translate 标签页的 *Inpainting 质量* 中选择 **LaMa**，可在去除文字后重建分格边框、网点和排线，而不是把它们抹糊。约 200MB，首次使用时自动下载，在 CPU 上几秒即可完成（有 GPU 更快）。选中后，橡皮擦和“选择文字区域”工具也会使用它。 |
+| LaMa Manga 去字 | Translate 标签页 *Inpainting 质量* 中的默认选项：介于轻量 OpenCV cleanup 与 Flux 之间，使用针对漫画/动漫图像微调过的 LaMa 网络，在去除文字后重建分格边框、网点和排线，而不是把它们抹糊——比同一下拉菜单里的通用版 LaMa（基于照片训练）效果更干净。约 200MB，首次使用时自动下载，在 CPU 上几秒即可完成（有 GPU 更快）。橡皮擦和"选择文字区域"工具会使用你选中的那个 LaMa 版本。 |
 | Live AI 查看器 | 调试工具：`Config` 标签页 → **Open viewer**，实时显示后端与 AI 之间的每个提示词和响应，附带耗时、筛选、搜索和复制按钮。仅当后端设置 `MT_LIVE_AI_LOG_ENABLED=true` 时可用；在托管后端上只有 `MT_ADMIN_EMAIL` 账户可以打开。另有 **Save images** 开关（默认关闭——每次调用都会占用磁盘空间和后台处理），开启后会保留发送给 AI 的图片，方便查看、点击放大并与提示词对照。 |
 | 首次下载提示 | 部分功能在首次使用时才下载 ML 模型（LaMa ~0.2 GB、manga-ocr ~0.9 GB、PaddleOCR-VL ~1.9 GB）。翻译变慢时，页面会显示“首次设置：正在下载……”提示，而不是无声地卡住。 |
 | 可选 Flux | 高级用户可下载 Flux Klein 4B 获得更重的 inpainting，而不增加默认 release 体积。 |
@@ -292,7 +292,7 @@ backend/models/flux/
 
 只有在你明确把 outside-text inpainting 配置为 Flux 模式（例如 `flux_klein_4b`）时才使用 Flux。对大多数用户来说，默认 `auto` 更轻、更快。
 
-**折中方案：LaMa。** *Inpainting 质量 → LaMa* 无需 GPU、无需手动安装：约 200MB 的模型（[big-lama TorchScript 导出版](https://huggingface.co/JosephCatrambone/big-lama-torchscript)，Apache-2.0）会在首次使用时下载到 `backend/models/lama/`，在 CPU 上每个区域只需几秒。重建分格边框和网点的效果远好于默认 cleanup，但在大面积绘画区域上不如 Flux。
+**折中方案：LaMa Manga（默认）。** *Inpainting 质量 → LaMa Manga* 无需 GPU、无需手动安装：约 200MB 的模型（[针对漫画/动漫微调过的 big-lama TorchScript 导出版](https://github.com/Sanster/models/releases/tag/AnimeMangaInpainting)，由 IOPaint/lama-cleaner 作者提供）会在首次使用时下载到 `backend/models/lama/`，在 CPU 上每个区域只需几秒。重建分格边框和网点的效果远好于默认 cleanup，也比同一下拉菜单里的通用版 LaMa（基于照片训练）更干净，但在大面积绘画区域上不如 Flux。
 
 ## Web 应用（无需扩展）
 

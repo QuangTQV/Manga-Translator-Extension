@@ -267,7 +267,7 @@ def test_the_route_passes_each_regions_style_and_ignores_the_style_of_restore_on
 
     seen = {}
 
-    def fake_render(base, draw_regions, font_dir, rendering, use_lama=False, fonts_base_dir=None, warnings=None):
+    def fake_render(base, draw_regions, font_dir, rendering, use_lama=False, lama_manga=False, fonts_base_dir=None, warnings=None):
         seen["regions"] = draw_regions
         seen["fonts_base_dir"] = fonts_base_dir
         return base

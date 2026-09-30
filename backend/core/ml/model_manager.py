@@ -48,6 +48,7 @@ class ModelType(Enum):
     FLUX_KLEIN_9B_PIPELINE = "flux_klein_9b_pipeline"
     FLUX_KLEIN_4B_PIPELINE = "flux_klein_4b_pipeline"
     LAMA = "lama"
+    LAMA_MANGA = "lama_manga"
 
 
 class ModelManager:
@@ -140,6 +141,7 @@ class ModelManager:
             ModelType.MANGA_OCR: (model_dir / "manga-ocr-base"),
             ModelType.PADDLE_OCR_VL: (model_dir / "paddleocr-vl"),
             ModelType.LAMA: (model_dir / "lama" / "big-lama.pt"),
+            ModelType.LAMA_MANGA: (model_dir / "lama" / "anime-manga-big-lama.pt"),
         }
 
     def _init_model_urls(self):
@@ -152,6 +154,14 @@ class ModelManager:
             ModelType.UPSCALE_LITE: (
                 "https://huggingface.co/Kim2091/2x-AnimeSharpV4/resolve/main/"
                 "2x-AnimeSharpV4_Fast_RCAN_PU.safetensors"
+            ),
+            # Same big-lama (FFCResNetGenerator) architecture as ModelType.LAMA,
+            # exported to TorchScript by Sanster (IOPaint/lama-cleaner) after
+            # fine-tuning on ~300k manga/anime images instead of Places2
+            # photos. Direct GitHub release asset, not a Hugging Face repo.
+            ModelType.LAMA_MANGA: (
+                "https://github.com/Sanster/models/releases/download/"
+                "AnimeMangaInpainting/anime-manga-big-lama.pt"
             ),
         }
 
@@ -529,16 +539,15 @@ class ModelManager:
             log_message("YOLO model loaded.", verbose=verbose)
             return model
 
-    def load_lama(self, device=None, verbose: bool = False):
-        """Load the big-lama TorchScript inpainting model (~200MB, downloaded
-        on first use). Returns (model, device_actually_used): falls back to
-        CPU if the requested device can't load it."""
+    def _load_lama_checkpoint(self, model_type: ModelType, ensure_downloaded, device=None, verbose: bool = False):
+        """Shared TorchScript load/fallback logic for both LaMa checkpoints
+        (ModelType.LAMA and ModelType.LAMA_MANGA) — same architecture and
+        calling convention, just different weights."""
         with self._lock:
-            if self.is_loaded(ModelType.LAMA):
-                return self.models[ModelType.LAMA]
-            path = self.model_paths[ModelType.LAMA]
-            hf_info = self.model_hf_repos[ModelType.LAMA]
-            self._ensure_hf_file(hf_info["repo_id"], hf_info["filename"], path, verbose=verbose)
+            if self.is_loaded(model_type):
+                return self.models[model_type]
+            path = self.model_paths[model_type]
+            ensure_downloaded()
             target = torch.device(device) if device is not None else get_best_device()
             try:
                 model = torch.jit.load(str(path), map_location=target).eval()
@@ -546,9 +555,36 @@ class ModelManager:
                 log_message(f"LaMa couldn't load on {target} ({e}); using CPU", verbose=verbose)
                 target = torch.device("cpu")
                 model = torch.jit.load(str(path), map_location=target).eval()
-            self.models[ModelType.LAMA] = (model, target)
+            self.models[model_type] = (model, target)
             log_message(f"LaMa inpainting model loaded on {target}.", verbose=verbose)
-            return self.models[ModelType.LAMA]
+            return self.models[model_type]
+
+    def load_lama(self, device=None, verbose: bool = False):
+        """Load the big-lama TorchScript inpainting model (~200MB, downloaded
+        on first use). Returns (model, device_actually_used): falls back to
+        CPU if the requested device can't load it."""
+        path = self.model_paths[ModelType.LAMA]
+        hf_info = self.model_hf_repos[ModelType.LAMA]
+        return self._load_lama_checkpoint(
+            ModelType.LAMA,
+            lambda: self._ensure_hf_file(hf_info["repo_id"], hf_info["filename"], path, verbose=verbose),
+            device=device,
+            verbose=verbose,
+        )
+
+    def load_lama_manga(self, device=None, verbose: bool = False):
+        """Load the manga/anime-finetuned LaMa TorchScript model (~200MB,
+        downloaded on first use) — same interface as load_lama(), better
+        reconstruction of screentone/hatching since it was trained on that
+        domain instead of natural photos."""
+        path = self.model_paths[ModelType.LAMA_MANGA]
+        url = self.model_urls[ModelType.LAMA_MANGA]
+        return self._load_lama_checkpoint(
+            ModelType.LAMA_MANGA,
+            lambda: self._ensure_file(path, url, verbose=verbose),
+            device=device,
+            verbose=verbose,
+        )
 
     def load_yolo_conjoined_bubble(self, verbose: bool = False):
         """Load YOLO model for conjoined speech bubble detection."""

@@ -5137,7 +5137,7 @@ function buildTranslateRequest(
     // flux_remote_base_url.
     inpainting_method: settings.config.inpaintingMethod?.endsWith('_remote')
       ? settings.config.inpaintingMethod.replace(/_remote$/, '')
-      : (settings.config.inpaintingMethod || 'lama'),
+      : (settings.config.inpaintingMethod || 'lama_manga'),
     flux_remote_base_url: settings.config.inpaintingMethod?.endsWith('_remote')
       ? (settings.config.fluxRemoteBaseUrl || undefined)
       : undefined,

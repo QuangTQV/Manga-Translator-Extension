@@ -422,10 +422,15 @@ def process_outside_text(
         auto_inpainting = requested_inpainting_method == "auto"
         inpainter = None
 
-        if inpainting_method == "lama":
+        if inpainting_method in ("lama", "lama_manga"):
             try:
-                inpainter = LamaInpainter(device=config.device, verbose=verbose)
-                log_message("Using LaMa for inpainting", verbose=verbose)
+                inpainter = LamaInpainter(
+                    device=config.device, verbose=verbose, manga=inpainting_method == "lama_manga",
+                )
+                log_message(
+                    f"Using {'LaMa Manga' if inpainting_method == 'lama_manga' else 'LaMa'} for inpainting",
+                    verbose=verbose,
+                )
             except Exception as e:
                 log_message(
                     f"LaMa unavailable ({e}), falling back to OpenCV",
@@ -1198,7 +1203,11 @@ def process_outside_text(
                 log_message("Outside text inpainting completed", verbose=verbose)
                 parts = []
                 if flux_inpaints:
-                    model_label = "LaMa" if inpainting_method == "lama" else "Flux"
+                    model_label = (
+                        "LaMa Manga" if inpainting_method == "lama_manga"
+                        else "LaMa" if inpainting_method == "lama"
+                        else "Flux"
+                    )
                     parts.append(f"{model_label}: {flux_inpaints}")
                 parts.append(f"CV2: {cv2_inpaints}")
                 if none_skips:

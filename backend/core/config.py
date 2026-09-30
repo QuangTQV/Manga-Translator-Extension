@@ -290,7 +290,7 @@ class OutsideTextConfig:
     seed: int = 1  # -1 = random
     huggingface_token: str = ""  # Required for Flux Kontext model downloads
     inpainting_method: str = (
-        "lama"  # quality-first default; also supports auto/OpenCV, flux_*, and none
+        "lama_manga"  # quality-first default (manga/anime-finetuned LaMa); also supports lama, auto/OpenCV, flux_*, and none
     )
     kontext_backend: str = "sdnq"  # "sdnq" (cross-platform) or "nunchaku" (CUDA-only)
     flux_low_vram: bool = False  # Use sequential CPU offload for Klein/Kontext SDNQ

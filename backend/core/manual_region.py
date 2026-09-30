@@ -77,7 +77,7 @@ def _border_pixels(crop: np.ndarray) -> np.ndarray:
     ])
 
 
-def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int], use_lama: bool = False) -> Tuple[int, int, int]:
+def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int], use_lama: bool = False, lama_manga: bool = False) -> Tuple[int, int, int]:
     """Erases the text inside px_box, in place, and returns the resulting
     background colour (BGR) so the caller can pick a readable text colour.
 
@@ -105,7 +105,7 @@ def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int], use_l
             full_mask[y1:y2, x1:x2] = mask > 0
             # Whole image in, so LaMa sees context beyond the box; only
             # masked pixels come back changed.
-            healed_rgb = _lama_inpaint(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), full_mask)
+            healed_rgb = _lama_inpaint(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), full_mask, manga=lama_manga)
             image_bgr[:] = cv2.cvtColor(healed_rgb, cv2.COLOR_RGB2BGR)
             return tuple(int(c) for c in np.median(image_bgr[y1:y2, x1:x2].reshape(-1, 3), axis=0))
         except Exception as e:  # noqa: BLE001 — never fail the render over the nicer inpainter
@@ -115,14 +115,14 @@ def clean_region(image_bgr: np.ndarray, px_box: Tuple[int, int, int, int], use_l
     return tuple(int(c) for c in np.median(healed.reshape(-1, 3), axis=0))
 
 
-def _lama_inpaint(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def _lama_inpaint(rgb: np.ndarray, mask: np.ndarray, manga: bool = False) -> np.ndarray:
     # Imported lazily: loading torch/the model manager is only worth it when
     # LaMa was actually asked for.
     from core.image.lama_inpainter import lama_inpaint_rgb
-    return lama_inpaint_rgb(rgb, mask)
+    return lama_inpaint_rgb(rgb, mask, manga=manga)
 
 
-def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2, use_lama: bool = False) -> Image.Image:
+def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2, use_lama: bool = False, lama_manga: bool = False) -> Image.Image:
     """The "eraser" tool: removes whatever is under an arbitrary hand-drawn
     mask instead of a rectangle — for raw text/SFX baked into complex art
     that a box can't isolate cleanly without also grabbing nearby artwork
@@ -147,7 +147,7 @@ def erase_mask(image: Image.Image, mask: Image.Image, dilate_px: int = 2, use_la
     rgb = np.array(image.convert("RGB"))
     if use_lama:
         try:
-            return Image.fromarray(_lama_inpaint(rgb, binary_mask > 0))
+            return Image.fromarray(_lama_inpaint(rgb, binary_mask > 0, manga=lama_manga))
         except Exception as e:  # noqa: BLE001
             log_message(f"LaMa erase failed ({e}); using OpenCV", always_print=True)
     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
@@ -320,6 +320,7 @@ def render_regions(
     font_dir: str,
     rendering: Optional[RenderingConfig] = None,
     use_lama: bool = False,
+    lama_manga: bool = False,
     fonts_base_dir: Optional[Path] = None,
     warnings: Optional[List[dict]] = None,
 ) -> Image.Image:
@@ -336,7 +337,7 @@ def render_regions(
         style = region[2] if len(region) > 2 else None
         px_box = box_to_pixels(image.size, box)
         bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        background = clean_region(bgr, px_box, use_lama=use_lama)
+        background = clean_region(bgr, px_box, use_lama=use_lama, lama_manga=lama_manga)
         image = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
         if not text.strip():
             continue

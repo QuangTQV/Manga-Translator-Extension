@@ -176,9 +176,9 @@ def test_combine_page_image_max_side_pixels_defaults_to_1536():
     assert cfg.translation.combine_page_image_max_side_pixels == 1536
 
 
-def test_inpainting_method_defaults_to_lama():
+def test_inpainting_method_defaults_to_lama_manga():
     cfg = _build_minimal_config()
-    assert cfg.outside_text.inpainting_method == "lama"
+    assert cfg.outside_text.inpainting_method == "lama_manga"
     assert cfg.translation.combine_page_image_resolution == "legacy"
 
 

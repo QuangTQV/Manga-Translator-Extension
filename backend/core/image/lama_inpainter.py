@@ -26,10 +26,12 @@ _MIN_CONTEXT_PX = 48
 _MAX_SIDE = 1536
 
 
-def _run_model(img: np.ndarray, mask: np.ndarray, device, verbose: bool) -> np.ndarray:
+def _run_model(img: np.ndarray, mask: np.ndarray, device, verbose: bool, manga: bool = False) -> np.ndarray:
     """img HxWx3 uint8, mask HxW bool, both already multiples of 8."""
     manager = ModelManager()
-    model, model_device = manager.load_lama(device, verbose=verbose)
+    model_type = ModelType.LAMA_MANGA if manga else ModelType.LAMA
+    load = manager.load_lama_manga if manga else manager.load_lama
+    model, model_device = load(device, verbose=verbose)
     image_t = torch.from_numpy(img).permute(2, 0, 1)[None].float().div_(255.0)
     mask_t = torch.from_numpy(mask.astype(np.float32))[None, None]
     with _INFERENCE_LOCK, torch.inference_mode():
@@ -42,7 +44,7 @@ def _run_model(img: np.ndarray, mask: np.ndarray, device, verbose: bool) -> np.n
             log_message(f"LaMa failed on {model_device} ({e}); retrying on CPU", verbose=verbose)
             model = model.to("cpu")
             model_device = torch.device("cpu")
-            manager.models[ModelType.LAMA] = (model, model_device)
+            manager.models[model_type] = (model, model_device)
             out = model(image_t, mask_t)
     result = out[0].permute(1, 2, 0).float().cpu().numpy()
     if result.max() <= 1.5:  # the exported model outputs 0..1
@@ -60,7 +62,7 @@ def _pad_to_multiple_of_8(img: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray
     return img, mask
 
 
-def lama_inpaint_rgb(rgb: np.ndarray, mask: np.ndarray, device=None, verbose: bool = False) -> np.ndarray:
+def lama_inpaint_rgb(rgb: np.ndarray, mask: np.ndarray, device=None, verbose: bool = False, manga: bool = False) -> np.ndarray:
     """Inpaint the nonzero pixels of `mask` (HxW) in `rgb` (HxWx3 uint8).
     Returns a new array; pixels outside the mask are left exactly as they were."""
     m = np.asarray(mask).astype(bool)
@@ -85,7 +87,7 @@ def lama_inpaint_rgb(rgb: np.ndarray, mask: np.ndarray, device=None, verbose: bo
     wh, ww = work_mask.shape
     padded_img, padded_mask = _pad_to_multiple_of_8(work_img, work_mask)
 
-    result = _run_model(padded_img, padded_mask, device, verbose)[:wh, :ww]
+    result = _run_model(padded_img, padded_mask, device, verbose, manga=manga)[:wh, :ww]
     if scale < 1.0:
         result = np.array(Image.fromarray(result).resize((cw, ch), Image.LANCZOS))
 
@@ -100,12 +102,14 @@ class LamaInpainter:
     """Same inpaint_mask() shape as FluxKleinInpainter, so the outside-text
     pipeline (core/outside_text_processor.py) can use either interchangeably."""
 
-    def __init__(self, device=None, verbose: bool = False):
+    def __init__(self, device=None, verbose: bool = False, manga: bool = False):
         self.device = device
         self.verbose = verbose
+        self.manga = manga
         # Load (and download, first time) now, so an unavailable model falls
         # back to OpenCV at setup time, the same way the Flux inpainters do.
-        ModelManager().load_lama(device, verbose=verbose)
+        manager = ModelManager()
+        (manager.load_lama_manga if manga else manager.load_lama)(device, verbose=verbose)
 
     def inpaint_mask(
         self,
@@ -127,5 +131,5 @@ class LamaInpainter:
         if not m.any():
             return image
         rgb = np.array(image.convert("RGB"))
-        result = Image.fromarray(lama_inpaint_rgb(rgb, m, self.device, verbose or self.verbose))
+        result = Image.fromarray(lama_inpaint_rgb(rgb, m, self.device, verbose or self.verbose, manga=self.manga))
         return result if image.mode == "RGB" else result.convert(image.mode)

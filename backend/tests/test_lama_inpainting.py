@@ -24,7 +24,7 @@ client = TestClient(main.app, raise_server_exceptions=False)
 
 
 def _fake_model(seen):
-    def run(img, mask, device, verbose):
+    def run(img, mask, device, verbose, manga=False):
         seen.append(img.shape)
         assert img.shape[0] % 8 == 0 and img.shape[1] % 8 == 0
         return np.full_like(img, 7)
@@ -77,10 +77,10 @@ def test_erase_mask_uses_lama_when_asked_and_falls_back_to_opencv(monkeypatch):
     mask = Image.new("L", (60, 60), 0)
     mask.paste(255, (20, 20, 40, 40))
 
-    monkeypatch.setattr(manual_region, "_lama_inpaint", lambda rgb, m: np.full_like(rgb, 7))
+    monkeypatch.setattr(manual_region, "_lama_inpaint", lambda rgb, m, manga=False: np.full_like(rgb, 7))
     assert np.array(manual_region.erase_mask(image, mask, use_lama=True))[30, 30].tolist() == [7, 7, 7]
 
-    def boom(rgb, m):
+    def boom(rgb, m, manga=False):
         raise RuntimeError("no model")
     monkeypatch.setattr(manual_region, "_lama_inpaint", boom)
     # Falls back to OpenCV: a white image stays white, no exception.
@@ -89,7 +89,7 @@ def test_erase_mask_uses_lama_when_asked_and_falls_back_to_opencv(monkeypatch):
 
 def test_clean_region_uses_lama_on_busy_backgrounds_only(monkeypatch):
     calls = []
-    monkeypatch.setattr(manual_region, "_lama_inpaint", lambda rgb, m: (calls.append(1), np.full_like(rgb, 7))[1])
+    monkeypatch.setattr(manual_region, "_lama_inpaint", lambda rgb, m, manga=False: (calls.append(1), np.full_like(rgb, 7))[1])
     flat = np.full((80, 80, 3), 255, np.uint8)
     manual_region.clean_region(flat, (20, 20, 60, 60), use_lama=True)
     assert calls == []  # flat border: plain fill, no model needed
@@ -105,14 +105,23 @@ def _b64png(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-@pytest.mark.parametrize("method, expected", [("lama", True), ("auto", False), (None, False)])
-def test_region_erase_route_passes_the_inpainting_method(monkeypatch, method, expected):
+@pytest.mark.parametrize(
+    "method, expected_use_lama, expected_manga",
+    [
+        ("lama", True, False),
+        ("lama_manga", True, True),
+        ("auto", False, False),
+        (None, False, False),
+    ],
+)
+def test_region_erase_route_passes_the_inpainting_method(monkeypatch, method, expected_use_lama, expected_manga):
     import endpoints.regions as regions
 
     seen = {}
 
-    def fake_erase(image, mask, use_lama=False):
+    def fake_erase(image, mask, use_lama=False, lama_manga=False):
         seen["use_lama"] = use_lama
+        seen["lama_manga"] = lama_manga
         return image.convert("RGB")
 
     monkeypatch.setattr(regions, "erase_mask", fake_erase)
@@ -121,7 +130,8 @@ def test_region_erase_route_passes_the_inpainting_method(monkeypatch, method, ex
         body["inpainting_method"] = method
     resp = client.post("/region/erase", json=body)
     assert resp.status_code == 200
-    assert seen["use_lama"] is expected
+    assert seen["use_lama"] is expected_use_lama
+    assert seen["lama_manga"] is expected_manga
 
 
 def _hatched(size=160):
@@ -143,6 +153,25 @@ def test_real_lama_reconstructs_hatching_better_than_opencv():
     damaged[mask > 0] = 0  # "text" drawn over the hatching
 
     lama = lama_inpaint_rgb(damaged, mask > 0, device="cpu")
+    opencv = cv2.inpaint(damaged, mask, 3, cv2.INPAINT_TELEA)
+    m = mask > 0
+    lama_err = np.abs(lama[m].astype(int) - truth[m]).mean()
+    opencv_err = np.abs(opencv[m].astype(int) - truth[m]).mean()
+    assert lama_err < opencv_err, (lama_err, opencv_err)
+
+
+@pytest.mark.skipif(
+    not (lama_mod.ModelManager().model_paths[lama_mod.ModelType.LAMA_MANGA]).exists(),
+    reason="LaMa Manga model not downloaded (backend/models/lama/anime-manga-big-lama.pt)",
+)
+def test_real_lama_manga_reconstructs_hatching_better_than_opencv():
+    truth = _hatched()
+    damaged = truth.copy()
+    mask = np.zeros(truth.shape[:2], np.uint8)
+    cv2.putText(mask, "SFX", (22, 105), cv2.FONT_HERSHEY_SIMPLEX, 2.2, 255, 14)
+    damaged[mask > 0] = 0
+
+    lama = lama_inpaint_rgb(damaged, mask > 0, device="cpu", manga=True)
     opencv = cv2.inpaint(damaged, mask, 3, cv2.INPAINT_TELEA)
     m = mask > 0
     lama_err = np.abs(lama[m].astype(int) - truth[m]).mean()
