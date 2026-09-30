@@ -379,6 +379,14 @@
       base_url: els.baseUrl.value.trim() || undefined,
       outside_text_enabled: els.outsideText.checked,
       economy_mode: els.economyMode.checked,
+      // Set explicitly rather than left to the backend default: a request
+      // that omits combine_page_image_resolution gets the fixed-pixel
+      // "legacy" behavior (kept as the schema default so an old extension
+      // build that predates this field isn't silently switched to adaptive
+      // sizing) — this app has no build step/version to grandfather, so it
+      // should always get the current best default instead.
+      combine_into_page_image: true,
+      combine_page_image_resolution: 'auto',
     };
   }
 
