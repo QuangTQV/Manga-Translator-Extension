@@ -83,6 +83,34 @@ def _bbox_key(bbox) -> Tuple[int, ...]:
     return tuple(int(round(float(v))) for v in bbox)
 
 
+def _restore_original_patch(
+    canvas: Image.Image,
+    original_crop_pil: Optional[Image.Image],
+    bbox,
+    verbose: bool = False,
+) -> bool:
+    """Paste a region's pre-cleaning pixels back onto `canvas` in place.
+
+    Used whenever a region ends up with nothing valid to draw (OCR/
+    translation failure, or every text-render attempt failing) after its
+    area was already whited-out or inpainted — without this, that area
+    would stay a blank hole instead of showing the original, untranslated
+    text. Returns whether a patch was actually pasted (`original_crop_pil`
+    is None when no pre-cleaning crop was captured for this region, e.g. an
+    older cache entry from before this existed).
+    """
+    if original_crop_pil is None:
+        return False
+    try:
+        canvas.paste(original_crop_pil, (int(bbox[0]), int(bbox[1])))
+        return True
+    except Exception as e:
+        log_message(
+            f"Could not restore original patch for {bbox}: {e}", verbose=verbose
+        )
+        return False
+
+
 def _debug_mask_bbox(mask):
     """Return full-image bbox for a debug mask, or None when empty/invalid."""
     normalized = (
@@ -1548,6 +1576,23 @@ def translate_and_render(
                         text = bubble.get("translation", "")
                         is_outside_text = bubble.get("is_outside_text", False)
                         original_crop_pil = None
+                        # Looked up early (before the invalid-translation check
+                        # below) so a failed OCR/translation can still restore
+                        # the pre-cleaning pixels instead of leaving the
+                        # already-whitened/inpainted area blank. OSB carries
+                        # its own crop directly; speech bubbles look it up by
+                        # bbox the same way the render-failure fallback below
+                        # does.
+                        if is_outside_text:
+                            original_crop_pil = bubble.get("original_crop_pil")
+                        else:
+                            early_render_info = bubble_render_info_map.get(
+                                _bbox_key(bbox)
+                            )
+                            if early_render_info:
+                                original_crop_pil = early_render_info.get(
+                                    "original_crop_pil"
+                                )
 
                         # Convert OSB text to uppercase
                         if is_outside_text and text:
@@ -1583,10 +1628,27 @@ def translate_and_render(
 
                         if is_invalid_translation:
                             entry_type = "outside text" if is_outside_text else "bubble"
-                            log_message(
-                                f"Skipping {entry_type} {bbox} - invalid translation",
-                                verbose=verbose,
-                            )
+                            # The area was already whited-out/inpainted before
+                            # translation ran, so leaving it as-is would show
+                            # a blank hole instead of the untranslated source
+                            # text — restore the pre-cleaning pixels captured
+                            # for this exact region (same fallback the
+                            # render-failure path below uses).
+                            if _restore_original_patch(
+                                pil_cleaned_image, original_crop_pil, bbox, verbose
+                            ):
+                                log_message(
+                                    f"Restoring original {entry_type} patch for {bbox} "
+                                    "(invalid translation)",
+                                    verbose=verbose,
+                                    always_print=True,
+                                )
+                                final_image_to_save = pil_cleaned_image
+                            else:
+                                log_message(
+                                    f"Skipping {entry_type} {bbox} - invalid translation",
+                                    verbose=verbose,
+                                )
                             continue
 
                         # Use OSB-specific settings for outside text, regular settings for speech bubbles
@@ -1968,16 +2030,16 @@ def translate_and_render(
                             # All render attempts failed after the bubble was
                             # already cleaned (original text erased) — restore
                             # the original crop rather than leaving it blank.
-                            log_message(
-                                f"Restoring original bubble patch for {bbox}",
-                                verbose=verbose,
-                                always_print=True,
-                            )
                             rendered_image = pil_cleaned_image.copy()
-                            rendered_image.paste(
-                                original_crop_pil, (int(bbox[0]), int(bbox[1]))
+                            success = _restore_original_patch(
+                                rendered_image, original_crop_pil, bbox, verbose
                             )
-                            success = True
+                            if success:
+                                log_message(
+                                    f"Restoring original bubble patch for {bbox}",
+                                    verbose=verbose,
+                                    always_print=True,
+                                )
 
                         if success:
                             pil_cleaned_image = rendered_image
