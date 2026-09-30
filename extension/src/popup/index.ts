@@ -570,16 +570,30 @@ function initPopupResize(): void {
       dragStart = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height };
       target.setPointerCapture(event.pointerId);
     });
+    let pendingSize: { width: number; height: number } | null = null;
+    let frameQueued = false;
+    const applyPendingSize = (): void => {
+      frameQueued = false;
+      if (!pendingSize) return;
+      document.body.style.width = `${Math.round(pendingSize.width)}px`;
+      document.body.style.height = `${Math.round(pendingSize.height)}px`;
+    };
     target.addEventListener('pointermove', (event) => {
       if (!dragStart) return;
       const width = heightOnly
         ? dragStart.width
         : Math.max(POPUP_MIN_WIDTH, Math.min(POPUP_MAX_WIDTH, dragStart.width + event.clientX - dragStart.x));
       const height = Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, dragStart.height + event.clientY - dragStart.y));
-      document.body.style.width = `${Math.round(width)}px`;
-      document.body.style.height = `${Math.round(height)}px`;
+      pendingSize = { width, height };
+      // `body` carries the glass UI's backdrop-filter blur, which is
+      // expensive to recompute on every resize; pointermove can fire faster
+      // than the popup can paint, so coalesce same-frame moves into one
+      // write instead of resizing (and re-blurring) on every event.
+      if (frameQueued) return;
+      frameQueued = true;
+      requestAnimationFrame(applyPendingSize);
     });
-    const stopResize = (): void => { dragStart = null; };
+    const stopResize = (): void => { dragStart = null; pendingSize = null; };
     target.addEventListener('pointerup', stopResize);
     target.addEventListener('pointercancel', stopResize);
     target.addEventListener('keydown', (event) => {
