@@ -682,6 +682,46 @@
     .advanced-settings-hint, .suggest-web-search-hint, .sc-assets-label,
     .settings-search-feedback, .settings-save-status { color: #b0bfd6; font-size: 11.5px; }
     .popup-footer { color: #9eafc9; font-size: 11px; }
+    /* Long hints default to a 2-line clamp with a "Show more" toggle
+       (popup/index.ts:refreshCollapsibleHints) — a hint short enough to fit
+       never gets a toggle at all (overflow check skips it), so this never
+       affects the many one-line hints in the popup. */
+    .toggle-hint.hint-clamped, .master-toggle-hint.hint-clamped, .suggest-web-search-hint.hint-clamped {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+    }
+    .hint-expanded.hint-clamped {
+      display: block;
+      -webkit-line-clamp: unset;
+      overflow: visible;
+    }
+    /* -webkit-line-clamp itself can't be transitioned smoothly, so the
+       open/close motion is done on max-height instead (popup/index.ts sets
+       explicit start/end px values, then clears the inline style once the
+       transition ends so the resting state stays responsive to reflows —
+       e.g. a popup-width change re-wrapping the text). Unclamp for the
+       whole animation (both directions), since the clamp itself has no
+       "63% of the way clamped" state to animate through. */
+    .hint-clamped.hint-animating {
+      display: block;
+      -webkit-line-clamp: unset;
+      overflow: hidden;
+      transition: max-height 280ms cubic-bezier(.22,1,.36,1);
+    }
+    .hint-toggle {
+      display: inline-block;
+      margin: 2px 0 0;
+      padding: 0;
+      border: none;
+      background: none;
+      color: #60a5fa;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .hint-toggle:hover { text-decoration: underline; }
     .tab-btn { font-size: 12px; }
     .btn, .btn-secondary, .btn-add-fallback, .btn-fetch-models, .btn-test-all, .btn-test-key { font-size: 12px; }
     .settings-search-result-label { font-size: 12px; }

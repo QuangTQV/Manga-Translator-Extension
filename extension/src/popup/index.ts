@@ -257,12 +257,89 @@ function setInstructionsExpandedState(expanded: boolean): void {
   expandInstructionsBtn.title = t(uiLanguage, expanded ? 'titleCollapseInstructions' : 'titleExpandInstructions');
 }
 
+const HINT_SELECTOR = '.toggle-hint, .master-toggle-hint, .suggest-web-search-hint';
+
+// Long hints collapse to a 2-line clamp with a "Show more" toggle; a hint
+// short enough to already fit never gets a toggle at all — checked by
+// measuring real overflow, not by guessing from character count. Hints
+// inside a hidden tab pane or a closed <details> read 0 for both heights
+// (display:none), which would look like "fits fine" and wrongly strip an
+// already-added toggle, so those are left untouched until that tab/section
+// becomes visible again (see the activateTab and advanced-settings hooks).
+// Animates a clamped hint between its 2-line collapsed height and its full
+// scrollHeight on max-height (see the CSS comment on .hint-animating for why
+// max-height rather than transitioning the clamp itself). Both heights are
+// plain numbers, not "auto"/"none", so the transition always has a real
+// distance to cover instead of snapping through an unmeasured jump.
+function animateHintTo(hint: HTMLElement, expanding: boolean): void {
+  const collapsedHeight = Number(hint.dataset.collapsedHeight ?? hint.clientHeight);
+  hint.style.maxHeight = `${hint.clientHeight}px`;
+  hint.classList.add('hint-animating');
+  hint.classList.toggle('hint-expanded', expanding);
+  void hint.offsetHeight; // commit the start height + unclamp before changing the target
+  const targetHeight = expanding ? hint.scrollHeight : collapsedHeight;
+  hint.style.maxHeight = `${targetHeight}px`;
+  hint.addEventListener('transitionend', function onEnd(e) {
+    if (e.propertyName !== 'max-height') return;
+    hint.removeEventListener('transitionend', onEnd);
+    hint.classList.remove('hint-animating');
+    hint.style.maxHeight = '';
+  }, { once: true });
+}
+
+function refreshCollapsibleHints(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>(HINT_SELECTOR).forEach((hint) => {
+    if (hint.classList.contains('hint-animating')) return; // let an in-flight toggle finish untouched
+    const pane = hint.closest('.tab-pane');
+    if (pane && !pane.classList.contains('active')) return;
+    const details = hint.closest('details');
+    if (details && !details.open) return;
+
+    hint.classList.add('hint-clamped');
+    const wasExpanded = hint.classList.contains('hint-expanded');
+    hint.classList.remove('hint-expanded');
+    const overflowing = hint.scrollHeight - hint.clientHeight > 1;
+    hint.dataset.collapsedHeight = String(hint.clientHeight);
+
+    let toggle = hint.nextElementSibling as HTMLElement | null;
+    if (!toggle?.classList.contains('hint-toggle')) toggle = null;
+
+    if (!overflowing) {
+      toggle?.remove();
+      return;
+    }
+    if (wasExpanded) hint.classList.add('hint-expanded');
+    if (!toggle) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'hint-toggle';
+      btn.addEventListener('click', () => {
+        const expanding = !hint.classList.contains('hint-expanded');
+        animateHintTo(hint, expanding);
+        btn.textContent = t(uiLanguage, expanding ? 'hintShowLess' : 'hintShowMore');
+      });
+      hint.insertAdjacentElement('afterend', btn);
+      toggle = btn;
+    }
+    toggle.textContent = t(uiLanguage, hint.classList.contains('hint-expanded') ? 'hintShowLess' : 'hintShowMore');
+  });
+}
+
+function initCollapsibleHints(): void {
+  document.querySelectorAll<HTMLDetailsElement>('details.advanced-settings').forEach((details) => {
+    details.addEventListener('toggle', () => {
+      if (details.open) refreshCollapsibleHints(details);
+    });
+  });
+}
+
 function applyI18n(): void {
   document.documentElement.lang = uiLanguage;
   document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
     const key = el.dataset.i18n as I18nKey | undefined;
     if (key) el.textContent = t(uiLanguage, key);
   });
+  refreshCollapsibleHints();
   document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-i18n-placeholder]').forEach((el) => {
     const key = el.dataset.i18nPlaceholder as I18nKey | undefined;
     if (key) el.placeholder = t(uiLanguage, key);
@@ -335,6 +412,7 @@ function activateTab(tabName: string): void {
   panes.forEach((pane) => {
     pane.classList.toggle('active', pane.id === `tab-${tabName}`);
   });
+  if (nextPane) refreshCollapsibleHints(nextPane);
 }
 
 function initSettingsSearch(): void {
@@ -617,6 +695,7 @@ function initPopupResize(): void {
     window.clearTimeout(popupSizeSaveTimer);
     popupSizeSaveTimer = window.setTimeout(() => {
       void chrome.storage.local.set({ [POPUP_SIZE_KEY]: { w: Math.round(width), h: Math.round(height) } });
+      refreshCollapsibleHints(); // width change can shift where a hint wraps
     }, 300);
   });
   observer.observe(document.body);
@@ -698,6 +777,7 @@ function initStandaloneWindow(): void {
       void chrome.storage.local.set({
         [POPUP_WINDOW_SIZE_KEY]: { w: window.outerWidth, h: window.outerHeight },
       });
+      refreshCollapsibleHints();
     }, 300);
   });
 }
@@ -710,6 +790,7 @@ async function init(): Promise<void> {
   initTabs();
   initSettingsSearch();
   initSliders();
+  initCollapsibleHints();
   if (isStandaloneWindow) {
     initStandaloneWindow();
   } else {
