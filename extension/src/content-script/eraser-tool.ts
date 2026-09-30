@@ -92,7 +92,9 @@ export function startEraserSelect(): void {
   layer.append(canvas, cursor, hint, toolbar);
   document.body.appendChild(layer);
 
+  let redrawQueued = false;
   const redraw = (): void => {
+    redrawQueued = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = 'rgba(248,113,113,0.6)';
     ctx.fillStyle = 'rgba(248,113,113,0.6)';
@@ -109,6 +111,15 @@ export function startEraserSelect(): void {
       for (const p of stroke.slice(1)) ctx.lineTo(p.x, p.y);
       ctx.stroke();
     }
+  };
+  // Full-viewport clear + replay of every stroke is too heavy to run at raw
+  // pointermove rate (uncapped, faster than paint on many mice/trackpads),
+  // and the cost grows with total stroke history, so a long erase session
+  // gets progressively janky. Coalesce same-frame moves into one redraw.
+  const scheduleRedraw = (): void => {
+    if (redrawQueued) return;
+    redrawQueued = true;
+    requestAnimationFrame(redraw);
   };
 
   const finish = (): void => {
@@ -130,7 +141,7 @@ export function startEraserSelect(): void {
     cursor.style.top = `${ev.clientY}px`;
     if (!currentStroke) return;
     currentStroke.push({ x: ev.clientX, y: ev.clientY });
-    redraw();
+    scheduleRedraw();
   });
   canvas.addEventListener('pointerleave', () => { cursor.style.display = 'none'; });
   canvas.addEventListener('pointerdown', (ev) => {
