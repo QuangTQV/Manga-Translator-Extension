@@ -2744,6 +2744,8 @@ function addInProgressBadge(img: HTMLImageElement): void {
     // sync, which would otherwise fight a `transform`-based CSS animation
     // on that same element (visible as flicker, then the animation getting
     // stuck once syncs stop firing).
+    const pop = document.createElement('div');
+    pop.className = 'mt-progress-pop';
     const dots = document.createElement('div');
     dots.className = 'mt-progress-dots';
     for (let i = 0; i < 3; i++) {
@@ -2751,8 +2753,15 @@ function addInProgressBadge(img: HTMLImageElement): void {
       dot.className = 'mt-progress-dot';
       dots.appendChild(dot);
     }
-    badge.appendChild(dots);
+    pop.appendChild(dots);
+    badge.appendChild(pop);
     parent.appendChild(badge);
+  } else {
+    // Reused an existing badge that removeInProgressBadge() had already
+    // started fading out (e.g. a fast retry) — bring it back to visible
+    // instead of letting its pending removal timeout delete it out from
+    // under this new in-progress state.
+    badge.classList.remove('mt-fade-out');
   }
 
   badge.title = tr('translatingBadgeTitle');
@@ -2764,7 +2773,15 @@ function removeInProgressBadge(img: HTMLImageElement): void {
   const parent = img.parentElement;
   if (!parent) return;
   const overlayId = getTranslatedOverlayId(img);
-  findInProgressBadge(parent, overlayId)?.remove();
+  const badge = findInProgressBadge(parent, overlayId);
+  if (!badge) return;
+  badge.classList.add('mt-fade-out');
+  // transitionend is the normal path; the timeout is a safety net in case
+  // the element gets detached (e.g. the overlay is torn down elsewhere)
+  // before the transition fires, so this never leaks a hidden-but-present node.
+  const cleanup = (): void => badge.remove();
+  badge.addEventListener('transitionend', cleanup, { once: true });
+  setTimeout(cleanup, 220);
 }
 
 function syncInProgressBadgeLayout(img: HTMLImageElement, precomputedPos?: DOMRect): void {
@@ -3995,6 +4012,20 @@ function injectAutoTranslateUI(): void {
       padding: 5px 8px;
       border-radius: 10px; pointer-events: none; z-index: 2147483001;
       box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      /* Only opacity animates here — the outer div's transform style is
+         rewritten inline on every scroll/layout sync (syncTranslatedBadgeLayout),
+         which would fight any transform-based transition/animation on this
+         same element. The entrance "pop" lives one level down instead. */
+      opacity: 1;
+      transition: opacity 180ms ease;
+    }
+    .mt-progress-badge.mt-fade-out { opacity: 0; }
+    .mt-progress-pop {
+      animation: mt-progress-pop-in 260ms cubic-bezier(.32,1.3,.34,1) both;
+    }
+    @keyframes mt-progress-pop-in {
+      from { transform: scale(.55); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
     }
     .mt-progress-dots {
       display: flex; align-items: center; gap: 3px;
@@ -4054,6 +4085,10 @@ function injectAutoTranslateUI(): void {
       font-size: 12px; line-height: 1.35; padding: 4px 8px;
       max-height: 120px; overflow-y: auto;
       font-family: Inter, system-ui, sans-serif;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-progress-pop, .mt-progress-dots, .mt-progress-dot { animation-duration: 0.01ms !important; }
+      .mt-progress-badge { transition-duration: 0.01ms !important; }
     }
   `;
   document.head.appendChild(style);
@@ -5537,7 +5572,47 @@ function applyScannerRootStyles(container: HTMLElement): void {
   container.style.pointerEvents = 'auto';
 }
 
+// Self-contained: toast() is called from many unrelated features (region
+// tool, export, auto-translate, ...) so it can't rely on some other
+// feature's setup having run first. It used to depend on a <style> that
+// only ever existed inside the scanner panel's closed shadow root — which
+// this element (appended to light-DOM document.body) could never actually
+// be affected by, so every toast rendered with zero styling. Injecting its
+// own style into the main document, once, on first use, fixes that
+// regardless of call order.
+function ensureToastStyle(): void {
+  if (document.getElementById('mt-toast-style')) return;
+  const style = document.createElement('style');
+  style.id = 'mt-toast-style';
+  style.textContent = `
+    .mt-toast {
+      position: fixed; bottom: 28px; left: 50%;
+      z-index: 2147483647; padding: 11px 20px; border-radius: 12px;
+      background: rgba(8,12,28,0.97); color: #dde6f5; font: 600 13px Inter, system-ui, sans-serif;
+      border: 1px solid rgba(80,110,200,0.22); box-shadow: 0 8px 30px rgba(0,0,0,0.4); white-space: nowrap;
+      animation: mt-toast-in 320ms cubic-bezier(.28,1.2,.34,1) both;
+    }
+    .mt-toast.mt-toast-hide {
+      animation: mt-toast-out 200ms cubic-bezier(.4,0,1,1) both;
+    }
+    @keyframes mt-toast-in {
+      from { transform: translateX(-50%) translateY(14px) scale(.94); opacity: 0; }
+      to { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+    }
+    @keyframes mt-toast-out {
+      from { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+      to { transform: translateX(-50%) translateY(8px) scale(.96); opacity: 0; }
+    }
+    .mt-toast.error { background: rgba(50,10,10,0.97); border-color: rgba(220,50,50,0.22); color: #fca5a5; }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-toast, .mt-toast.mt-toast-hide { animation-duration: 0.01ms !important; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function toast(message: string, isError = false, durationMs = 5000): void {
+  ensureToastStyle();
   const existing = document.getElementById('mt-toast');
   if (existing) existing.remove();
   const el = document.createElement('div');
@@ -5545,7 +5620,11 @@ function toast(message: string, isError = false, durationMs = 5000): void {
   el.className = `mt-toast${isError ? ' error' : ''}`;
   el.textContent = message;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), durationMs);
+  setTimeout(() => {
+    el.classList.add('mt-toast-hide');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 260); // safety net if animationend never fires
+  }, durationMs);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5750,13 +5829,6 @@ function injectStyles(shadow: ShadowRoot): void {
       font-size: 13px; padding: 9px 16px; box-shadow: 0 4px 14px rgba(59,130,246,0.22);
     }
     .mts-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
-    .mt-toast {
-      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
-      z-index: 2147483647; padding: 11px 20px; border-radius: 12px;
-      background: rgba(8,12,28,0.97); color: #dde6f5; font: 600 13px Inter, system-ui, sans-serif;
-      border: 1px solid rgba(80,110,200,0.22); box-shadow: 0 8px 30px rgba(0,0,0,0.4); white-space: nowrap;
-    }
-    .mt-toast.error { background: rgba(50,10,10,0.97); border-color: rgba(220,50,50,0.22); color: #fca5a5; }
   `;
   shadow.appendChild(s);
 }
