@@ -160,6 +160,13 @@ class TranslationConfig:
     # _build_annotated_page_image and CLAUDE.md's "Combine into one page
     # image" section for the token-cost comparison).
     combine_page_image_max_side_pixels: int = 1536
+    # "legacy" (not "auto") is the deliberate default here — see the
+    # matching field in schemas.py: a caller that predates
+    # combine_page_image_resolution (older extension build, or the web app,
+    # which doesn't set it) gets the fixed combine_page_image_max_side_pixels
+    # behavior it always had, rather than silently switching to adaptive
+    # sizing it never opted into. The extension's Pro tab always sends
+    # "auto" explicitly as of this field's introduction.
     combine_page_image_resolution: str = "legacy"
     reasoning_effort: Optional[str] = (
         None  # Default: Google uses "auto", Anthropic uses "none", others use "medium"
