@@ -4205,6 +4205,25 @@ function injectAutoTranslateUI(): void {
       .mt-progress-pop, .mt-progress-dots, .mt-progress-dot { animation-duration: 0.01ms !important; }
       .mt-progress-badge { transition-duration: 0.01ms !important; }
     }
+    /* Tap feedback for the per-page buttons. Can't use transform or
+       background here (both are rewritten inline by JS — transform for
+       scroll-position syncing, background for the toggle button's on/off
+       state — and an inline style always wins over a stylesheet rule, so
+       either would silently never show). filter is untouched by any inline
+       write on these elements, so it's the one property free to animate. */
+    .mt-export-btn, .mt-original-toggle-btn, .mt-retranslate-btn {
+      transition: filter 100ms ease;
+    }
+    .mt-export-btn:hover, .mt-original-toggle-btn:hover, .mt-retranslate-btn:hover {
+      filter: brightness(1.3);
+    }
+    .mt-export-btn:active, .mt-original-toggle-btn:active, .mt-retranslate-btn:active {
+      filter: brightness(0.7);
+      transition-duration: 50ms;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-export-btn, .mt-original-toggle-btn, .mt-retranslate-btn { transition: none; }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -5915,6 +5934,7 @@ function injectStyles(shadow: ShadowRoot): void {
       transition: border-color 0.15s, transform 0.1s;
     }
     .mts-card:hover { border-color: rgba(80,120,255,0.45); transform: translateY(-2px); }
+    .mts-card:active { transform: translateY(-2px) scale(0.97); }
     .mts-card.selected { border-color: #4f8ff7; }
     .mts-card.translating { opacity: 0.55; }
     .mts-card.done { border-color: #16a34a; opacity: 0.75; }
@@ -5947,13 +5967,21 @@ function injectStyles(shadow: ShadowRoot): void {
       width: 24px; height: 24px; border-radius: 999px;
       background: rgba(0,0,0,0.65); color: white; font-size: 12px;
       display: flex; align-items: center; justify-content: center;
-      opacity: 0.75; transition: opacity 0.15s, background 0.15s;
+      opacity: 0.75; transition: opacity 0.15s, background 0.15s, transform 0.12s cubic-bezier(.2,.75,.25,1);
     }
     .mts-zoom-btn:hover { opacity: 1; background: rgba(37,99,235,0.9); }
+    .mts-zoom-btn:active { transform: scale(0.88); }
     .mts-btn-toolbar, .mts-btn-primary, .mts-btn-close {
       display: inline-flex; align-items: center; justify-content: center;
       border: none; border-radius: 9px; cursor: pointer; font-weight: 700;
       font-family: Inter, system-ui, sans-serif;
+      transition: background 0.15s, transform 0.12s cubic-bezier(.2,.75,.25,1);
+    }
+    .mts-btn-toolbar:active, .mts-btn-primary:active, .mts-btn-close:active { transform: scale(0.94); }
+    @media (prefers-reduced-motion: reduce) {
+      .mts-card, .mts-zoom-btn, .mts-btn-toolbar, .mts-btn-primary, .mts-btn-close {
+        transition-duration: 0.01ms !important;
+      }
     }
     .mts-btn-toolbar {
       background: rgba(14,22,50,0.9); color: #7a90b8; font-size: 12px; padding: 6px 11px;
