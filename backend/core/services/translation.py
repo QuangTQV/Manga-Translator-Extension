@@ -1833,13 +1833,27 @@ def _parse_llm_response_unified(
 
 
 def _inspect_combined_page_response(
-    response_text: Optional[str], total_elements: int
+    response_text: Optional[str],
+    total_elements: int,
+    accept_ocr_failed: bool = False,
 ) -> Tuple[Dict[int, str], List[int], bool]:
     """Return valid numbered rows, rows needing repair, and whether an
     out-of-range index made the mapping ambiguous.
 
     This stricter check is only used for the single annotated-page flow;
     ordinary crop-based parsing keeps its existing behavior.
+
+    `accept_ocr_failed`: on the *first* pass over the model's original
+    response, `[OCR FAILED]` is treated as needing repair — it's worth
+    giving the model one more focused look via a dedicated crop. But that
+    repair call is itself re-parsed with this same function, and if the
+    model still says `[OCR FAILED]` there, that's not a parsing problem to
+    retry — it's the model's considered final answer after the dedicated
+    look, and a legitimate one for genuinely unreadable text (small/
+    stylized SFX, a torn page, ...). Treating it as "still needs repair" at
+    that point just discards a valid `[OCR FAILED]` row in favor of the far
+    less informative "[PROVIDER: Missing item N]" fallback — pass True when
+    re-parsing a repair response to accept it as a final, valid result.
     """
     if not response_text:
         return {}, list(range(1, total_elements + 1)), False
@@ -1869,11 +1883,10 @@ def _inspect_combined_page_response(
             repair_ids.add(number)
             continue
         original, translated = (part.strip() for part in row.split("||", 1))
-        if (
-            not original
-            or not translated
-            or "[OCR FAILED]" in original.upper()
-            or "[OCR FAILED]" in translated.upper()
+        if not original or not translated:
+            repair_ids.add(number)
+        elif not accept_ocr_failed and (
+            "[OCR FAILED]" in original.upper() or "[OCR FAILED]" in translated.upper()
         ):
             repair_ids.add(number)
 
@@ -3305,7 +3318,7 @@ Do not change the already valid rows shown below. Do not invent text for an unre
                             repair_response, _ = _extract_memory_note(repair_response)
                         repaired_rows, _, repair_had_out_of_range = (
                             _inspect_combined_page_response(
-                                repair_response, total_elements
+                                repair_response, total_elements, accept_ocr_failed=True
                             )
                         )
                         if not repair_had_out_of_range:

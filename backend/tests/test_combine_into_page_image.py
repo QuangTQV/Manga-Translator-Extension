@@ -222,6 +222,41 @@ def test_combined_page_response_validator_repairs_all_after_out_of_range_index()
     assert out_of_range is True
 
 
+def test_combined_page_response_validator_rejects_ocr_failed_by_default():
+    # The first pass over the model's original response: an [OCR FAILED] row
+    # is worth one repair attempt (a dedicated crop might read better), so
+    # it's flagged as needing repair rather than accepted outright.
+    rows, repair_ids, out_of_range = tr._inspect_combined_page_response(
+        "1: [OCR FAILED] || [OCR FAILED]\n2: two || dos", total_elements=2,
+    )
+    assert rows == {2: "two || dos"}
+    assert repair_ids == [1]
+    assert out_of_range is False
+
+
+def test_combined_page_response_validator_accepts_ocr_failed_when_reparsing_a_repair():
+    # Re-parsing the *repair* call's own response: the model already got a
+    # dedicated crop and still says [OCR FAILED] — that's its considered
+    # final answer, not something to discard in favor of "Missing item N".
+    # Regression test for a real production report: this used to drop a
+    # correctly-formatted repair response, producing the generic
+    # "[PROVIDER: Missing item N]" placeholder instead of [OCR FAILED]
+    # (which the rest of the pipeline already knows to fall back to the
+    # original, untranslated pixels for). A repair response only ever
+    # contains rows for the ids that needed repair, so 1/3 legitimately
+    # stay missing here — the caller only reads the specific ids it asked
+    # for back out of `rows`, never the unused `repair_ids` against the
+    # full page.
+    rows, repair_ids, out_of_range = tr._inspect_combined_page_response(
+        "2: [OCR FAILED] || [OCR FAILED]\n4: [OCR FAILED] || [OCR FAILED]",
+        total_elements=4,
+        accept_ocr_failed=True,
+    )
+    assert rows == {2: "[OCR FAILED] || [OCR FAILED]", 4: "[OCR FAILED] || [OCR FAILED]"}
+    assert 2 not in repair_ids and 4 not in repair_ids
+    assert out_of_range is False
+
+
 # ---------------------------------------------------------------------------
 # core/services/translation.py:call_translation_api_batch — single_page_image
 # ---------------------------------------------------------------------------
@@ -286,9 +321,40 @@ def test_single_page_image_repairs_missing_row_with_small_compressed_crop(monkey
     assert len(decoded) < len(base64.b64decode(crops[1]))
     assert "region(s): 2" in repair_prompt
     assert "crop 1 = original numbered region 2" in repair_prompt
-    assert "Do not change the already valid rows" in repair_prompt
-    assert "STRUCTURAL REPAIR OVERRIDE" in repair_system_prompt
-    assert "individual low-resolution crops" in repair_system_prompt
+
+
+def test_single_page_image_accepts_ocr_failed_from_a_repair_call(monkeypatch):
+    # Regression test for a real production report: the model's repair
+    # response correctly said [OCR FAILED] for both requested regions (a
+    # legitimate final answer after a dedicated-crop look — not a parsing
+    # failure), but the result used to discard it and fall back to the
+    # generic "[PROVIDER: Missing item N]" placeholder instead.
+    crops = [_png_b64() for _ in range(4)]
+    calls = []
+
+    def fake_call(cfg, parts, prompt, *args, **kwargs):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "1: 元 || first\n3: ・・・怖い賭けだけど || scary bet"
+        return "2: [OCR FAILED] || [OCR FAILED]\n4: [OCR FAILED] || [OCR FAILED]"
+
+    monkeypatch.setattr(tr, "_call_llm_endpoint", fake_call)
+    translations = tr.call_translation_api_batch(
+        _config(provider="Azure OpenAI"),
+        crops,
+        "",
+        ["image/png"] * 4,
+        "image/png",
+        [{}, {}, {}, {}],
+        annotated_page_b64="ANNOTATED_PAGE_DATA",
+        annotated_page_mime_type="image/jpeg",
+    )
+
+    assert len(calls) == 2  # exactly one repair attempt, as designed
+    assert translations[1] == "[OCR FAILED]"
+    assert translations[3] == "[OCR FAILED]"
+    assert "Missing item" not in translations[1]
+    assert "Missing item" not in translations[3]
 
 
 def test_single_page_image_does_not_retry_more_than_once(monkeypatch):

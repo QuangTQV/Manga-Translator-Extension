@@ -784,9 +784,15 @@ function initStandaloneWindow(): void {
 
 async function init(): Promise<void> {
   // `body` has backdrop-filter for the glass UI, which makes it the containing
-  // block for fixed descendants. Keep the help overlay outside body so it is
-  // fixed to the popup viewport rather than scrolling with the tab content.
+  // block for fixed descendants. Keep the help overlay and the save-status
+  // banner outside body so they're fixed to the popup viewport rather than
+  // scrolling with the tab content — #popup-status was still inside body
+  // (its static spot in the HTML, right before the footer), so saving from
+  // partway down a long tab (e.g. several LLM providers configured) showed
+  // the "saved" confirmation hundreds of pixels above the visible area
+  // instead of near the bottom of the screen.
   document.documentElement.appendChild(supportChatOverlay);
+  document.documentElement.appendChild(statusEl);
   initTabs();
   initSettingsSearch();
   initSliders();
