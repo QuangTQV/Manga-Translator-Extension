@@ -50,11 +50,14 @@ test('the view-original button hides/shows the translated overlay over the untou
   const overlay = mangaPage.locator('.mt-page-overlay').first();
   await expect(overlay).toBeVisible();
 
+  // The overlay now cross-fades via opacity instead of display:none, so it
+  // stays `display: block` (Playwright's toBeHidden/toBeVisible don't look
+  // at opacity) — check the actual CSS value post-transition instead.
   await toggleBtn.click();
-  await expect(overlay).toBeHidden();
+  await expect(overlay).toHaveCSS('opacity', '0');
   await expect(toggleBtn).toHaveClass(/active/);
 
   await toggleBtn.click();
-  await expect(overlay).toBeVisible();
+  await expect(overlay).toHaveCSS('opacity', '1');
   await expect(toggleBtn).not.toHaveClass(/active/);
 });

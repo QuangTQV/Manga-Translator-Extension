@@ -2065,30 +2065,11 @@ function applyTranslatedImage(img: HTMLImageElement, dataUrl: string, rawUrl?: s
   setOriginalViewActive(img, false);
 }
 
-function applyTranslatedOverlay(img: HTMLImageElement, dataUrl: string): void {
-  const parent = img.parentElement;
-  if (!parent) {
-    img.src = dataUrl;
-    return;
-  }
-
-  const parentStyle = window.getComputedStyle(parent);
-  if (parentStyle.position === 'static') {
-    parent.style.position = 'relative';
-  }
-
-  const overlayId = getTranslatedOverlayId(img);
-  let overlay = findTranslatedOverlay(parent, overlayId);
-  if (!overlay) {
-    overlay = document.createElement('img');
-    overlay.className = 'mt-page-overlay';
-    overlay.alt = '';
-    overlay.setAttribute('data-mt-for', overlayId);
-    overlay.setAttribute('aria-hidden', 'true');
-    parent.appendChild(overlay);
-  }
-
-  overlay.src = dataUrl;
+function styleTranslatedOverlayEl(overlay: HTMLImageElement, overlayId: string): void {
+  overlay.className = 'mt-page-overlay';
+  overlay.alt = '';
+  overlay.setAttribute('data-mt-for', overlayId);
+  overlay.setAttribute('aria-hidden', 'true');
   overlay.style.position = 'absolute';
   // A small z-index (this used to be '9') only wins against a manga site's
   // OWN sibling elements in the same local stacking context if the site
@@ -2104,7 +2085,88 @@ function applyTranslatedOverlay(img: HTMLImageElement, dataUrl: string): void {
   overlay.style.display = 'block';
   overlay.style.maxWidth = 'none';
   overlay.style.opacity = '1';
-  syncTranslatedOverlayLayout(img, overlay);
+}
+
+function applyTranslatedOverlay(img: HTMLImageElement, dataUrl: string): void {
+  const parent = img.parentElement;
+  if (!parent) {
+    img.src = dataUrl;
+    return;
+  }
+
+  const parentStyle = window.getComputedStyle(parent);
+  if (parentStyle.position === 'static') {
+    parent.style.position = 'relative';
+  }
+
+  const overlayId = getTranslatedOverlayId(img);
+  const existing = findTranslatedOverlay(parent, overlayId);
+
+  if (!existing) {
+    // First translation for this page: nothing on screen yet to fade from,
+    // so just show it — matches the toast/badge treatment elsewhere, which
+    // only animate a *change*, not an initial appearance.
+    const overlay = document.createElement('img');
+    styleTranslatedOverlayEl(overlay, overlayId);
+    overlay.src = dataUrl;
+    parent.appendChild(overlay);
+    syncTranslatedOverlayLayout(img, overlay);
+    scheduleTranslatedDecorationSync(img);
+    return;
+  }
+
+  if (existing.src === dataUrl) return; // identical result (e.g. a cache hit); nothing to transition
+
+  // Re-translate (or a fix) replacing an already-visible translation: cross-
+  // fade to the new image instead of the instant src swap this used to be,
+  // which flashed the moment the new bytes decoded — most jarring here
+  // specifically, since the reader is by definition already looking at
+  // this exact spot when they ask for a re-translate. Two stacked <img>s
+  // (the clone inherits `existing`'s already-correct position/size from its
+  // last layout sync) fade across each other, then collapse back to one.
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion) {
+    existing.src = dataUrl;
+    syncTranslatedOverlayLayout(img, existing);
+    scheduleTranslatedDecorationSync(img);
+    return;
+  }
+
+  const preload = new Image();
+  preload.onload = () => {
+    // The target overlay may have been removed (page scrolled away/recycled)
+    // or replaced by a newer call while this image was decoding.
+    if (!existing.isConnected || findTranslatedOverlay(parent, overlayId) !== existing) return;
+
+    const incoming = existing.cloneNode(false) as HTMLImageElement;
+    incoming.removeAttribute('data-mt-for'); // keep exactly one canonical overlay findable mid-transition
+    incoming.src = dataUrl;
+    // !important: the .mt-page-overlay class declares `opacity: 1 !important`
+    // (see setOriginalViewActive's comment on the same rule) — a plain
+    // inline assignment would just be ignored and both elements would sit
+    // at opacity 1 the whole time, i.e. no visible cross-fade at all.
+    incoming.style.setProperty('opacity', '0', 'important');
+    incoming.style.setProperty('transition', 'opacity 260ms ease', 'important');
+    existing.insertAdjacentElement('afterend', incoming);
+    void incoming.offsetWidth; // commit the starting opacity before animating
+    existing.style.setProperty('transition', 'opacity 260ms ease', 'important');
+    incoming.style.setProperty('opacity', '1', 'important');
+    existing.style.setProperty('opacity', '0', 'important');
+    existing.addEventListener('transitionend', function onEnd() {
+      existing.removeEventListener('transitionend', onEnd);
+      existing.remove();
+      incoming.setAttribute('data-mt-for', overlayId);
+      incoming.style.transition = '';
+      syncTranslatedOverlayLayout(img, incoming);
+    }, { once: true });
+  };
+  preload.onerror = () => {
+    // Decoding failed for some reason; fall back to the old instant swap
+    // rather than leaving the stale translation on screen forever.
+    existing.src = dataUrl;
+  };
+  preload.src = dataUrl;
+  syncTranslatedOverlayLayout(img, existing);
   scheduleTranslatedDecorationSync(img);
 }
 
@@ -2357,7 +2419,22 @@ function setOriginalViewActive(img: HTMLImageElement, showOriginal: boolean): vo
   const overlayId = getTranslatedOverlayId(img);
 
   const overlay = findTranslatedOverlay(parent, overlayId);
-  overlay?.style.setProperty('display', showOriginal ? 'none' : 'block', 'important');
+  if (overlay) {
+    // Cross-fades instead of the instant display:none/block cut this used
+    // to be — readers toggle this a lot to compare original vs. translated,
+    // so a hard flash every time was one of the most-repeated snaps in the
+    // whole extension. Stays `display: block` always; opacity does the
+    // actual show/hide, and the overlay's existing pointer-events:none
+    // means it never blocks clicks on the real page image while faded out.
+    // Both need `!important`: the .mt-page-overlay class itself declares
+    // `display: block !important` AND `opacity: 1 !important` (so a freshly
+    // created overlay is never invisible-by-default while this file's many
+    // other inline-style writers don't have to think about opacity at all)
+    // — a plain inline assignment loses to that regardless of the value.
+    overlay.style.setProperty('display', 'block', 'important');
+    overlay.style.setProperty('transition', 'opacity 220ms ease', 'important');
+    overlay.style.setProperty('opacity', showOriginal ? '0' : '1', 'important');
+  }
 
   const hitLayer = findFixHitLayer(parent, overlayId);
   if (hitLayer) hitLayer.style.display = showOriginal ? 'none' : '';

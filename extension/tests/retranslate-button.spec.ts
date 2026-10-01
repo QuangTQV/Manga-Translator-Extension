@@ -69,7 +69,12 @@ test.describe('re-translate button', () => {
     // The first, ordinary translation does not ask to skip the cache.
     expect(bodies).toHaveLength(1);
     expect(bodies[0].bypass_translation_cache).toBeUndefined();
-    const overlay = page.locator('.mt-page-overlay');
+    // .last(): a re-translate cross-fades two stacked overlays briefly (see
+    // applyTranslatedOverlay) before collapsing back to one — .last() always
+    // resolves to the single element at rest and to the incoming (eventually
+    // surviving) one mid-transition, so this never hits a strict-mode
+    // violation from matching both.
+    const overlay = page.locator('.mt-page-overlay').last();
     await expect(overlay).toHaveAttribute('src', `data:image/png;base64,${FAKE_TRANSLATED_IMAGE_B64}`);
 
     await retranslate.click();
@@ -106,7 +111,7 @@ test.describe('re-translate button', () => {
 
     releaseSecond();
     await expect(retranslate).toHaveText('↻', { timeout: 10_000 });
-    await expect(page.locator('.mt-page-overlay')).toHaveAttribute('src', `data:image/png;base64,${SECOND_TRANSLATION_B64}`);
+    await expect(page.locator('.mt-page-overlay').last()).toHaveAttribute('src', `data:image/png;base64,${SECOND_TRANSLATION_B64}`);
     expect(posts).toBe(2);
   });
 
@@ -125,11 +130,15 @@ test.describe('re-translate button', () => {
 
     const page = await startAuto(context, extensionId);
     const retranslate = page.locator('.mt-retranslate-btn');
-    const overlay = page.locator('.mt-page-overlay');
+    const overlay = page.locator('.mt-page-overlay').last();
     await expect(retranslate).toBeVisible({ timeout: 15_000 });
 
     await retranslate.click();
-    await expect(page.locator('#mt-toast')).toContainText('Could not re-translate this page');
+    // Shows the backend's actual error now instead of a generic message
+    // (matches how every other direct, user-initiated action in the
+    // content script surfaces result.error) — easier to diagnose from a
+    // bug report than a dead-end "try again".
+    await expect(page.locator('#mt-toast')).toContainText('boom');
     await expect(retranslate).toHaveText('↻');
     await expect(overlay).toHaveAttribute('src', `data:image/png;base64,${FAKE_TRANSLATED_IMAGE_B64}`); // untouched
     await expect(overlay).toBeVisible();
