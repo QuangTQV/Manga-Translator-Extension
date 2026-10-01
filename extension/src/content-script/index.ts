@@ -3110,6 +3110,12 @@ function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, b
   magnifier.style.left = '0px';
   magnifier.style.top = '0px';
   magnifier.style.display = 'flex';
+  // transform is left untouched here (still whatever it was, usually
+  // 'none') so this measurement reads the box's true layout size —
+  // getBoundingClientRect() reports the visually-scaled size once a
+  // transform is applied, which would throw off the position math below by
+  // the same ~4% as the entrance pop's scale. The pop itself is applied
+  // after positioning, closer to the bottom of this function.
   const totalHeight = magnifier.getBoundingClientRect().height;
 
   const margin = 10;
@@ -3125,10 +3131,31 @@ function showBubbleMagnifier(hitEl: HTMLElement, overlayImg: HTMLImageElement, b
   top = Math.max(margin, Math.min(top, window.innerHeight - totalHeight - margin));
   magnifier.style.left = `${left}px`;
   magnifier.style.top = `${top}px`;
+
+  // Entrance pop, now that position/size are final: start from the hidden
+  // visual state (in case a previous hover's fade-out — hideBubbleMagnifier
+  // — was interrupted mid-transition by this new hover, so this one always
+  // begins from a consistent point), force a reflow so the browser commits
+  // that starting state, then animate to visible.
+  magnifier.style.transition = 'none';
+  magnifier.style.opacity = '0';
+  magnifier.style.transform = 'scale(0.96)';
+  void magnifier.offsetWidth;
+  magnifier.style.transition = '';
+  magnifier.style.opacity = '1';
+  magnifier.style.transform = 'scale(1)';
 }
 
 function hideBubbleMagnifier(): void {
-  if (activeBubbleMagnifier) activeBubbleMagnifier.style.display = 'none';
+  const magnifier = activeBubbleMagnifier;
+  if (!magnifier || magnifier.style.display === 'none') return;
+  magnifier.style.opacity = '0';
+  magnifier.style.transform = 'scale(0.96)';
+  window.setTimeout(() => {
+    // A new hover may have reopened it (opacity back to '1') while this
+    // timeout was pending — only hide if it's still the one fading out.
+    if (magnifier.style.opacity === '0') magnifier.style.display = 'none';
+  }, 150);
 }
 
 // The magnifier is `position: fixed` relative to the bubble's on-screen
@@ -4156,6 +4183,12 @@ function injectAutoTranslateUI(): void {
       pointer-events: none;
       z-index: 2147483647;
       overflow: hidden;
+      opacity: 0;
+      transform: scale(0.96);
+      transition: opacity 150ms ease, transform 150ms ease;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-bubble-magnifier { transition-duration: 0.01ms !important; }
     }
     .mt-bubble-magnifier-image {
       flex: 0 0 auto;
@@ -4798,10 +4831,21 @@ function bindScanner(shadow: ShadowRoot): void {
     hideHoverPreview();
     lightboxImg.src = src;
     lightbox.style.display = 'flex';
+    // Force the browser to commit display:flex/opacity:0 as a real paint
+    // before switching to the visible state, same as every other
+    // entrance pop in this file — otherwise the opacity change can
+    // coalesce with the display change and skip the transition entirely.
+    void lightbox.offsetWidth;
+    lightbox.classList.add('mts-visible');
   };
   const closeLightbox = () => {
-    lightbox.style.display = 'none';
-    lightboxImg.src = '';
+    lightbox.classList.remove('mts-visible');
+    window.setTimeout(() => {
+      if (!lightbox.classList.contains('mts-visible')) {
+        lightbox.style.display = 'none';
+        lightboxImg.src = '';
+      }
+    }, 200);
   };
   lightboxCloseBtn.addEventListener('click', closeLightbox);
   lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
@@ -4823,10 +4867,17 @@ function bindScanner(shadow: ShadowRoot): void {
     top = Math.max(8, Math.min(top, window.innerHeight - maxHeight - 8));
     hoverPreview.style.left = `${left}px`;
     hoverPreview.style.top = `${top}px`;
+    void hoverPreview.offsetWidth; // commit display:flex/opacity:0 before animating to visible
+    hoverPreview.classList.add('mts-visible');
   };
   const hideHoverPreview = () => {
-    hoverPreview.style.display = 'none';
-    hoverPreviewImg.src = '';
+    hoverPreview.classList.remove('mts-visible');
+    window.setTimeout(() => {
+      // A new hover may have reopened it while this timeout was pending.
+      if (hoverPreview.classList.contains('mts-visible')) return;
+      hoverPreview.style.display = 'none';
+      hoverPreviewImg.src = '';
+    }, 150);
   };
   grid.addEventListener('mouseover', (e) => {
     const zoomBtn = (e.target as HTMLElement).closest<HTMLElement>('.mts-zoom-btn');
@@ -5104,7 +5155,7 @@ function bindScanner(shadow: ShadowRoot): void {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (lightbox.style.display !== 'none') { closeLightbox(); return; }
+      if (lightbox.classList.contains('mts-visible')) { closeLightbox(); return; }
       closeScanner();
       return;
     }
@@ -5753,11 +5804,20 @@ function injectStyles(shadow: ShadowRoot): void {
       background: rgba(2,4,16,0.9);
       align-items: center; justify-content: center; padding: 40px;
       cursor: zoom-out;
+      opacity: 0;
+      transition: opacity 200ms ease;
     }
+    .mts-lightbox.mts-visible { opacity: 1; }
     .mts-lightbox-img {
       max-width: 100%; max-height: 100%; object-fit: contain;
       border-radius: 8px; box-shadow: 0 20px 80px rgba(0,0,0,0.7);
       cursor: default;
+      transform: scale(0.94);
+      transition: transform 200ms cubic-bezier(.22,1,.36,1);
+    }
+    .mts-lightbox.mts-visible .mts-lightbox-img { transform: scale(1); }
+    @media (prefers-reduced-motion: reduce) {
+      .mts-lightbox, .mts-lightbox-img { transition-duration: 0.01ms !important; }
     }
     .mts-lightbox-close {
       position: absolute; top: 20px; right: 20px;
@@ -5769,6 +5829,13 @@ function injectStyles(shadow: ShadowRoot): void {
       border-radius: 10px; overflow: hidden;
       border: 1px solid rgba(80,100,200,0.3); box-shadow: 0 20px 60px rgba(0,0,0,0.6);
       background: #0d1428;
+      opacity: 0;
+      transform: scale(0.96);
+      transition: opacity 150ms ease, transform 150ms ease;
+    }
+    .mts-hover-preview.mts-visible { opacity: 1; transform: scale(1); }
+    @media (prefers-reduced-motion: reduce) {
+      .mts-hover-preview { transition-duration: 0.01ms !important; }
     }
     .mts-hover-preview-img {
       display: block; max-width: 100%; max-height: 100%;
