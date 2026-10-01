@@ -70,7 +70,7 @@ const BACKGROUND_MESSAGE_TYPES = new Set([
   'ADMIN_SET_LLM_CONFIG', 'LIST_FONTS', 'LIVE_AI_LOG', 'LIVE_AI_LOG_SETTINGS',
   'LIVE_AI_IMAGE', 'REGION_API', 'STORY_LIST', 'STORY_GET', 'STORY_CREATE',
   'STORY_SAVE', 'STORY_DELETE', 'STORY_UPDATE_FROM_DESCRIPTION',
-  'ENSURE_SEARXNG',
+  'ENSURE_SEARXNG', 'SHOW_NOTIFICATION',
 ]);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -121,6 +121,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (error) {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
       }
+      return;
+    }
+
+    if (message.type === 'SHOW_NOTIFICATION') {
+      // Content scripts can't call chrome.notifications directly — only
+      // extension pages (background, popup) can. This lets a content script
+      // surface something worth noticing even if the reader has switched
+      // away to another tab, e.g. a batch translation finishing or every
+      // configured key/provider failing in a row.
+      await showSystemNotification(
+        typeof message.title === 'string' ? message.title : 'Manga Translator',
+        typeof message.message === 'string' ? message.message : '',
+      );
+      sendResponse({ ok: true });
       return;
     }
 
@@ -454,7 +468,7 @@ async function fetchAndTranslateWithBody(imageUrl: string, pageUrl: string | und
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
   const endpoint = `${backendUrl.replace(/\/$/, '')}/translate`;
 
-  const stopDownloadWatch = watchModelDownloads(tabId, backendUrl);
+  const stopDownloadWatch = watchModelDownloads(tabId, backendUrl, settings.uiLanguage);
   try {
     console.log('[BG] fetchAndTranslateWithBody calling backend:', endpoint);
     const res = await fetch(endpoint, {
@@ -962,7 +976,7 @@ async function regionApiCall(path: string, body: Record<string, unknown>, tabId?
   if (!REGION_PATHS.has(path)) return { ok: false, error: 'Unsupported region endpoint' };
   const settings = await getSettings();
   const backendUrl = settings.backendUrl || 'http://localhost:7677';
-  const stopDownloadWatch = watchModelDownloads(tabId, backendUrl);
+  const stopDownloadWatch = watchModelDownloads(tabId, backendUrl, settings.uiLanguage);
   try {
     const res = await fetch(`${backendUrl.replace(/\/$/, '')}${path}`, {
       method: 'POST',
@@ -983,6 +997,27 @@ async function regionApiCall(path: string, body: Record<string, unknown>, tabId?
   } finally {
     stopDownloadWatch();
   }
+}
+
+// System (OS-level) notifications — the extension's only way to reach a
+// reader who has switched away from the manga tab entirely. Used sparingly,
+// only for things worth interrupting them for (see call sites). Single
+// choke point for the Config tab's on/off toggle, so every call site (the
+// content-script relay below and the model-download watcher further down)
+// is covered without each needing its own check.
+async function showSystemNotification(title: string, message: string): Promise<void> {
+  const settings = await getSettings();
+  if (settings.notificationsEnabled === false) return;
+  chrome.notifications.create(
+    '',
+    {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+      title,
+      message,
+    },
+    () => { void chrome.runtime.lastError; }, // swallow — a notification the user can't currently see (OS "do not disturb", permission revoked) isn't worth surfacing an error for
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1007,7 +1042,7 @@ const downloadWatchers = new Map<number, DownloadWatcher>();
 
 // Returns the function that ends this request's watch. A no-op without a tab
 // (requests made from the popup have nobody to tell).
-function watchModelDownloads(tabId: number | undefined, backendUrl: string): () => void {
+function watchModelDownloads(tabId: number | undefined, backendUrl: string, uiLanguage: AppSettings['uiLanguage']): () => void {
   if (tabId === undefined) return () => {};
   let watcher = downloadWatchers.get(tabId);
   if (!watcher) {
@@ -1024,6 +1059,16 @@ function watchModelDownloads(tabId: number | undefined, backendUrl: string): () 
           w.lastNoticeAt = Date.now();
           await chrome.tabs.sendMessage(tabId, { type: 'MODEL_DOWNLOADS', downloads });
         } else if (downloads.length === 0) {
+          // The reader may well have switched tabs during what can be a
+          // multi-minute first-time download (up to ~2GB) — a system
+          // notification reaches them even if the manga tab isn't visible,
+          // unlike the in-page toast this replaces/follows.
+          if (w.lastNames) {
+            await showSystemNotification(
+              t(uiLanguage, 'notifyTitle'),
+              t(uiLanguage, 'notifyModelDownloadDoneBody', { name: w.lastNames.replace(/\|/g, ', ') }),
+            );
+          }
           w.lastNames = '';
         }
       } catch { /* backend busy/unreachable or tab gone: this is only a courtesy notice */ }

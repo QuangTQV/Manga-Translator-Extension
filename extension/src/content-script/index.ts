@@ -166,6 +166,9 @@ const EN_MESSAGES = {
   fixSelectedDone: 'Fixed {success}/{total} page(s)',
   cacheTooLargeToLoad: 'Translated page cache is {mb}MB — too large to load, so previously translated pages won\'t show as translated this session. Use "Clear translated cache" in Config to reset it.',
   btnBackToTranslate: 'Translate',
+  notifyTitle: 'Manga Translator',
+  notifyScanDoneBody: 'Finished translating {count} page(s)',
+  notifyRetryExhaustedBody: 'Translation keeps failing — check your API keys, provider settings, or that the backend is running',
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -324,6 +327,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: 'Đã sửa {success}/{total} trang',
     cacheTooLargeToLoad: 'Cache trang đã dịch đang {mb}MB - quá lớn để tải, nên các trang đã dịch trước đó sẽ không hiện là đã dịch trong phiên này. Dùng "Clear translated cache" trong Config để reset.',
     btnBackToTranslate: 'Dịch',
+    notifyTitle: 'Manga Translator',
+    notifyScanDoneBody: 'Đã dịch xong {count} trang',
+    notifyRetryExhaustedBody: 'Dịch liên tục thất bại — kiểm tra lại API key, cấu hình provider, hoặc backend có đang chạy không',
   },
   zh: {
     autoMt: '自动 MT',
@@ -477,6 +483,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: '已修正 {success}/{total} 页',
     cacheTooLargeToLoad: '已翻译页面缓存为 {mb}MB，太大无法加载，因此本次会话中之前翻译过的页面不会显示为已翻译。请在设置的 Config 中使用"Clear translated cache"重置。',
     btnBackToTranslate: '翻译',
+    notifyTitle: 'Manga Translator',
+    notifyScanDoneBody: '已完成 {count} 页的翻译',
+    notifyRetryExhaustedBody: '翻译持续失败——请检查 API 密钥、提供商设置，或后端是否正在运行',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -630,6 +639,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: '{success}/{total} ページを修正しました',
     cacheTooLargeToLoad: '翻訳済みページのキャッシュが {mb}MB あり、大きすぎて読み込めません。そのため今回のセッションでは以前翻訳したページが「翻訳済み」と表示されません。Config の「Clear translated cache」でリセットしてください。',
     btnBackToTranslate: '翻訳',
+    notifyTitle: 'Manga Translator',
+    notifyScanDoneBody: '{count}ページの翻訳が完了しました',
+    notifyRetryExhaustedBody: '翻訳が失敗し続けています — APIキー、プロバイダー設定、バックエンドの起動状況を確認してください',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -783,6 +795,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fixSelectedDone: '{success}/{total}개 페이지를 수정했습니다',
     cacheTooLargeToLoad: '번역된 페이지 캐시가 {mb}MB로 너무 커서 불러올 수 없습니다. 이번 세션에서는 이전에 번역한 페이지가 번역됨으로 표시되지 않습니다. Config의 "Clear translated cache"로 초기화하세요.',
     btnBackToTranslate: '번역',
+    notifyTitle: 'Manga Translator',
+    notifyScanDoneBody: '{count}페이지 번역을 완료했습니다',
+    notifyRetryExhaustedBody: '번역이 계속 실패하고 있습니다 — API 키, 공급자 설정 또는 백엔드 실행 상태를 확인하세요',
   },
 };
 
@@ -1193,6 +1208,11 @@ const AUTO_SCAN_LIMIT = 250;
 const LAZY_IMAGE_ATTRS = ['data-src', 'data-lazy-src', 'data-original', 'data-srcset', 'data-lazy', 'data-image'] as const;
 const AUTO_RETRY_MAP = new Map<string, number>(); // url -> retry count
 const AUTO_RETRY_MAX = 3;
+// A provider outage or an exhausted shared quota hits every in-flight image
+// at once — without this, that single event would otherwise fire one system
+// notification per image.
+const RETRY_EXHAUSTED_NOTIFY_COOLDOWN_MS = 60_000;
+let lastRetryExhaustedNotifyAt = 0;
 
 // Per-image bubble/request context from the most recent successful translate
 // in this session — powers the "click a bubble to fix its translation"
@@ -1249,6 +1269,10 @@ function markAutoTranslateFailure(img: HTMLImageElement, url: string, retries: n
   AUTO_RETRY_MAP.set(url, nextRetries);
   if (nextRetries >= AUTO_RETRY_MAX) {
     addRetryNeededBadge(img, url);
+    if (Date.now() - lastRetryExhaustedNotifyAt >= RETRY_EXHAUSTED_NOTIFY_COOLDOWN_MS) {
+      lastRetryExhaustedNotifyAt = Date.now();
+      notifySystem(tr('notifyRetryExhaustedBody'));
+    }
   }
 }
 
@@ -5161,6 +5185,12 @@ function bindScanner(shadow: ShadowRoot): void {
           : tr('partialTranslated', { success, total: chosen.length }),
         success === 0,
       );
+      // A batch translate is the extension's longest-running action by far
+      // (N pages at ~45-85s each) and closes the scanner panel right after —
+      // exactly the moment a reader is most likely to have switched tabs
+      // while waiting, so this is worth a system notification on top of the
+      // in-page toast above.
+      notifySystem(tr('notifyScanDoneBody', { count: success }));
     }
 
     if (scannerAutoCloseTimer !== undefined) window.clearTimeout(scannerAutoCloseTimer);
@@ -5623,6 +5653,7 @@ function getDefaultSettings(): AppSettings {
     autoDetect: false,
     showBubbleBboxes: false,
     extensionEnabled: true,
+    notificationsEnabled: true,
     uiLanguage: 'en',
     config: {
       inputLanguage: 'Auto',
@@ -5777,6 +5808,15 @@ function toast(message: string, isError = false, durationMs = 5000): void {
     el.addEventListener('animationend', () => el.remove(), { once: true });
     setTimeout(() => el.remove(), 260); // safety net if animationend never fires
   }, durationMs);
+}
+
+// An OS-level notification, reaching the reader even if they've switched
+// away from this tab — unlike toast(), which only an open, focused manga
+// tab can show. Content scripts can't call chrome.notifications directly
+// (only extension pages can), so this just relays through the background.
+// Used sparingly: see call sites for which events earn one.
+function notifySystem(message: string): void {
+  chrome.runtime.sendMessage({ type: 'SHOW_NOTIFICATION', title: tr('notifyTitle'), message }).catch(() => {});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

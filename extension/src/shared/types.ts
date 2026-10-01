@@ -422,6 +422,12 @@ export interface AppSettings {
   // point every translate path routes through) regardless of what UI
   // action triggered it.
   extensionEnabled: boolean;
+  // OS-level notifications (chrome.notifications) for events worth
+  // reaching a reader who's switched away from the manga tab — a batch
+  // scan/translate finishing, every configured key/provider failing, a
+  // first-use model download finishing. Doesn't affect the in-page toast,
+  // which always shows regardless of this setting.
+  notificationsEnabled: boolean;
   uiLanguage: UiLanguage;
   config: TranslateConfig;
   // Only relevant against a centrally-hosted backend (MT_REQUIRE_AUTH=true
@@ -443,6 +449,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoDetect: false,
   showBubbleBboxes: false,
   extensionEnabled: true,
+  notificationsEnabled: true,
   uiLanguage: 'en',
   config: {
     inputLanguage: 'Auto',

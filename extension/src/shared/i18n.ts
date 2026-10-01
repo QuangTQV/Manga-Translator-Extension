@@ -422,6 +422,10 @@ const EN = {
   btnAddContinuityNote: '+ Add note',
   placeholderContinuityNoteText: 'What happened/was revealed',
   placeholderContinuityNoteSource: 'Source (e.g. Chapter 5, optional)',
+  notifyTitle: 'Manga Translator',
+  notifyModelDownloadDoneBody: '{name} finished downloading',
+  labelNotificationsEnabled: 'System notifications',
+  hintNotificationsEnabled: 'Get an OS notification when a batch scan/translate finishes, a model finishes downloading, or every configured key/provider fails in a row — useful if you switch tabs while waiting. The in-page toast always shows regardless of this.',
 } as const;
 
 type MessageKey = keyof typeof EN;
@@ -842,6 +846,10 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     btnAddContinuityNote: '+ Thêm ghi chú',
     placeholderContinuityNoteText: 'Điều gì đã xảy ra/được tiết lộ',
     placeholderContinuityNoteSource: 'Nguồn (vd: Chương 5, tuỳ chọn)',
+    notifyTitle: 'Manga Translator',
+    notifyModelDownloadDoneBody: 'Đã tải xong {name}',
+    labelNotificationsEnabled: 'Thông báo hệ thống',
+    hintNotificationsEnabled: 'Nhận thông báo của hệ điều hành khi quét/dịch hàng loạt xong, model tải xong, hoặc tất cả API key/provider đã cấu hình đều lỗi liên tiếp — hữu ích nếu bạn chuyển sang tab khác trong lúc chờ. Toast trong trang vẫn luôn hiện bất kể cài đặt này.',
   },
   zh: {
     popupSubtitle: '扫描页面 · 选择 · 翻译',
@@ -1257,6 +1265,10 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     btnAddContinuityNote: '+ 添加笔记',
     placeholderContinuityNoteText: '发生/揭示了什么',
     placeholderContinuityNoteSource: '来源（例如第5话，可选）',
+    notifyTitle: 'Manga Translator',
+    notifyModelDownloadDoneBody: '{name} 下载完成',
+    labelNotificationsEnabled: '系统通知',
+    hintNotificationsEnabled: '在批量扫描/翻译完成、模型下载完成，或所有已配置的密钥/提供商连续失败时收到系统通知——如果您在等待时切换了标签页会很有用。无论此设置如何，页面内提示始终会显示。',
   },
   ja: {
     popupSubtitle: 'ページをスキャン · 選択 · 翻訳',
@@ -1672,6 +1684,10 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     btnAddContinuityNote: '+ メモを追加',
     placeholderContinuityNoteText: '起きたこと/明らかになったこと',
     placeholderContinuityNoteSource: '出典（例: 5話、任意）',
+    notifyTitle: 'Manga Translator',
+    notifyModelDownloadDoneBody: '{name}のダウンロードが完了しました',
+    labelNotificationsEnabled: 'システム通知',
+    hintNotificationsEnabled: 'バッチスキャン/翻訳の完了、モデルのダウンロード完了、設定したすべてのキー/プロバイダーが連続して失敗した際にOS通知を受け取ります — 待機中に別のタブに切り替える場合に便利です。この設定に関わらずページ内トーストは常に表示されます。',
   },
   ko: {
     popupSubtitle: '페이지 스캔 · 선택 · 번역',
@@ -2087,6 +2103,10 @@ const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
     btnAddContinuityNote: '+ 메모 추가',
     placeholderContinuityNoteText: '일어난 일/밝혀진 것',
     placeholderContinuityNoteSource: '출처 (예: 5화, 선택)',
+    notifyTitle: 'Manga Translator',
+    notifyModelDownloadDoneBody: '{name} 다운로드 완료',
+    labelNotificationsEnabled: '시스템 알림',
+    hintNotificationsEnabled: '일괄 스캔/번역이 끝나거나, 모델 다운로드가 완료되거나, 설정된 모든 키/공급자가 연속으로 실패할 때 OS 알림을 받습니다 — 대기 중 다른 탭으로 전환할 때 유용합니다. 이 설정과 관계없이 페이지 내 토스트는 항상 표시됩니다.',
   },
 };
 

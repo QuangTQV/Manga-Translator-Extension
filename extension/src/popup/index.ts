@@ -20,6 +20,7 @@ function qs<T extends HTMLElement>(id: string): T {
 
 const extensionEnabledToggle = qs<HTMLInputElement>('f-extension-enabled');
 const masterToggleRow = qs<HTMLDivElement>('master-toggle-row');
+const notificationsEnabledToggle = qs<HTMLInputElement>('f-notifications-enabled');
 const backendInput = qs<HTMLInputElement>('f-backend');
 const webSearchSourceSelect = qs<HTMLSelectElement>('f-web-search-source');
 const searxngStartStatus = qs<HTMLSpanElement>('searxng-start-status');
@@ -820,6 +821,7 @@ async function loadAndBind(): Promise<void> {
 
   extensionEnabledToggle.checked = settings.extensionEnabled;
   applyExtensionEnabledState();
+  notificationsEnabledToggle.checked = settings.notificationsEnabled;
 
   backendInput.value = settings.backendUrl;
   urlDisplay.textContent = settings.backendUrl.replace(/^https?:\/\//, '');
@@ -921,7 +923,7 @@ function bind(): void {
     }
   });
 
-  for (const el of [backendInput, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, combinePageImageToggle, combinePageImageResolutionSelect, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, readingDirectionSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
+  for (const el of [backendInput, notificationsEnabledToggle, webSearchSourceSelect, sourceInput, targetInput, useStoryDbToggle, outsideTextToggle, storyRefImagesToggle, economyModeToggle, combinePageImageToggle, combinePageImageResolutionSelect, fontPackSelect, minFontSizeInput, maxFontSizeInput, supersamplingSelect, textReadingSelect, readingDirectionSelect, preTranslateToggle, previousContextToggle, contextMemoryToggle, contextMemorySequentialToggle, inpaintingMethodSelect, fluxRemoteUrlInput, fluxRemoteTokenInput, suggestStoryTitleInput, suggestWebSearchToggle]) {
     el.addEventListener('change', () => { void autoSave(); });
   }
   sourceInput.addEventListener('input', updateSourceAutoStyle);
@@ -1797,6 +1799,7 @@ function collectAllSettings(): AppSettings {
   return {
     ...settings,
     extensionEnabled: extensionEnabledToggle.checked,
+    notificationsEnabled: notificationsEnabledToggle.checked,
     backendUrl: backendInput.value.trim() || DEFAULT_SETTINGS.backendUrl,
     uiLanguage: normalizeUiLanguage(uiLanguageSelect.value),
     config: {

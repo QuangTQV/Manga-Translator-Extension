@@ -1203,6 +1203,16 @@
           <button id="btn-open-live-ai" class="btn btn-secondary" type="button" data-i18n="btnOpenLiveAi">Open viewer</button>
           <div class="toggle-hint" data-i18n="hintLiveAiViewer">Debug tool: see every prompt and response the backend exchanges with the AI, as it happens. Needs MT_LIVE_AI_LOG_ENABLED=true on the backend.</div>
         </div>
+        <div class="toggle-row">
+          <div class="toggle-copy">
+            <div class="toggle-title" data-i18n="labelNotificationsEnabled">System notifications</div>
+            <div class="toggle-hint" data-i18n="hintNotificationsEnabled">Get an OS notification when a batch scan/translate finishes, a model finishes downloading, or every configured key/provider fails in a row — useful if you switch tabs while waiting. The in-page toast always shows regardless of this.</div>
+          </div>
+          <label class="toggle">
+            <input id="f-notifications-enabled" type="checkbox" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
       <div class="actions">
         <button id="btn-reset-preferences" class="btn btn-secondary" type="button" data-i18n="btnResetPreferences">Restore defaults</button>
