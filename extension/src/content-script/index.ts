@@ -2915,7 +2915,12 @@ function removeRetryBadge(img: HTMLImageElement): void {
   const parent = img.parentElement;
   if (!parent) return;
   const overlayId = getTranslatedOverlayId(img);
-  findRetryBadge(parent, overlayId)?.remove();
+  const badge = findRetryBadge(parent, overlayId);
+  if (!badge) return;
+  badge.classList.add('mt-fade-out');
+  const cleanup = (): void => badge.remove();
+  badge.addEventListener('transitionend', cleanup, { once: true });
+  setTimeout(cleanup, 220);
 }
 
 function syncRetryBadgeLayout(img: HTMLImageElement, badge: HTMLElement): void {
@@ -2947,10 +2952,19 @@ function addRetryNeededBadge(img: HTMLImageElement, url: string): void {
     badge = document.createElement('div');
     badge.className = 'mt-retry-badge';
     badge.setAttribute('data-mt-for', overlayId);
+    // Entrance pop on an inner span, not the outer badge div — same reason
+    // as .mt-progress-pop on the in-progress badge: syncRetryBadgeLayout()
+    // repositions this element via inline transform on every scroll sync,
+    // which would fight a transform-based animation on the same element.
+    const pop = document.createElement('span');
+    pop.className = 'mt-progress-pop';
+    pop.textContent = '⟳';
+    badge.appendChild(pop);
     parent.appendChild(badge);
+  } else {
+    badge.classList.remove('mt-fade-out');
   }
 
-  badge.textContent = '⟳';
   badge.title = tr('retryBadgeTitle');
   badge.style.position = 'absolute';
   badge.style.background = 'rgba(239,68,68,0.9)';
@@ -4110,13 +4124,22 @@ function injectAutoTranslateUI(): void {
       border-radius: 99px; padding: 8px 14px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.5);
       color: #dde6f5; font-size: 12px; font-weight: 700;
+      /* Nothing else writes an inline transform on this element (unlike the
+         page buttons/badges, which are position-synced that way), so the
+         entrance pop can animate it directly — no inner-wrapper split needed. */
+      animation: mt-progress-pop-in 260ms cubic-bezier(.32,1.3,.34,1) both;
+      transition: opacity 180ms ease;
     }
+    .mt-auto-indicator.mt-auto-fade-out { opacity: 0; }
     .mt-auto-dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: #22c55e; animation: mt-pulse 1.5s ease-in-out infinite;
     }
     .mt-auto-indicator.stopped .mt-auto-dot { background: #6b7fa8; animation: none; }
     .mt-auto-indicator.stopped { border-color: rgba(60,80,160,0.15); }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-auto-indicator { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
     @keyframes mt-pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.5; transform: scale(0.8); }
@@ -4178,6 +4201,14 @@ function injectAutoTranslateUI(): void {
     @keyframes mt-progress-float {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-2px); }
+    }
+    .mt-retry-badge {
+      opacity: 1;
+      transition: opacity 180ms ease;
+    }
+    .mt-retry-badge.mt-fade-out { opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-retry-badge { transition-duration: 0.01ms !important; }
     }
     .mt-page-overlay {
       display: block !important;
@@ -4253,9 +4284,25 @@ function injectAutoTranslateUI(): void {
 }
 
 function removeAutoTranslateUI(): void {
-  autoTranslateRoot?.remove();
+  // Null the shared reference immediately (not after the fade) — a quick
+  // stop-then-restart must be able to inject a fresh indicator right away
+  // rather than being blocked by injectAutoTranslateUI()'s `if
+  // (autoTranslateRoot) return` guard while this one is still fading out in
+  // the background on its own captured references.
+  const root = autoTranslateRoot;
+  const style = document.getElementById('mt-auto-style');
   autoTranslateRoot = null;
-  document.getElementById('mt-auto-style')?.remove();
+  if (!root) return;
+
+  const cleanup = (): void => {
+    root.remove();
+    style?.remove();
+  };
+  const indicator = root.querySelector<HTMLElement>('.mt-auto-indicator');
+  if (!indicator) { cleanup(); return; }
+  indicator.classList.add('mt-auto-fade-out');
+  indicator.addEventListener('transitionend', cleanup, { once: true });
+  setTimeout(cleanup, 220);
 }
 
 function updateAutoTranslateIndicator(state: 'active' | 'stopped'): void {
@@ -4419,7 +4466,7 @@ async function runSuggestInstructions(
 
 async function openScanner(): Promise<void> {
   await refreshUiLanguage();
-  closeScanner(false);
+  closeScanner(false, true);
 
   scannerPausedAutoTranslate = autoTranslateActive;
   if (scannerPausedAutoTranslate) {
@@ -4458,6 +4505,17 @@ async function openScanner(): Promise<void> {
   injectStyles(currentShadow);
   bindScanner(currentShadow);
   mountScannerRoot(container);
+
+  // Entrance pop, matching the lightbox/hover-preview already in this file —
+  // this is the single most-triggered show/hide in the extension (every
+  // batch-translate session) and was the one left as an instant cut.
+  const backdropEl = currentShadow.querySelector<HTMLElement>('.mts-backdrop');
+  const boxEl = currentShadow.querySelector<HTMLElement>('.mts-box');
+  if (backdropEl && boxEl) {
+    void boxEl.offsetWidth; // force reflow before adding the visible class — see the lightbox's own comment on this
+    backdropEl.classList.add('mts-visible');
+    boxEl.classList.add('mts-visible');
+  }
 
   void loadThumbnailsInBackground();
 }
@@ -5683,7 +5741,10 @@ function getDefaultSettings(): AppSettings {
 // Overlay management
 // ─────────────────────────────────────────────────────────────────────────────
 
-function closeScanner(resumeAutoTranslate = true): void {
+// `instant` skips the fade-out — only for openScanner()'s own reset-before-
+// rebuild call, which isn't a user-visible close and must finish
+// synchronously so the panel rebuild isn't delayed by a leftover animation.
+function closeScanner(resumeAutoTranslate = true, instant = false): void {
   if (scannerAutoCloseTimer !== undefined) {
     window.clearTimeout(scannerAutoCloseTimer);
     scannerAutoCloseTimer = undefined;
@@ -5694,18 +5755,31 @@ function closeScanner(resumeAutoTranslate = true): void {
   scannerPausedAutoTranslate = false;
 
   const root = document.getElementById(ROOT_ID);
-  if (root) root.remove();
+  const backdropEl = currentShadow?.querySelector<HTMLElement>('.mts-backdrop') ?? null;
+  const boxEl = currentShadow?.querySelector<HTMLElement>('.mts-box') ?? null;
 
-  currentShadow = null;
-  seenUrls = new Set();
-  imageCache = new Map();
-  thumbnailCache = new Map();
-  currentPages = [];
-  totalChapterPages = 0;
+  const finishClose = (): void => {
+    if (root) root.remove();
+    currentShadow = null;
+    seenUrls = new Set();
+    imageCache = new Map();
+    thumbnailCache = new Map();
+    currentPages = [];
+    totalChapterPages = 0;
 
-  if (shouldResumeAutoTranslate && !autoTranslateActive) {
-    void startAutoTranslate();
+    if (shouldResumeAutoTranslate && !autoTranslateActive) {
+      void startAutoTranslate();
+    }
+  };
+
+  if (instant || !root || !backdropEl || !boxEl) {
+    finishClose();
+    return;
   }
+
+  backdropEl.classList.remove('mts-visible');
+  boxEl.classList.remove('mts-visible');
+  window.setTimeout(finishClose, 200);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5849,14 +5923,24 @@ function injectStyles(shadow: ShadowRoot): void {
       position: fixed; inset: 0; z-index: 0;
       background: rgba(2,4,16,0.65); backdrop-filter: blur(4px);
       pointer-events: auto;
+      opacity: 0;
+      transition: opacity 200ms ease;
     }
+    .mts-backdrop.mts-visible { opacity: 1; }
     .mts-box {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      position: fixed; top: 50%; left: 50%;
       z-index: 1;
       width: min(1100px, calc(100vw - 48px)); max-height: calc(100vh - 48px);
       display: flex; flex-direction: column;
       background: #080b18; border: 1px solid rgba(80,100,200,0.2);
       border-radius: 20px; overflow: hidden; box-shadow: 0 40px 120px rgba(0,0,0,0.65);
+      opacity: 0;
+      transform: translate(-50%,-50%) scale(0.94);
+      transition: opacity 200ms ease, transform 200ms cubic-bezier(.22,1,.36,1);
+    }
+    .mts-box.mts-visible { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+    @media (prefers-reduced-motion: reduce) {
+      .mts-backdrop, .mts-box { transition-duration: 0.01ms !important; }
     }
     .mts-lightbox {
       position: fixed; inset: 0; z-index: 2;

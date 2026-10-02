@@ -1311,13 +1311,40 @@ function syncMoveButtons(container: HTMLElement, rowClass: string): void {
   });
 }
 
+// FLIP (First-Last-Invert-Play): a plain insertBefore() teleports a row to
+// its new slot instantly. Measures both rows' positions before `swap()` runs
+// the real DOM move, then plays each one back from its old spot to the new
+// one — same spirit as animateRowEnter/animateRowRemoval above, for a
+// position change instead of an add/remove. No spring overshoot (unlike
+// those two) — an overshoot on a reorder reads as jittery, not springy.
+function animateRowSwap(rowA: HTMLElement, rowB: HTMLElement, swap: () => void): void {
+  const beforeA = rowA.getBoundingClientRect();
+  const beforeB = rowB.getBoundingClientRect();
+  swap();
+  for (const [row, before] of [[rowA, beforeA], [rowB, beforeB]] as const) {
+    const deltaY = before.top - row.getBoundingClientRect().top;
+    if (!deltaY) continue;
+    row.style.transition = 'none';
+    row.style.transform = `translateY(${deltaY}px)`;
+    void row.offsetHeight; // force reflow before transitioning back to identity
+    row.style.transition = 'transform 200ms cubic-bezier(.4,0,.2,1)';
+    row.style.transform = '';
+    row.addEventListener('transitionend', () => { row.style.transition = ''; }, { once: true });
+  }
+}
+
 function moveRow(row: HTMLElement, direction: -1 | 1, rowClass: string): void {
   const parent = row.parentElement;
   if (!parent) return;
-  if (direction === -1 && row.previousElementSibling) {
-    parent.insertBefore(row, row.previousElementSibling);
-  } else if (direction === 1 && row.nextElementSibling) {
-    parent.insertBefore(row.nextElementSibling, row);
+  const sibling = direction === -1 ? row.previousElementSibling : row.nextElementSibling;
+  if (sibling instanceof HTMLElement) {
+    animateRowSwap(row, sibling, () => {
+      if (direction === -1) {
+        parent.insertBefore(row, row.previousElementSibling);
+      } else {
+        parent.insertBefore(row.nextElementSibling!, row);
+      }
+    });
   }
   syncMoveButtons(parent, rowClass);
   updateDuplicateKeyWarning();
@@ -2296,11 +2323,36 @@ function storyMessage<T>(type: string, extra: Record<string, unknown> = {}): Pro
   });
 }
 
+// Story DB banners/fields toggled via style.display — these fire on every
+// story switch/save/draft-detection (the core Story DB workflow), so unlike
+// a one-time login/logout swap they're worth the same opacity-fade
+// treatment already used elsewhere (e.g. #popup-status). The guard on hide
+// (only actually set display:none if opacity is still 0) matters because
+// several call sites reset an element hidden and then, after an await,
+// decide whether to re-show it — without the guard a reset immediately
+// followed by a re-show would have the earlier hide's deferred callback
+// hide it again right after.
+function fadeDisplay(el: HTMLElement, show: boolean, displayValue = ''): void {
+  if (show) {
+    el.style.display = displayValue;
+    el.style.opacity = '0';
+    void el.offsetWidth; // force reflow before transitioning in
+    el.style.transition = 'opacity 180ms ease';
+    el.style.opacity = '1';
+  } else {
+    el.style.transition = 'opacity 180ms ease';
+    el.style.opacity = '0';
+    window.setTimeout(() => {
+      if (el.style.opacity === '0') el.style.display = 'none';
+    }, 200);
+  }
+}
+
 function renderStoryDbView(): void {
   const loggedIn = Boolean(settings.accountToken);
   storyDbLockedView.style.display = loggedIn ? 'none' : '';
   storyDbEditorView.style.display = loggedIn ? '' : 'none';
-  if (!loggedIn) storyContentFields.style.display = 'none';
+  if (!loggedIn) fadeDisplay(storyContentFields, false);
 }
 
 function populateStorySelect(stories: StorySummary[], preferredId?: string): string {
@@ -2332,7 +2384,7 @@ function populateStorySelect(stories: StorySummary[], preferredId?: string): str
 const STORY_DOMAIN_MAP_KEY = 'mtStoryDomainMap';
 
 async function checkStoryDomainMismatch(currentStoryId: string): Promise<void> {
-  storyDomainMismatchWarning.style.display = 'none';
+  fadeDisplay(storyDomainMismatchWarning, false);
   // Nothing to warn about if the Translate tab's "Use Story DB" toggle is
   // off — no story_id is ever sent in that case, so no mismatch is possible.
   if (!currentStoryId || !useStoryDbToggle.checked) return;
@@ -2348,7 +2400,7 @@ async function checkStoryDomainMismatch(currentStoryId: string): Promise<void> {
     const previousStoryName = Array.from(storySelect.options).find((o) => o.value === previousStoryId)?.textContent;
     if (!previousStoryName) return; // that story was renamed/deleted since — nothing useful to say
     storyDomainMismatchWarning.textContent = t(uiLanguage, 'warningStoryDomainMismatch', { domain: hostname, story: previousStoryName });
-    storyDomainMismatchWarning.style.display = '';
+    fadeDisplay(storyDomainMismatchWarning, true);
   } catch {
     // chrome.tabs unavailable, or tab.url unreadable (e.g. a chrome:// page) — nothing to warn about.
   }
@@ -2556,8 +2608,8 @@ async function loadStoryIntoForm(id: string): Promise<void> {
   storyContinuityEnabledToggle.checked = result.story.continuity_notes_enabled;
   renderStoryContinuityNotes(result.story.continuity_notes);
   storyUpdateDescriptionInput.value = '';
-  storyContentFields.style.display = '';
-  storyDraftBanner.style.display = 'none';
+  fadeDisplay(storyContentFields, true);
+  fadeDisplay(storyDraftBanner, false);
   settings.activeStoryId = id;
   await autoSave();
   await checkStoryDomainMismatch(id);
@@ -2565,7 +2617,7 @@ async function loadStoryIntoForm(id: string): Promise<void> {
   const draft = await loadStoryDraft(id);
   if (draft) {
     applyStoryDraft(draft);
-    storyDraftBanner.style.display = 'flex';
+    fadeDisplay(storyDraftBanner, true, 'flex');
   }
   resetStoryHistory();
 }
@@ -2575,7 +2627,7 @@ async function handleStoryDraftDiscard(): Promise<void> {
   if (!id) return;
   if (!window.confirm(t(uiLanguage, 'confirmStoryDraftDiscard'))) return;
   await clearStoryDraft(id);
-  storyDraftBanner.style.display = 'none';
+  fadeDisplay(storyDraftBanner, false);
   await loadStoryIntoForm(id); // reloads from the server, with no draft left to restore
 }
 
@@ -2584,15 +2636,15 @@ async function loadStoryList(): Promise<void> {
   if (id) {
     await loadStoryIntoForm(id);
   } else {
-    storyContentFields.style.display = 'none';
+    fadeDisplay(storyContentFields, false);
   }
 }
 
 async function handleStorySelectChange(): Promise<void> {
   const id = storySelect.value;
   if (!id) {
-    storyContentFields.style.display = 'none';
-    storyDomainMismatchWarning.style.display = 'none';
+    fadeDisplay(storyContentFields, false);
+    fadeDisplay(storyDomainMismatchWarning, false);
     settings.activeStoryId = undefined;
     await autoSave();
     return;
@@ -2646,7 +2698,7 @@ async function handleStorySave(): Promise<void> {
     }
     await refreshStoryOptions(id); // picks up a renamed title in the select's option text
     await clearStoryDraft(id); // now safely persisted server-side — no draft left to restore
-    storyDraftBanner.style.display = 'none';
+    fadeDisplay(storyDraftBanner, false);
     setStatus(t(uiLanguage, 'statusStorySaved'), 'ok');
   } finally {
     storySaveBtn.disabled = false;
@@ -2720,7 +2772,7 @@ async function handleStoryImportFile(file: File): Promise<void> {
     renderStoryGlossary(data.glossary);
     storyContinuityEnabledToggle.checked = !!data.continuity_notes_enabled;
     renderStoryContinuityNotes(Array.isArray(data.continuity_notes) ? data.continuity_notes : []);
-    storyContentFields.style.display = '';
+    fadeDisplay(storyContentFields, true);
     scheduleStoryDraftSave(); // imported content isn't saved server-side until Save story — protect it the same as any other unsaved edit
     setStatus(t(uiLanguage, 'statusStoryImported'), 'ok');
   } catch {
