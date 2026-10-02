@@ -1339,6 +1339,32 @@ def _call_llm_endpoint(
                 candidate, parts, prompt_text, debug, system_prompt
             )
             elapsed = time.time() - start
+            if not result and not is_last:
+                # A "successful" call (no exception) that nonetheless gave
+                # nothing usable — most commonly a provider adapter's
+                # safety-block / no-candidates branch returning None/""
+                # instead of raising (e.g. utils/endpoints/google.py's
+                # promptFeedback.blockReason handling, and the equivalent
+                # branch in every other adapter in that directory).
+                # _looks_like_a_refusal only recognizes a plain-text refusal
+                # sentence, so without this check a blocked/empty response
+                # was returned as if successful and never got a chance to
+                # rotate to a configured backup key/fallback provider — the
+                # entire point of configuring them. Only short-circuits
+                # here when there's another candidate left to try; the
+                # last-candidate case still returns the falsy result
+                # unchanged, exactly as before, so every existing caller's
+                # own None/""-handling (most raise their own TranslationError
+                # immediately after) is unaffected.
+                log_message(
+                    f"LLM call ({candidate.provider} / {candidate.model_name}) "
+                    f"returned no usable content after {elapsed:.2f}s "
+                    f"(likely a safety block or empty response) — "
+                    f"rotating to next key/provider "
+                    f"({idx + 1}/{len(candidates)} tried).",
+                    always_print=True,
+                )
+                continue
             if _looks_like_a_refusal(result):
                 # A "successful" call (no exception) whose body is the
                 # provider declining in plain text — nothing downstream

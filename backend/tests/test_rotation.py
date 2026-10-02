@@ -424,6 +424,70 @@ def test_refusal_on_last_candidate_raises_a_clear_error():
             _call_llm_endpoint(config, [], "prompt")
 
 
+def test_safety_blocked_candidate_returning_none_rotates_to_next_provider():
+    """Another real bug scenario, same shape as the plain-text-refusal one
+    above: Gemini's safety filter blocks a page (promptFeedback.blockReason)
+    and utils/endpoints/google.py returns None rather than raising — every
+    other provider adapter has the same None/"" branch for a blocked/empty
+    response. _looks_like_a_refusal only recognizes a text sentence, so
+    without treating a falsy result the same way, this returned
+    "successfully" from _call_llm_endpoint and never rotated to the
+    configured backup/fallback at all."""
+    config = TranslationConfig(
+        provider="Google", google_api_key="g1", model_name="m",
+        backup_api_keys=["g2"], rotation_strategy="sequential",
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        key = getattr(candidate, "google_api_key", None)
+        if key == "g1":
+            return None
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+
+
+def test_empty_string_candidate_rotates_to_next_provider():
+    config = TranslationConfig(
+        provider="Google", google_api_key="g1", model_name="m",
+        backup_api_keys=["g2"], rotation_strategy="sequential",
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        key = getattr(candidate, "google_api_key", None)
+        if key == "g1":
+            return ""
+        return "1: translated"
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result == "1: translated"
+
+
+def test_safety_blocked_last_candidate_still_returns_falsy_unchanged():
+    """The one case this fix must NOT change: when there's no other
+    candidate left to rotate to, the falsy result is still returned as-is
+    (not raised here) — every existing caller already does its own
+    None/""-handling right after calling _call_llm_endpoint (most raise
+    their own TranslationError immediately), and changing that here would
+    be a second, overlapping behavior change beyond the actual bug."""
+    config = TranslationConfig(
+        provider="Google", google_api_key="g1", model_name="m",
+    )
+
+    def impl(candidate, parts, prompt_text, debug, system_prompt):
+        return None
+
+    with patch("core.services.translation._call_llm_endpoint_impl", side_effect=impl):
+        result = _call_llm_endpoint(config, [], "prompt")
+
+    assert result is None
+
+
 # ---------------------------------------------------------------------------
 # enable_web_search: try a search-capable candidate before an incapable one
 # ---------------------------------------------------------------------------
