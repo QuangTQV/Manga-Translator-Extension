@@ -254,6 +254,32 @@
       font-size: 11px; font-weight: 600; padding: 4px 10px; cursor: pointer; width: 100%;
     }
     .btn-add-fallback:hover { background: rgba(59,130,246,0.25); }
+    /* Shared add/remove animation for list rows (provider groups, API keys,
+       Story DB characters/relationships/glossary/notes) — used by
+       animateRowEnter()/animateRowRemoval() in index.ts. A plain .remove()
+       or appendChild() used to cut/pop these in and out instantly, the one
+       list-editing interaction in the popup that hadn't gotten the same
+       spring/fade treatment as everything else. max-height is set inline
+       to the row's measured height right before this class is added (can't
+       transition to/from `auto`), so this only declares the end state. */
+    .row-removing {
+      overflow: hidden;
+      transition: opacity 180ms ease, max-height 220ms cubic-bezier(.4,0,.2,1), margin 220ms cubic-bezier(.4,0,.2,1), padding 220ms cubic-bezier(.4,0,.2,1), border-width 220ms cubic-bezier(.4,0,.2,1);
+      opacity: 0 !important;
+      max-height: 0 !important;
+      margin-top: 0 !important;
+      margin-bottom: 0 !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      border-width: 0 !important;
+    }
+    .row-enter {
+      animation: popup-row-enter 240ms cubic-bezier(.32,1.3,.34,1) both;
+    }
+    @keyframes popup-row-enter {
+      from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
     .backup-key-row {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       margin-top: 6px;

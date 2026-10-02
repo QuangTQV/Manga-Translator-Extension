@@ -964,7 +964,9 @@ function bind(): void {
     el.addEventListener('change', () => { void autoSave(); });
   }
   addProviderGroupBtn.addEventListener('click', () => {
-    providerGroupsList.appendChild(createProviderGroupRow());
+    const row = createProviderGroupRow();
+    providerGroupsList.appendChild(row);
+    animateRowEnter(row);
     syncMoveButtons(providerGroupsList, 'fallback-provider-row');
     updateDuplicateKeyWarning();
   });
@@ -1263,6 +1265,35 @@ function updateDuplicateKeyWarning(): void {
   duplicateKeyWarning.textContent = lines.join(' ');
 }
 
+// Shared add/remove animation for every editable list row in the popup
+// (provider groups, API keys, Story DB characters/relationships/glossary/
+// notes) — a plain .remove()/appendChild() used to cut/pop these instantly,
+// unlike every other interactive element in the popup by this point.
+function animateRowEnter(row: HTMLElement): void {
+  row.classList.add('row-enter');
+  row.addEventListener('animationend', () => row.classList.remove('row-enter'), { once: true });
+}
+
+// `onRemoved` (resyncing move buttons, the duplicate-key warning, autosave,
+// etc.) runs only once the row is actually gone, not before — so it always
+// sees accurate sibling/list state, same as the old synchronous `.remove()`
+// call it replaces.
+function animateRowRemoval(row: HTMLElement, onRemoved?: () => void): void {
+  row.style.maxHeight = `${row.scrollHeight}px`;
+  row.style.overflow = 'hidden';
+  void row.offsetHeight; // force layout before adding the class that transitions it to 0
+  row.classList.add('row-removing');
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    row.remove();
+    onRemoved?.();
+  };
+  row.addEventListener('transitionend', finish, { once: true });
+  setTimeout(finish, 350); // safety net if transitionend never fires (e.g. reduced-motion's near-0 duration)
+}
+
 // Order matters for the "sequential" rotation strategy (always starts at
 // the first entry, only advancing on failure) — these let the user drag a
 // key/provider to the front instead of deleting and re-adding everything
@@ -1343,10 +1374,11 @@ function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
   removeBtn.textContent = `× ${t(uiLanguage, 'btnRemoveFallback')}`;
   removeBtn.addEventListener('click', () => {
     const parent = row.parentElement;
-    row.remove();
-    if (parent) syncMoveButtons(parent, 'fallback-provider-row');
-    updateDuplicateKeyWarning();
-    void autoSave();
+    animateRowRemoval(row, () => {
+      if (parent) syncMoveButtons(parent, 'fallback-provider-row');
+      updateDuplicateKeyWarning();
+      void autoSave();
+    });
   });
   header.append(enabledLabel, fbUpBtn, fbDownBtn, removeBtn);
 
@@ -1420,7 +1452,9 @@ function createProviderGroupRow(data?: ProviderGroupConfig): HTMLDivElement {
   addKeyBtn.className = 'btn-add-fallback';
   addKeyBtn.textContent = t(uiLanguage, 'btnAddBackupKey');
   addKeyBtn.addEventListener('click', () => {
-    apiKeysList.appendChild(createBackupKeyRow());
+    const row = createBackupKeyRow();
+    apiKeysList.appendChild(row);
+    animateRowEnter(row);
     syncMoveButtons(apiKeysList, 'backup-key-row');
     syncProviderEnabledStyle();
     updateDuplicateKeyWarning();
@@ -1546,10 +1580,11 @@ function createBackupKeyRow(data?: BackupApiKeyEntry): HTMLDivElement {
   removeBtn.textContent = '×';
   removeBtn.addEventListener('click', () => {
     const parent = row.parentElement;
-    row.remove();
-    if (parent) syncMoveButtons(parent, 'backup-key-row');
-    updateDuplicateKeyWarning();
-    void autoSave();
+    animateRowRemoval(row, () => {
+      if (parent) syncMoveButtons(parent, 'backup-key-row');
+      updateDuplicateKeyWarning();
+      void autoSave();
+    });
   });
 
   const syncDisabledStyle = () => row.classList.toggle('disabled', !enabledCheckbox.checked);
@@ -2847,8 +2882,7 @@ function createStoryCharacterRow(data?: StoryCharacter): HTMLDivElement {
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = '×';
   removeBtn.addEventListener('click', () => {
-    row.remove();
-    refreshRelationshipCharacterOptions();
+    animateRowRemoval(row, refreshRelationshipCharacterOptions);
   });
 
   row.appendChild(nameField);
@@ -3002,7 +3036,7 @@ function createStoryRelationshipRow(data?: StoryRelationship): HTMLDivElement {
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = '×';
-  removeBtn.addEventListener('click', () => { row.remove(); });
+  removeBtn.addEventListener('click', () => { animateRowRemoval(row); });
 
   row.appendChild(charASelect);
   row.appendChild(charBSelect);
@@ -3061,7 +3095,7 @@ function createStoryGlossaryRow(data?: StoryGlossaryTerm): HTMLDivElement {
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = '×';
-  removeBtn.addEventListener('click', () => { row.remove(); });
+  removeBtn.addEventListener('click', () => { animateRowRemoval(row); });
 
   row.appendChild(termField);
   row.appendChild(translationField);
@@ -3088,7 +3122,7 @@ function createStoryContinuityNoteRow(data?: StoryContinuityNote): HTMLDivElemen
   removeBtn.type = 'button';
   removeBtn.className = 'btn-remove-fallback';
   removeBtn.textContent = '×';
-  removeBtn.addEventListener('click', () => { row.remove(); });
+  removeBtn.addEventListener('click', () => { animateRowRemoval(row); });
 
   row.appendChild(textField);
   row.appendChild(sourceField);
@@ -3117,12 +3151,16 @@ function renderStoryContinuityNotes(notes: StoryContinuityNote[]): void {
 }
 
 function addStoryCharacterRow(): void {
-  storyCharactersList.appendChild(createStoryCharacterRow());
+  const row = createStoryCharacterRow();
+  storyCharactersList.appendChild(row);
+  animateRowEnter(row);
   refreshRelationshipCharacterOptions();
 }
 
 function addStoryRelationshipRow(): void {
-  storyRelationshipsList.appendChild(createStoryRelationshipRow());
+  const row = createStoryRelationshipRow();
+  storyRelationshipsList.appendChild(row);
+  animateRowEnter(row);
 }
 
 // The relationship map is a live view over the character/relationship rows
@@ -3138,16 +3176,21 @@ initRelationshipGraph({
   addRelationship: (aId, bId) => {
     const row = createStoryRelationshipRow({ id: crypto.randomUUID(), character_a_id: aId, character_b_id: bId, surface_relation: '' });
     storyRelationshipsList.appendChild(row);
+    animateRowEnter(row);
     return row;
   },
 });
 
 function addStoryGlossaryRow(): void {
-  storyGlossaryList.appendChild(createStoryGlossaryRow());
+  const row = createStoryGlossaryRow();
+  storyGlossaryList.appendChild(row);
+  animateRowEnter(row);
 }
 
 function addStoryContinuityNoteRow(): void {
-  storyContinuityNotesList.appendChild(createStoryContinuityNoteRow());
+  const row = createStoryContinuityNoteRow();
+  storyContinuityNotesList.appendChild(row);
+  animateRowEnter(row);
 }
 
 function collectStoryCharacters(): StoryCharacter[] {
