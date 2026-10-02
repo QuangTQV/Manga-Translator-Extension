@@ -750,17 +750,18 @@ def translate_image_base64(
     # Decode image
     pil_image = base64_to_image(image_b64)
 
-    # Create a temporary file path for the pipeline (it expects a path)
-    tmp_input = io.BytesIO()
-    pil_image.save(tmp_input, format="PNG")
-    tmp_input.seek(0)
+    # translate_and_render expects a path for its input image — write
+    # directly to the temp file instead of via an intermediate BytesIO.
+    # No output_path: this caller always uses the PIL Image translate_and_render
+    # returns directly (or falls back to the original pil_image on a non-Image
+    # result) and never reads a saved file back, so passing one here used to
+    # make the pipeline write a full image to disk on every call for nothing —
+    # output_path is documented as optional specifically for "if None, image
+    # is not saved."
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_in:
-        tmp_in.write(tmp_input.read())
+        pil_image.save(tmp_in, format="PNG")
         tmp_in_path = Path(tmp_in.name)
-
-    tmp_output = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    tmp_output_path = Path(tmp_output.name)
 
     bubbles_info: list[dict[str, Any]] = []
     translated_image: Image.Image = pil_image
@@ -779,7 +780,6 @@ def translate_image_base64(
         result = translate_and_render(
             image_path=tmp_in_path,
             config=config,
-            output_path=tmp_output_path,
             previous_context_texts=previous_context_texts,
             ocr_texts_out=ocr_texts_out,
             memory_note_out=memory_note_out,
@@ -795,13 +795,8 @@ def translate_image_base64(
         log_message(f"Translation pipeline error: {e}", always_print=True)
         raise RuntimeError(str(e)) from e
     finally:
-        # Cleanup temp files
         try:
             tmp_in_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        try:
-            tmp_output_path.unlink(missing_ok=True)
         except Exception:
             pass
 
