@@ -90,6 +90,7 @@ const EN_MESSAGES = {
   fluxRemoteUnreachable: 'Flux remote worker is unreachable — outside-bubble text was left as-is on this page. Check that your Kaggle session/tunnel is still running and the URL is current.',
   fluxRemoteUnauthorized: 'Flux remote worker rejected the token — outside-bubble text was left as-is. Check the Token field in the popup.',
   modelDownloading: "First-time setup: downloading {name}{size}. This page will translate once it finishes (a few minutes on a slow connection).",
+  modelDownloadDismissBtn: "Don't remind me about this",
   extensionDisabled: 'Extension is disabled',
   suggestInstructions: 'Suggest Notes',
   suggestInstructionsHint: 'Analyze selected pages and draft Story Notes (cast, relationships, tone)',
@@ -254,6 +255,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: 'Không kết nối được Flux worker từ xa — chữ ngoài bong bóng thoại được giữ nguyên ở trang này. Kiểm tra session Kaggle/tunnel còn chạy và URL còn mới không.',
     fluxRemoteUnauthorized: 'Flux worker từ xa từ chối token — chữ ngoài bong bóng thoại được giữ nguyên. Kiểm tra ô Token trong popup.',
     modelDownloading: "Cài đặt lần đầu: đang tải {name}{size}. Trang này sẽ được dịch xong khi tải xong (có thể mất vài phút nếu mạng chậm).",
+    modelDownloadDismissBtn: "Không nhắc tôi về việc này nữa",
     extensionDisabled: 'Tiện ích đang tắt',
     suggestInstructions: 'Gợi ý ghi chú',
     suggestInstructionsHint: 'Phân tích các trang đã chọn và soạn Ghi chú truyện (nhân vật, quan hệ, văn phong)',
@@ -413,6 +415,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: '无法连接远程 Flux worker——本页气泡外文字保持原样。请检查 Kaggle 会话/隧道是否仍在运行，URL 是否为最新。',
     fluxRemoteUnauthorized: '远程 Flux worker 拒绝了令牌——气泡外文字保持原样。请检查弹窗中的 Token 字段。',
     modelDownloading: "首次设置：正在下载 {name}{size}。下载完成后本页才会翻译（网速慢时可能需要几分钟）。",
+    modelDownloadDismissBtn: "不再提醒我",
     extensionDisabled: '扩展已停用',
     suggestInstructions: '生成建议',
     suggestInstructionsHint: '分析已选页面并起草故事笔记（角色、关系、语气）',
@@ -572,6 +575,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: 'リモート Flux worker に接続できません——このページの吹き出し外の文字はそのままです。Kaggle セッション/トンネルが動いているか、URL が最新か確認してください。',
     fluxRemoteUnauthorized: 'リモート Flux worker がトークンを拒否しました——吹き出し外の文字はそのままです。ポップアップの Token 欄を確認してください。',
     modelDownloading: "初回セットアップ：{name}{size} をダウンロード中です。完了するとこのページが翻訳されます（回線が遅い場合は数分かかります）。",
+    modelDownloadDismissBtn: "今後表示しない",
     extensionDisabled: '拡張機能は無効です',
     suggestInstructions: 'ノートを提案',
     suggestInstructionsHint: '選択したページを分析し、ストーリーメモ（登場人物・関係・トーン）を作成します',
@@ -731,6 +735,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: '원격 Flux worker에 연결할 수 없습니다 — 이 페이지의 말풍선 밖 글자는 그대로 남았습니다. Kaggle 세션/터널이 실행 중인지, URL이 최신인지 확인하세요.',
     fluxRemoteUnauthorized: '원격 Flux worker가 토큰을 거부했습니다 — 말풍선 밖 글자는 그대로 남았습니다. 팝업의 Token 필드를 확인하세요.',
     modelDownloading: "최초 설정: {name}{size} 다운로드 중입니다. 완료되면 이 페이지가 번역됩니다 (연결이 느리면 몇 분 걸릴 수 있습니다).",
+    modelDownloadDismissBtn: "다시 알리지 않기",
     extensionDisabled: '확장 프로그램이 꺼져 있습니다',
     suggestInstructions: '메모 제안',
     suggestInstructionsHint: '선택한 페이지를 분석해 스토리 메모(등장인물, 관계, 어조)를 작성합니다',
@@ -827,7 +832,7 @@ function normalizeUiLanguage(language: unknown): UiLanguage {
 chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   if (msg.type === 'PING') { send({ ok: true }); return false; }
   if (msg.type === 'MODEL_DOWNLOADS') {
-    notifyModelDownloads((msg as { downloads?: { name: string; approx_mb: number | null }[] }).downloads ?? []);
+    void notifyModelDownloads((msg as { downloads?: { name: string; approx_mb: number | null }[] }).downloads ?? []);
     send({ ok: true });
     return false;
   }
@@ -4357,14 +4362,48 @@ function notifyBackendWarnings(warnings: string[] | undefined): void {
   }
 }
 
+const MODEL_DOWNLOAD_NOTICE_DISMISSED_KEY = 'mtModelDownloadNoticeDismissed';
+
 // The backend is fetching model weights (first use of LaMa / manga-ocr /
 // PaddleOCR-VL — up to ~2 GB) and the page being translated has to wait for
-// it; say so instead of leaving a spinner with no explanation.
-function notifyModelDownloads(downloads: { name: string; approx_mb: number | null }[]): void {
+// it; say so instead of leaving a spinner with no explanation. A production
+// report: a gated/misconfigured model repo can fail every single attempt
+// (see core/ml/download_status.py's own failure-cooldown fix for the retry
+// side of this), which used to mean this notice kept reappearing forever —
+// a "don't remind me" option lets the reader quiet it even before that gets
+// fixed on their end. Dismissal is per model NAME, not global, so an
+// unrelated model later still gets its own first notice.
+async function notifyModelDownloads(downloads: { name: string; approx_mb: number | null }[]): Promise<void> {
   if (downloads.length === 0) return;
-  const only = downloads.length === 1 ? downloads[0].approx_mb : null;
+  let dismissed: string[] = [];
+  try {
+    const raw = await chrome.storage.local.get(MODEL_DOWNLOAD_NOTICE_DISMISSED_KEY);
+    dismissed = (raw[MODEL_DOWNLOAD_NOTICE_DISMISSED_KEY] as string[] | undefined) ?? [];
+  } catch {
+    // storage unavailable — fall through and show it rather than silently drop it
+  }
+  const visible = downloads.filter((d) => !dismissed.includes(d.name));
+  if (visible.length === 0) return;
+
+  const only = visible.length === 1 ? visible[0].approx_mb : null;
   const size = only ? ` (~${only >= 1000 ? `${(only / 1000).toFixed(1)} GB` : `${only} MB`})` : '';
-  toast(tr('modelDownloading', { name: downloads.map((d) => d.name).join(', '), size }), false, 12_000);
+  const names = visible.map((d) => d.name);
+  showActionBanner(
+    'mt-model-download-banner',
+    tr('modelDownloading', { name: names.join(', '), size }),
+    [{ label: tr('modelDownloadDismissBtn'), onClick: () => void dismissModelDownloadNotice(names) }],
+  );
+}
+
+async function dismissModelDownloadNotice(names: string[]): Promise<void> {
+  try {
+    const raw = await chrome.storage.local.get(MODEL_DOWNLOAD_NOTICE_DISMISSED_KEY);
+    const dismissed = new Set((raw[MODEL_DOWNLOAD_NOTICE_DISMISSED_KEY] as string[] | undefined) ?? []);
+    for (const name of names) dismissed.add(name);
+    await chrome.storage.local.set({ [MODEL_DOWNLOAD_NOTICE_DISMISSED_KEY]: Array.from(dismissed) });
+  } catch {
+    // best-effort — worst case it just asks again next time
+  }
 }
 
 function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: TranslateRequest): Promise<{ translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; warnings?: string[]; error?: string }> {
@@ -5883,8 +5922,11 @@ function ensureToastStyle(): void {
     /* Top-center, not bottom-center like .mt-toast — this needs a decision,
        not just a glance, so it sits somewhere that can't be mistaken for a
        passing status toast and can't collide with one if both ever show at
-       once (nor with the top-right per-page badges/buttons). */
-    .mt-story-mismatch-banner {
+       once (nor with the top-right per-page badges/buttons). Shared by
+       every notice that needs one or more action buttons (the story-domain-
+       mismatch warning, the model-download notice's dismiss) — a plain
+       toast() has neither room nor a click target for that. */
+    .mt-action-banner {
       position: fixed; top: 20px; left: 50%;
       z-index: 2147483647; padding: 12px 16px; border-radius: 12px;
       background: rgba(8,12,28,0.97); color: #dde6f5; font: 13px Inter, system-ui, sans-serif;
@@ -5893,23 +5935,23 @@ function ensureToastStyle(): void {
       display: flex; flex-direction: column; gap: 10px;
       animation: mt-toast-in 320ms cubic-bezier(.28,1.2,.34,1) both;
     }
-    .mt-story-mismatch-banner.mt-toast-hide {
+    .mt-action-banner.mt-toast-hide {
       animation: mt-toast-out 200ms cubic-bezier(.4,0,1,1) both;
     }
-    .mt-story-mismatch-banner-msg { line-height: 1.4; color: #fde68a; }
-    .mt-story-mismatch-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .mt-story-mismatch-banner-btn {
+    .mt-action-banner-msg { line-height: 1.4; color: #fde68a; }
+    .mt-action-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .mt-action-banner-btn {
       background: rgba(255,255,255,0.08); color: #dde6f5;
       border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
       padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
       font-family: Inter, system-ui, sans-serif;
       transition: background 150ms ease;
     }
-    .mt-story-mismatch-banner-btn:hover { background: rgba(255,255,255,0.16); }
-    .mt-story-mismatch-banner-btn:active { background: rgba(255,255,255,0.22); }
+    .mt-action-banner-btn:hover { background: rgba(255,255,255,0.16); }
+    .mt-action-banner-btn:active { background: rgba(255,255,255,0.22); }
     @media (prefers-reduced-motion: reduce) {
-      .mt-story-mismatch-banner, .mt-story-mismatch-banner.mt-toast-hide { animation-duration: 0.01ms !important; }
-      .mt-story-mismatch-banner-btn { transition: none; }
+      .mt-action-banner, .mt-action-banner.mt-toast-hide { animation-duration: 0.01ms !important; }
+      .mt-action-banner-btn { transition: none; }
     }
   `;
   document.head.appendChild(style);
@@ -6005,21 +6047,26 @@ function bgFetchStoryName(storyId: string): Promise<string | null> {
   });
 }
 
-function showStoryDomainMismatchBanner(hostname: string, storyName: string, pairKey: string): void {
+// Shared by every notice that needs one or more action buttons, not just a
+// passing message — see the .mt-action-banner CSS comment. `id` lets a
+// repeat call (e.g. the model-download notice, re-sent every 20s while a
+// download is still running) replace its own previous instance without
+// touching an unrelated banner that might also be showing.
+function showActionBanner(id: string, message: string, buttons: { label: string; onClick: () => void }[]): void {
   ensureToastStyle();
-  document.getElementById('mt-story-mismatch-banner')?.remove();
+  document.getElementById(id)?.remove();
 
   const el = document.createElement('div');
-  el.id = 'mt-story-mismatch-banner';
-  el.className = 'mt-story-mismatch-banner';
+  el.id = id;
+  el.className = 'mt-action-banner';
 
   const msg = document.createElement('div');
-  msg.className = 'mt-story-mismatch-banner-msg';
-  msg.textContent = tr('storyMismatchBannerMessage', { domain: hostname, story: storyName });
+  msg.className = 'mt-action-banner-msg';
+  msg.textContent = message;
   el.appendChild(msg);
 
   const actions = document.createElement('div');
-  actions.className = 'mt-story-mismatch-banner-actions';
+  actions.className = 'mt-action-banner-actions';
 
   const close = (): void => {
     window.clearTimeout(dismissTimer);
@@ -6028,29 +6075,32 @@ function showStoryDomainMismatchBanner(hostname: string, storyName: string, pair
     setTimeout(() => el.remove(), 260); // safety net if animationend never fires
   };
 
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.className = 'mt-story-mismatch-banner-btn';
-  clearBtn.textContent = tr('storyMismatchBannerClearBtn');
-  clearBtn.onclick = () => {
-    void clearActiveStorySelection();
-    close();
-  };
-  actions.appendChild(clearBtn);
-
-  const dismissBtn = document.createElement('button');
-  dismissBtn.type = 'button';
-  dismissBtn.className = 'mt-story-mismatch-banner-btn';
-  dismissBtn.textContent = tr('storyMismatchBannerDismissBtn');
-  dismissBtn.onclick = () => {
-    void dismissStoryDomainMismatch(hostname, pairKey);
-    close();
-  };
-  actions.appendChild(dismissBtn);
+  for (const { label, onClick } of buttons) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mt-action-banner-btn';
+    btn.textContent = label;
+    btn.onclick = () => {
+      onClick();
+      close();
+    };
+    actions.appendChild(btn);
+  }
 
   el.appendChild(actions);
   document.body.appendChild(el);
   const dismissTimer = window.setTimeout(close, 15_000);
+}
+
+function showStoryDomainMismatchBanner(hostname: string, storyName: string, pairKey: string): void {
+  showActionBanner(
+    'mt-story-mismatch-banner',
+    tr('storyMismatchBannerMessage', { domain: hostname, story: storyName }),
+    [
+      { label: tr('storyMismatchBannerClearBtn'), onClick: () => void clearActiveStorySelection() },
+      { label: tr('storyMismatchBannerDismissBtn'), onClick: () => void dismissStoryDomainMismatch(hostname, pairKey) },
+    ],
+  );
 }
 
 // Read-modify-write against the live stored settings (not the `settings`
