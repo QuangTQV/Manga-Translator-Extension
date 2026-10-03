@@ -295,6 +295,17 @@ function refreshCollapsibleHints(root: ParentNode = document): void {
     if (pane && !pane.classList.contains('active')) return;
     const details = hint.closest('details');
     if (details && !details.open) return;
+    // A hidden or mid-fade hint (display:none, or an ancestor's — e.g. a
+    // fadeDisplay()-hidden Story DB banner) has zero layout, so measuring it
+    // here is meaningless and, worse, can add/remove the `.hint-toggle`
+    // sibling button spuriously — a DOM mutation that the Story DB
+    // draft-autosave MutationObserver (which watches the whole form for
+    // structural changes) picks up and reschedules a draft save from,
+    // sometimes resurrecting a just-cleared draft. The body-resize
+    // ResizeObserver calls this document-wide on every width settle,
+    // regardless of what's visible at that moment, so this guard matters
+    // more now that fade animations make body height change more often.
+    if (hint.offsetParent === null) return;
 
     hint.classList.add('hint-clamped');
     const wasExpanded = hint.classList.contains('hint-expanded');
@@ -2382,6 +2393,13 @@ function populateStorySelect(stories: StorySummary[], preferredId?: string): str
 // request goes out with a story_id, and this checks the currently active
 // tab's hostname against that the moment a story is loaded into the form.
 const STORY_DOMAIN_MAP_KEY = 'mtStoryDomainMap';
+// Shared with content-script/index.ts's own on-page version of this same
+// warning (showStoryDomainMismatchBanner there) — keyed by the exact
+// (previous, current) story id pair rather than just the hostname, so
+// dismissing today's mismatch on the page doesn't also permanently silence
+// the popup for a genuinely different mismatch later. Written only from the
+// page; the popup only ever reads it.
+const STORY_DOMAIN_MISMATCH_DISMISSED_KEY = 'mtStoryDomainMismatchDismissed';
 
 async function checkStoryDomainMismatch(currentStoryId: string): Promise<void> {
   fadeDisplay(storyDomainMismatchWarning, false);
@@ -2393,10 +2411,12 @@ async function checkStoryDomainMismatch(currentStoryId: string): Promise<void> {
     if (!tab?.url) return;
     const hostname = new URL(tab.url).hostname;
     if (!hostname) return;
-    const raw = await chrome.storage.local.get(STORY_DOMAIN_MAP_KEY);
+    const raw = await chrome.storage.local.get([STORY_DOMAIN_MAP_KEY, STORY_DOMAIN_MISMATCH_DISMISSED_KEY]);
     const map = raw[STORY_DOMAIN_MAP_KEY] as Record<string, string> | undefined;
     const previousStoryId = map?.[hostname];
     if (!previousStoryId || previousStoryId === currentStoryId) return;
+    const dismissed = raw[STORY_DOMAIN_MISMATCH_DISMISSED_KEY] as Record<string, string> | undefined;
+    if (dismissed?.[hostname] === `${previousStoryId}::${currentStoryId}`) return;
     const previousStoryName = Array.from(storySelect.options).find((o) => o.value === previousStoryId)?.textContent;
     if (!previousStoryName) return; // that story was renamed/deleted since — nothing useful to say
     storyDomainMismatchWarning.textContent = t(uiLanguage, 'warningStoryDomainMismatch', { domain: hostname, story: previousStoryName });

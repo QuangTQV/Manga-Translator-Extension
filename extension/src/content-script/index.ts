@@ -169,6 +169,9 @@ const EN_MESSAGES = {
   notifyTitle: 'Manga Translator',
   notifyScanDoneBody: 'Finished translating {count} page(s)',
   notifyRetryExhaustedBody: 'Translation keeps failing — check your API keys, provider settings, or that the backend is running',
+  storyMismatchBannerMessage: '{domain} was last read using a different story ("{story}") than the one selected now — you may have forgotten to switch.',
+  storyMismatchBannerClearBtn: 'Select no story',
+  storyMismatchBannerDismissBtn: "Don't ask again for this site",
 };
 
 type ContentMessageKey = keyof typeof EN_MESSAGES;
@@ -330,6 +333,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     notifyTitle: 'Manga Translator',
     notifyScanDoneBody: 'Đã dịch xong {count} trang',
     notifyRetryExhaustedBody: 'Dịch liên tục thất bại — kiểm tra lại API key, cấu hình provider, hoặc backend có đang chạy không',
+    storyMismatchBannerMessage: '{domain} trước đây được đọc bằng truyện khác ("{story}") với truyện đang chọn — có thể bạn quên đổi truyện.',
+    storyMismatchBannerClearBtn: 'Không chọn truyện nào',
+    storyMismatchBannerDismissBtn: 'Không hỏi lại cho trang này',
   },
   zh: {
     autoMt: '自动 MT',
@@ -486,6 +492,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     notifyTitle: 'Manga Translator',
     notifyScanDoneBody: '已完成 {count} 页的翻译',
     notifyRetryExhaustedBody: '翻译持续失败——请检查 API 密钥、提供商设置，或后端是否正在运行',
+    storyMismatchBannerMessage: '{domain} 上次阅读时使用的是另一个故事（"{story}"）——您可能忘记切换了。',
+    storyMismatchBannerClearBtn: '不选择任何故事',
+    storyMismatchBannerDismissBtn: '此网站不再提醒',
   },
   ja: {
     autoMt: 'Auto MT',
@@ -642,6 +651,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     notifyTitle: 'Manga Translator',
     notifyScanDoneBody: '{count}ページの翻訳が完了しました',
     notifyRetryExhaustedBody: '翻訳が失敗し続けています — APIキー、プロバイダー設定、バックエンドの起動状況を確認してください',
+    storyMismatchBannerMessage: '{domain} は前回、別のストーリー（「{story}」）で読まれていました — 切り替えを忘れている可能性があります。',
+    storyMismatchBannerClearBtn: 'ストーリーを選択しない',
+    storyMismatchBannerDismissBtn: 'このサイトでは再表示しない',
   },
   ko: {
     autoMt: 'Auto MT',
@@ -798,6 +810,9 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     notifyTitle: 'Manga Translator',
     notifyScanDoneBody: '{count}페이지 번역을 완료했습니다',
     notifyRetryExhaustedBody: '번역이 계속 실패하고 있습니다 — API 키, 공급자 설정 또는 백엔드 실행 상태를 확인하세요',
+    storyMismatchBannerMessage: '{domain}은(는) 마지막으로 다른 스토리("{story}")로 읽혔습니다 — 전환을 잊으셨을 수 있습니다.',
+    storyMismatchBannerClearBtn: '스토리 선택 안 함',
+    storyMismatchBannerDismissBtn: '이 사이트에서 다시 묻지 않기',
   },
 };
 
@@ -1289,6 +1304,7 @@ async function startAutoTranslate(): Promise<void> {
     toast(tr('extensionDisabled'), true);
     throw new Error(tr('extensionDisabled'));
   }
+  void checkStoryDomainMismatchOnPage(settings);
 
   autoTranslateActive = true;
   if (autoTranslateRemoveUiTimer !== undefined) {
@@ -5864,6 +5880,37 @@ function ensureToastStyle(): void {
     @media (prefers-reduced-motion: reduce) {
       .mt-toast, .mt-toast.mt-toast-hide { animation-duration: 0.01ms !important; }
     }
+    /* Top-center, not bottom-center like .mt-toast — this needs a decision,
+       not just a glance, so it sits somewhere that can't be mistaken for a
+       passing status toast and can't collide with one if both ever show at
+       once (nor with the top-right per-page badges/buttons). */
+    .mt-story-mismatch-banner {
+      position: fixed; top: 20px; left: 50%;
+      z-index: 2147483647; padding: 12px 16px; border-radius: 12px;
+      background: rgba(8,12,28,0.97); color: #dde6f5; font: 13px Inter, system-ui, sans-serif;
+      border: 1px solid rgba(251,191,36,0.35); box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+      max-width: min(420px, calc(100vw - 32px));
+      display: flex; flex-direction: column; gap: 10px;
+      animation: mt-toast-in 320ms cubic-bezier(.28,1.2,.34,1) both;
+    }
+    .mt-story-mismatch-banner.mt-toast-hide {
+      animation: mt-toast-out 200ms cubic-bezier(.4,0,1,1) both;
+    }
+    .mt-story-mismatch-banner-msg { line-height: 1.4; color: #fde68a; }
+    .mt-story-mismatch-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .mt-story-mismatch-banner-btn {
+      background: rgba(255,255,255,0.08); color: #dde6f5;
+      border: 1px solid rgba(255,255,255,0.15); border-radius: 8px;
+      padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+      font-family: Inter, system-ui, sans-serif;
+      transition: background 150ms ease;
+    }
+    .mt-story-mismatch-banner-btn:hover { background: rgba(255,255,255,0.16); }
+    .mt-story-mismatch-banner-btn:active { background: rgba(255,255,255,0.22); }
+    @media (prefers-reduced-motion: reduce) {
+      .mt-story-mismatch-banner, .mt-story-mismatch-banner.mt-toast-hide { animation-duration: 0.01ms !important; }
+      .mt-story-mismatch-banner-btn { transition: none; }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -5891,6 +5938,147 @@ function toast(message: string, isError = false, durationMs = 5000): void {
 // Used sparingly: see call sites for which events earn one.
 function notifySystem(message: string): void {
   chrome.runtime.sendMessage({ type: 'SHOW_NOTIFICATION', title: tr('notifyTitle'), message }).catch(() => {});
+}
+
+const STORY_DOMAIN_MAP_KEY = 'mtStoryDomainMap';
+const STORY_DOMAIN_MISMATCH_DISMISSED_KEY = 'mtStoryDomainMismatchDismissed';
+
+// Set once a mismatch has been checked for this page load — startAutoTranslate()
+// can run more than once per load (stop/restart), but the check — and the
+// banner it might show — should only ever happen the first time.
+let storyMismatchChecked = false;
+
+// The reader's active Story DB selection applies across every site, but the
+// character DB/glossary it injects is usually only relevant to ONE manga —
+// background/index.ts's recordStoryDomainUsage() remembers which story was
+// last actually used (via a real translate request) on each hostname, so
+// this can warn right here on the page if the current selection doesn't
+// match, instead of only inside the popup's Story DB tab (whose own
+// checkStoryDomainMismatch does the same comparison, but only runs while
+// that tab happens to be open).
+async function checkStoryDomainMismatchOnPage(settings: AppSettings): Promise<void> {
+  if (storyMismatchChecked) return;
+  storyMismatchChecked = true;
+
+  if (!settings.accountToken || !settings.config.useStoryDb || !settings.activeStoryId) return;
+  const hostname = location.hostname;
+  if (!hostname) return;
+
+  try {
+    const raw = await chrome.storage.local.get([STORY_DOMAIN_MAP_KEY, STORY_DOMAIN_MISMATCH_DISMISSED_KEY]);
+    const map = raw[STORY_DOMAIN_MAP_KEY] as Record<string, string> | undefined;
+    const previousStoryId = map?.[hostname];
+    if (!previousStoryId || previousStoryId === settings.activeStoryId) return;
+
+    // Keyed by the exact (previous, current) pair rather than just the
+    // hostname — dismissing today's mismatch shouldn't permanently blind the
+    // reader to a genuinely different mismatch later (e.g. after switching
+    // to yet another wrong story on the same site).
+    const dismissed = raw[STORY_DOMAIN_MISMATCH_DISMISSED_KEY] as Record<string, string> | undefined;
+    const pairKey = `${previousStoryId}::${settings.activeStoryId}`;
+    if (dismissed?.[hostname] === pairKey) return;
+
+    // Named, not just "a different Story DB" — matching the popup's own
+    // wording (checkStoryDomainMismatch there names it too). If it was
+    // renamed/deleted since, there's nothing useful to say — same bail-out
+    // the popup's version uses.
+    const previousStoryName = await bgFetchStoryName(previousStoryId);
+    if (!previousStoryName) return;
+
+    showStoryDomainMismatchBanner(hostname, previousStoryName, pairKey);
+  } catch {
+    // storage unavailable — not worth surfacing an error for a courtesy notice
+  }
+}
+
+// Content scripts can't read the Story DB directly (it's a backend-side
+// resource, fetched via background/index.ts's own account-authenticated
+// call) — same STORY_LIST message type and response shape the popup uses.
+function bgFetchStoryName(storyId: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(null), 5000);
+    chrome.runtime.sendMessage({ type: 'STORY_LIST' }, (response: unknown) => {
+      clearTimeout(timeout);
+      const resp = response as { ok?: boolean; stories?: { id: string; name: string }[] } | null;
+      resolve(resp?.stories?.find((s) => s.id === storyId)?.name ?? null);
+    });
+  });
+}
+
+function showStoryDomainMismatchBanner(hostname: string, storyName: string, pairKey: string): void {
+  ensureToastStyle();
+  document.getElementById('mt-story-mismatch-banner')?.remove();
+
+  const el = document.createElement('div');
+  el.id = 'mt-story-mismatch-banner';
+  el.className = 'mt-story-mismatch-banner';
+
+  const msg = document.createElement('div');
+  msg.className = 'mt-story-mismatch-banner-msg';
+  msg.textContent = tr('storyMismatchBannerMessage', { domain: hostname, story: storyName });
+  el.appendChild(msg);
+
+  const actions = document.createElement('div');
+  actions.className = 'mt-story-mismatch-banner-actions';
+
+  const close = (): void => {
+    window.clearTimeout(dismissTimer);
+    el.classList.add('mt-toast-hide');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 260); // safety net if animationend never fires
+  };
+
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'mt-story-mismatch-banner-btn';
+  clearBtn.textContent = tr('storyMismatchBannerClearBtn');
+  clearBtn.onclick = () => {
+    void clearActiveStorySelection();
+    close();
+  };
+  actions.appendChild(clearBtn);
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.type = 'button';
+  dismissBtn.className = 'mt-story-mismatch-banner-btn';
+  dismissBtn.textContent = tr('storyMismatchBannerDismissBtn');
+  dismissBtn.onclick = () => {
+    void dismissStoryDomainMismatch(hostname, pairKey);
+    close();
+  };
+  actions.appendChild(dismissBtn);
+
+  el.appendChild(actions);
+  document.body.appendChild(el);
+  const dismissTimer = window.setTimeout(close, 15_000);
+}
+
+// Read-modify-write against the live stored settings (not the `settings`
+// object the mismatch check was called with, which can be stale by the time
+// the reader actually clicks this) — content-script has no existing
+// settings-write helper since settings are normally only ever edited from
+// the popup; this writes the same storage key the same way loadSettings()
+// reads it.
+async function clearActiveStorySelection(): Promise<void> {
+  try {
+    const raw = await chrome.storage.local.get(STORAGE_KEY);
+    const stored = raw[STORAGE_KEY] as Partial<AppSettings> | undefined;
+    if (!stored) return;
+    await chrome.storage.local.set({ [STORAGE_KEY]: { ...stored, activeStoryId: undefined } });
+  } catch {
+    // best-effort — worst case the reader just re-picks "no story" in the popup
+  }
+}
+
+async function dismissStoryDomainMismatch(hostname: string, pairKey: string): Promise<void> {
+  try {
+    const raw = await chrome.storage.local.get(STORY_DOMAIN_MISMATCH_DISMISSED_KEY);
+    const dismissed = (raw[STORY_DOMAIN_MISMATCH_DISMISSED_KEY] as Record<string, string> | undefined) ?? {};
+    dismissed[hostname] = pairKey;
+    await chrome.storage.local.set({ [STORY_DOMAIN_MISMATCH_DISMISSED_KEY]: dismissed });
+  } catch {
+    // best-effort — worst case it just asks again next time
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
