@@ -92,3 +92,80 @@ def test_health_lists_active_downloads_and_is_never_gated():
     assert body["status"] == "ok"
     assert body["downloads"][0]["name"] == "LaMa inpainting"
     assert body["downloads"][0]["approx_mb"] == 206
+
+
+# A gated/unauthorized repo (no Hugging Face token, or a token without
+# access) fails in well under a second every time — previously this meant a
+# doomed download was retried from scratch on every single translate request
+# that needed the model, each attempt briefly registering as "active" and
+# reappearing in the extension's /health-polling toast, even though it could
+# never succeed without the user fixing their token. A real production
+# report: deepghs/AnimeText_yolo became a gated repo and every page turn
+# re-triggered this exact loop.
+def test_a_failed_hf_file_download_is_not_retried_immediately(monkeypatch, tmp_path: Path):
+    attempts = []
+
+    def fake_hf_hub_download(repo_id, filename, local_dir, token):
+        attempts.append(repo_id)
+        raise Exception("401 Client Error: gated repo")
+
+    monkeypatch.setattr(mm, "hf_hub_download", fake_hf_hub_download)
+    manager = mm.ModelManager.__new__(mm.ModelManager)
+    manager.hf_token = None
+
+    for _ in range(3):
+        try:
+            manager._ensure_hf_file("deepghs/AnimeText_yolo", "model.pt", tmp_path / "model.pt")
+        except Exception:
+            pass
+
+    # The real download function only actually ran once — the next two
+    # calls short-circuited on the remembered failure instead of hitting
+    # Hugging Face (and briefly showing up as "active") again.
+    assert attempts == ["deepghs/AnimeText_yolo"]
+    assert active_downloads() == []
+
+
+def test_a_failed_hf_repo_download_is_not_retried_immediately(monkeypatch, tmp_path: Path):
+    attempts = []
+
+    def boom(**kwargs):
+        attempts.append(kwargs["repo_id"])
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(mm, "snapshot_download", boom)
+    monkeypatch.setattr(mm, "_models_dir", lambda: tmp_path)
+    manager = mm.ModelManager.__new__(mm.ModelManager)
+    manager.hf_token = None
+
+    for _ in range(3):
+        try:
+            manager._ensure_hf_repo("PaddlePaddle/PaddleOCR-VL-1.5", tmp_path / "paddle")
+        except Exception:
+            pass
+
+    assert attempts == ["PaddlePaddle/PaddleOCR-VL-1.5"]
+
+
+def test_a_different_repo_is_unaffected_by_another_repos_cooldown(monkeypatch, tmp_path: Path):
+    """The cooldown is keyed per repo_id, not global — a gated OSB-text
+    model failing shouldn't block an unrelated model from downloading."""
+    def fake_hf_hub_download(repo_id, filename, local_dir, token):
+        if repo_id == "deepghs/AnimeText_yolo":
+            raise Exception("401 Client Error: gated repo")
+        target = Path(local_dir) / filename
+        target.write_bytes(b"weights")
+        return str(target)
+
+    monkeypatch.setattr(mm, "hf_hub_download", fake_hf_hub_download)
+    manager = mm.ModelManager.__new__(mm.ModelManager)
+    manager.hf_token = None
+
+    try:
+        manager._ensure_hf_file("deepghs/AnimeText_yolo", "model.pt", tmp_path / "model.pt")
+    except Exception:
+        pass
+
+    result = manager._ensure_hf_file("JosephCatrambone/big-lama-torchscript", "lama.pt", tmp_path / "lama.pt")
+    assert result == tmp_path / "lama.pt"
+    assert result.exists()

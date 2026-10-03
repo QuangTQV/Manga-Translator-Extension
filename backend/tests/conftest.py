@@ -35,3 +35,16 @@ def _reset_rotation_state():
     yield
     translation_module._cooldowns.clear()
     translation_module._round_robin_cursors.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_download_failure_cooldown():
+    """Same reasoning as _reset_rotation_state above — the failed-download
+    cooldown (core/ml/download_status.py's _failures) is a process-lifetime
+    module global by design, so one test's failed repo_id can't poison
+    another test's unrelated use of the same repo_id."""
+    from core.ml import download_status
+
+    download_status._failures.clear()
+    yield
+    download_status._failures.clear()

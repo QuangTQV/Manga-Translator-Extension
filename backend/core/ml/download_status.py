@@ -25,6 +25,38 @@ _KNOWN: Dict[str, Tuple[str, int]] = {
 _lock = threading.Lock()
 _active: Dict[str, dict] = {}
 
+# A failed download (most commonly: a repo that's gated/requires a Hugging
+# Face token the user hasn't configured) used to be retried from scratch on
+# every single translate request that needed the model — each attempt fails
+# fast (well under a second for an auth error), but it's retried often enough
+# relative to how long a normal translate request already takes that the
+# extension's /health-polling toast ("first-time setup: downloading X") kept
+# reappearing instead of showing once and resolving, even though the
+# download was never actually going to succeed without the user fixing their
+# token. Remembering a recent failure here lets the caller skip straight to
+# re-raising instead of hitting the network (and registering as "active" in
+# the table above) again until the cooldown passes.
+_FAILURE_COOLDOWN_SECONDS = 1800  # 30 minutes
+_failures: Dict[str, Tuple[float, str]] = {}
+
+
+def record_download_failure(key: str, error: str) -> None:
+    with _lock:
+        _failures[key] = (time.monotonic(), error)
+
+
+def recent_failure(key: str) -> Optional[str]:
+    """The error message from a recent failed download of `key`, or None if
+    there wasn't one or its cooldown has already passed."""
+    with _lock:
+        entry = _failures.get(key)
+    if entry is None:
+        return None
+    started, error = entry
+    if time.monotonic() - started > _FAILURE_COOLDOWN_SECONDS:
+        return None
+    return error
+
 
 @contextmanager
 def track_download(key: str) -> Iterator[None]:

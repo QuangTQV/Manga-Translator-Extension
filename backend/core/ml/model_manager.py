@@ -18,7 +18,7 @@ from transformers import (
 from ultralytics import YOLO
 
 from core.device import empty_cache, get_best_device, get_best_dtype, get_device_info
-from core.ml.download_status import track_download
+from core.ml.download_status import track_download, record_download_failure, recent_failure
 from utils.exceptions import ModelError
 from utils.logging import log_message
 
@@ -255,6 +255,11 @@ class ModelManager:
         """
         if path.exists():
             return
+        cached_error = recent_failure(path.name)
+        if cached_error is not None:
+            raise ModelError(
+                f"Skipping download of {path.name} — it failed recently ({cached_error}); not retrying yet."
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         log_message(f"Downloading {path.name}...", verbose=verbose)
         try:
@@ -265,6 +270,7 @@ class ModelManager:
         except Exception as e:
             if path.exists():
                 path.unlink()
+            record_download_failure(path.name, str(e))
             raise ModelError(f"Failed to download {path.name}: {e}")
 
     def _ensure_hf_file(
@@ -286,19 +292,28 @@ class ModelManager:
         """
         if target.exists():
             return target
+        cached_error = recent_failure(repo_id)
+        if cached_error is not None:
+            raise ModelError(
+                f"Skipping download of {target.name} from {repo_id} — it failed recently ({cached_error}); not retrying yet."
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         log_message(
             f"Downloading {target.name} from Hugging Face ({repo_id})...",
             verbose=verbose,
         )
         effective_token = token if token else self.hf_token
-        with track_download(repo_id):
-            downloaded = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                local_dir=str(target.parent),
-                token=effective_token,
-            )
+        try:
+            with track_download(repo_id):
+                downloaded = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    local_dir=str(target.parent),
+                    token=effective_token,
+                )
+        except Exception as e:
+            record_download_failure(repo_id, str(e))
+            raise
         downloaded_path = Path(downloaded)
         if downloaded_path != target:
             downloaded_parent = downloaded_path.parent
@@ -356,6 +371,12 @@ class ModelManager:
         if is_downloaded:
             return target_dir
 
+        cached_error = recent_failure(repo_id)
+        if cached_error is not None:
+            raise ModelError(
+                f"Skipping download of repository {repo_id} — it failed recently ({cached_error}); not retrying yet."
+            )
+
         target_dir.mkdir(parents=True, exist_ok=True)
         log_message(
             (
@@ -394,6 +415,7 @@ class ModelManager:
                         f"Warning: Skipping deletion of {target_dir} as it is outside models/ directory",
                         always_print=True,
                     )
+            record_download_failure(repo_id, str(e))
             raise ModelError(f"Failed to download repository {repo_id}: {e}") from e
         return target_dir
 
