@@ -79,7 +79,7 @@ def _read_text(req: RegionOcrRequest, config) -> str:
 
 @router.post("/ocr", response_model=RegionOcrResponse)
 async def region_ocr(req: RegionOcrRequest, account=Depends(verify_token)) -> RegionOcrResponse:
-    _apply_shared_llm_config(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
     _reject_oversized_image(req.image)
     config = _config_for_request(req)
     try:
@@ -112,8 +112,8 @@ async def region_translate(req: RegionTranslateRequest, account=Depends(verify_t
         raise HTTPException(status_code=400, detail="Nothing to translate")
     if len(text) > MAX_REGION_TEXT_CHARS:
         raise HTTPException(status_code=400, detail="Text is too long")
-    _apply_shared_llm_config(req, account)
-    _resolve_story_context(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
+    await asyncio.to_thread(_resolve_story_context, req, account)
     config = _config_for_request(req)
     tconf = config.translation
     # This route always has the source text, so the user's pre rules apply

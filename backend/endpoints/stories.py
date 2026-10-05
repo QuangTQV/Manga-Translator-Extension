@@ -56,7 +56,8 @@ def _to_detail(row) -> StoryDetail:
 async def list_my_stories(
     account: Account = Depends(require_login),
 ) -> list[StorySummary]:
-    return [_to_summary(row) for row in list_stories(account.email)]
+    rows = await asyncio.to_thread(list_stories, account.email)
+    return [_to_summary(row) for row in rows]
 
 
 @router.post("", response_model=StoryDetail)
@@ -64,7 +65,7 @@ async def create_my_story(
     req: CreateStoryRequest,
     account: Account = Depends(require_login),
 ) -> StoryDetail:
-    row = create_story(account.email, req.name)
+    row = await asyncio.to_thread(create_story, account.email, req.name)
     return _to_detail(row)
 
 
@@ -73,7 +74,7 @@ async def get_my_story(
     story_id: str, account: Account = Depends(require_login)
 ) -> StoryDetail:
     try:
-        row = get_story(story_id, account.email)
+        row = await asyncio.to_thread(get_story, story_id, account.email)
     except StoryNotFoundError:
         raise HTTPException(status_code=404, detail="Story not found")
     return _to_detail(row)
@@ -86,7 +87,8 @@ async def save_my_story(
     account: Account = Depends(require_login),
 ) -> StoryDetail:
     try:
-        row = save_story(
+        row = await asyncio.to_thread(
+            save_story,
             story_id,
             account.email,
             name=req.name,
@@ -106,7 +108,7 @@ async def delete_my_story(
     story_id: str, account: Account = Depends(require_login)
 ) -> dict:
     try:
-        delete_story(story_id, account.email)
+        await asyncio.to_thread(delete_story, story_id, account.email)
     except StoryNotFoundError:
         raise HTTPException(status_code=404, detail="Story not found")
     return {"ok": True}
@@ -134,7 +136,7 @@ async def update_story_from_description(
     """
     if not req.description.strip():
         raise HTTPException(status_code=400, detail="No description provided.")
-    _apply_shared_llm_config(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
     config = _config_for_request(req)
     config.translation.enable_web_search = req.enable_web_search
     config.translation.web_search_provider = req.web_search_provider

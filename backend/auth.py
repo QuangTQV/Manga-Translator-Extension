@@ -1,7 +1,14 @@
 """Account gate for a centrally-hosted deployment. Inert by default — see
 config.py's `require_auth` (env MT_REQUIRE_AUTH, default false): a normal
 self-hosted/local backend never requires a token, so this dependency
-returning None on every route is a no-op for that setup."""
+returning None on every route is a no-op for that setup.
+
+core.accounts' store calls are synchronous SQLAlchemy (see core/db.py) —
+every one is offloaded via asyncio.to_thread, the same convention used for
+ML pipeline work in endpoints/translate.py, so a DB round-trip here never
+blocks the single event loop and stalls every other in-flight request
+(translate, health checks, everything) for its duration."""
+import asyncio
 from typing import Optional
 
 from fastapi import Header, HTTPException
@@ -25,11 +32,11 @@ async def verify_token(authorization: Optional[str] = Header(None)) -> Optional[
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     token = authorization.removeprefix("Bearer ").strip()
-    if not token or not get_account(token):
+    if not token or not await asyncio.to_thread(get_account, token):
         raise HTTPException(status_code=401, detail="Invalid account token")
 
     try:
-        return check_and_increment_usage(token)
+        return await asyncio.to_thread(check_and_increment_usage, token)
     except QuotaExceededError as e:
         raise HTTPException(status_code=429, detail=str(e)) from e
 
@@ -45,7 +52,7 @@ async def require_login(authorization: Optional[str] = Header(None)) -> Account:
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     token = authorization.removeprefix("Bearer ").strip()
-    account = get_account(token) if token else None
+    account = await asyncio.to_thread(get_account, token) if token else None
     if not account:
         raise HTTPException(status_code=401, detail="Invalid account token")
     return account
@@ -67,7 +74,7 @@ async def require_admin(authorization: Optional[str] = Header(None)) -> Account:
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     token = authorization.removeprefix("Bearer ").strip()
-    account = get_account(token) if token else None
+    account = await asyncio.to_thread(get_account, token) if token else None
     if not account:
         raise HTTPException(status_code=401, detail="Invalid account token")
     if account.email.lower() != settings.admin_email.lower():

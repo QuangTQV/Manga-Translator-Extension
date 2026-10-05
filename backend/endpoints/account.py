@@ -5,6 +5,8 @@ the normal local/self-hosted setup: these routes exist regardless, but
 nothing else in the app calls them unless require_auth is on and the
 extension's Account tab is used.
 """
+import asyncio
+
 import requests
 from fastapi import APIRouter, Header, HTTPException
 
@@ -52,7 +54,7 @@ async def register(req: RegisterAccountRequest) -> AccountResponse:
     """No email verification or payment collection — this is scaffolding
     for a hosted deployment to build a real signup flow on top of."""
     try:
-        account = register_account(req.email)
+        account = await asyncio.to_thread(register_account, req.email)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except AccountExistsError as e:
@@ -63,7 +65,7 @@ async def register(req: RegisterAccountRequest) -> AccountResponse:
 @router.get("/me", response_model=AccountResponse)
 async def me(authorization: str = Header(None)) -> AccountResponse:
     token = _token_from_header(authorization)
-    account = get_account(token)
+    account = await asyncio.to_thread(get_account, token)
     if not account:
         raise HTTPException(status_code=401, detail="Invalid account token")
     return _to_response(account)
@@ -76,7 +78,7 @@ async def change_plan(req: SetPlanRequest, authorization: str = Header(None)) ->
     from a Stripe (or similar) webhook handler instead of exposing this."""
     token = _token_from_header(authorization)
     try:
-        account = set_plan(token, req.plan)
+        account = await asyncio.to_thread(set_plan, token, req.plan)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=401, detail=str(e))
     except ValueError as e:
@@ -93,7 +95,7 @@ async def logout(authorization: str = Header(None)) -> dict:
     only Google Sign-In can issue that email a new token afterward."""
     token = _token_from_header(authorization)
     try:
-        revoke_token(token)
+        await asyncio.to_thread(revoke_token, token)
     except AccountNotFoundError as e:
         raise HTTPException(status_code=401, detail=str(e))
     return {"ok": True}
@@ -107,8 +109,8 @@ async def google_login(req: GoogleLoginRequest) -> AccountResponse:
     finds or creates the matching account. Returning users get their
     existing account back (not a 409, unlike /register)."""
     try:
-        resp = requests.get(
-            GOOGLE_TOKENINFO_URL, params={"access_token": req.access_token}, timeout=10,
+        resp = await asyncio.to_thread(
+            requests.get, GOOGLE_TOKENINFO_URL, params={"access_token": req.access_token}, timeout=10,
         )
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Could not reach Google: {e}")
@@ -125,5 +127,5 @@ async def google_login(req: GoogleLoginRequest) -> AccountResponse:
     if not email:
         raise HTTPException(status_code=401, detail="Google token did not include an email")
 
-    account = find_or_create_account(email)
+    account = await asyncio.to_thread(find_or_create_account, email)
     return _to_response(account, include_token=True)

@@ -338,8 +338,8 @@ async def translate_single(
     Accepts a base64-encoded image and returns the translated image
     plus bubble metadata.
     """
-    _apply_shared_llm_config(req, account)
-    _resolve_story_context(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
+    await asyncio.to_thread(_resolve_story_context, req, account)
     _reject_oversized_image(req.image)
     config = _config_for_request(req)
 
@@ -536,8 +536,8 @@ async def translate_batch(
     call, even though it can process up to 20 images — a real billing
     model would likely want to count per-image here instead.
     """
-    _apply_shared_llm_config(req, account)
-    _resolve_story_context(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
+    await asyncio.to_thread(_resolve_story_context, req, account)
     if len(req.images) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 images per batch")
 
@@ -590,7 +590,7 @@ async def suggest_instructions(
     at visually yet, and the notes can be drafted purely from search
     results.
     """
-    _apply_shared_llm_config(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
     can_search_without_images = req.enable_web_search and bool(
         (req.story_title or "").strip()
     )
@@ -737,7 +737,7 @@ async def support_chat(
     helper, not part of the translate pipeline, with no account-scoped
     row to protect.
     """
-    _apply_shared_llm_config(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
     if not req.messages:
         raise HTTPException(status_code=400, detail="No message provided.")
 
@@ -798,7 +798,7 @@ async def test_key(
     request — the popup's "Test API Key" button. Bypasses the pipeline
     concurrency slot entirely (no GPU/detection/rendering involved), so
     testing several keys at once never queues behind real translate work."""
-    _apply_shared_llm_config(req, account)
+    await asyncio.to_thread(_apply_shared_llm_config, req, account)
     try:
         config = build_test_key_config(
             req.provider,

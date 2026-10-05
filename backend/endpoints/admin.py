@@ -5,6 +5,8 @@ model/key from the extension popup's Owner section, instead of setting
 GOOGLE_API_KEY/etc. env vars by hand and redeploying. Irrelevant to (and
 untouched by) the normal local/self-hosted setup.
 """
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
@@ -49,7 +51,7 @@ def _to_response(config) -> SharedLlmConfigResponse:
 @router.get("/llm-config", response_model=SharedLlmConfigResponse)
 async def get_llm_config(_admin: Account = Depends(require_admin)) -> SharedLlmConfigResponse:
     try:
-        return _to_response(get_shared_llm_config())
+        return _to_response(await asyncio.to_thread(get_shared_llm_config))
     except SecretKeyMismatchError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -65,10 +67,11 @@ async def set_llm_config(
     try:
         api_key = req.api_key
         if not api_key:
-            existing = get_shared_llm_config()
+            existing = await asyncio.to_thread(get_shared_llm_config)
             api_key = existing.api_key if existing else None
 
-        config = set_shared_llm_config(
+        config = await asyncio.to_thread(
+            set_shared_llm_config,
             provider=req.provider, model_name=req.model_name,
             api_key=api_key, base_url=req.base_url,
         )
