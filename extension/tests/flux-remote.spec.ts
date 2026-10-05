@@ -292,7 +292,7 @@ test.describe('popup — Flux remote inpainting', () => {
     expect(capturedBody.flux_remote_base_url).toBeUndefined();
   });
 
-  test('the token is sent as flux_remote_token, and a backend warning shows a toast', async ({ context, extensionId }) => {
+  test('the token is sent as flux_remote_token, and a backend warning shows a dismissible banner', async ({ context, extensionId }) => {
     let [worker] = context.serviceWorkers();
     if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
     await seedSettings(
@@ -317,15 +317,6 @@ test.describe('popup — Flux remote inpainting', () => {
     });
 
     const mangaPage = await context.newPage();
-    // Later toasts replace earlier ones, so record every toast's text.
-    await mangaPage.addInitScript(() => {
-      (window as any).__toasts = [];
-      new MutationObserver((muts) => {
-        for (const m of muts) m.addedNodes.forEach((n) => {
-          if ((n as HTMLElement).id === 'mt-toast') (window as any).__toasts.push((n as HTMLElement).textContent);
-        });
-      }).observe(document, { childList: true, subtree: true });
-    });
     await mangaPage.goto(TEST_SITE_URL);
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
@@ -342,7 +333,18 @@ test.describe('popup — Flux remote inpainting', () => {
     await mangaPage.waitForTimeout(2000);
 
     expect(capturedBody.flux_remote_token).toBe('sekret');
-    const toasts: string[] = await mangaPage.evaluate(() => (window as any).__toasts);
-    expect(toasts.some((t) => /Flux remote worker is unreachable/.test(t))).toBe(true);
+    const banner = mangaPage.locator('#mt-backend-warning-flux_remote_unreachable');
+    await expect(banner).toContainText('Flux remote worker is unreachable');
+
+    // A persistent cause (an expired token, a tunnel left stopped on
+    // purpose) would otherwise nag every minute for as long as translation
+    // continues — the dismiss lets the reader silence this specific code.
+    await banner.getByRole('button', { name: "Don't remind me about this" }).click();
+    await expect(banner).toHaveCount(0, { timeout: 1_000 });
+    const dismissed = await worker.evaluate(async () => {
+      const result = await chrome.storage.local.get('mtBackendWarningDismissed');
+      return result.mtBackendWarningDismissed;
+    });
+    expect(dismissed).toEqual(['flux_remote_unreachable']);
   });
 });

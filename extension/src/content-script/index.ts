@@ -90,7 +90,7 @@ const EN_MESSAGES = {
   fluxRemoteUnreachable: 'Flux remote worker is unreachable — outside-bubble text was left as-is on this page. Check that your Kaggle session/tunnel is still running and the URL is current.',
   fluxRemoteUnauthorized: 'Flux remote worker rejected the token — outside-bubble text was left as-is. Check the Token field in the popup.',
   modelDownloading: "First-time setup: downloading {name}{size}. This page will translate once it finishes (a few minutes on a slow connection).",
-  modelDownloadDismissBtn: "Don't remind me about this",
+  dismissNoticeBtn: "Don't remind me about this",
   extensionDisabled: 'Extension is disabled',
   suggestInstructions: 'Suggest Notes',
   suggestInstructionsHint: 'Analyze selected pages and draft Story Notes (cast, relationships, tone)',
@@ -255,7 +255,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: 'Không kết nối được Flux worker từ xa — chữ ngoài bong bóng thoại được giữ nguyên ở trang này. Kiểm tra session Kaggle/tunnel còn chạy và URL còn mới không.',
     fluxRemoteUnauthorized: 'Flux worker từ xa từ chối token — chữ ngoài bong bóng thoại được giữ nguyên. Kiểm tra ô Token trong popup.',
     modelDownloading: "Cài đặt lần đầu: đang tải {name}{size}. Trang này sẽ được dịch xong khi tải xong (có thể mất vài phút nếu mạng chậm).",
-    modelDownloadDismissBtn: "Không nhắc tôi về việc này nữa",
+    dismissNoticeBtn: "Không nhắc tôi về việc này nữa",
     extensionDisabled: 'Tiện ích đang tắt',
     suggestInstructions: 'Gợi ý ghi chú',
     suggestInstructionsHint: 'Phân tích các trang đã chọn và soạn Ghi chú truyện (nhân vật, quan hệ, văn phong)',
@@ -415,7 +415,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: '无法连接远程 Flux worker——本页气泡外文字保持原样。请检查 Kaggle 会话/隧道是否仍在运行，URL 是否为最新。',
     fluxRemoteUnauthorized: '远程 Flux worker 拒绝了令牌——气泡外文字保持原样。请检查弹窗中的 Token 字段。',
     modelDownloading: "首次设置：正在下载 {name}{size}。下载完成后本页才会翻译（网速慢时可能需要几分钟）。",
-    modelDownloadDismissBtn: "不再提醒我",
+    dismissNoticeBtn: "不再提醒我",
     extensionDisabled: '扩展已停用',
     suggestInstructions: '生成建议',
     suggestInstructionsHint: '分析已选页面并起草故事笔记（角色、关系、语气）',
@@ -575,7 +575,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: 'リモート Flux worker に接続できません——このページの吹き出し外の文字はそのままです。Kaggle セッション/トンネルが動いているか、URL が最新か確認してください。',
     fluxRemoteUnauthorized: 'リモート Flux worker がトークンを拒否しました——吹き出し外の文字はそのままです。ポップアップの Token 欄を確認してください。',
     modelDownloading: "初回セットアップ：{name}{size} をダウンロード中です。完了するとこのページが翻訳されます（回線が遅い場合は数分かかります）。",
-    modelDownloadDismissBtn: "今後表示しない",
+    dismissNoticeBtn: "今後表示しない",
     extensionDisabled: '拡張機能は無効です',
     suggestInstructions: 'ノートを提案',
     suggestInstructionsHint: '選択したページを分析し、ストーリーメモ（登場人物・関係・トーン）を作成します',
@@ -735,7 +735,7 @@ const CONTENT_MESSAGES: Record<UiLanguage, Record<ContentMessageKey, string>> = 
     fluxRemoteUnreachable: '원격 Flux worker에 연결할 수 없습니다 — 이 페이지의 말풍선 밖 글자는 그대로 남았습니다. Kaggle 세션/터널이 실행 중인지, URL이 최신인지 확인하세요.',
     fluxRemoteUnauthorized: '원격 Flux worker가 토큰을 거부했습니다 — 말풍선 밖 글자는 그대로 남았습니다. 팝업의 Token 필드를 확인하세요.',
     modelDownloading: "최초 설정: {name}{size} 다운로드 중입니다. 완료되면 이 페이지가 번역됩니다 (연결이 느리면 몇 분 걸릴 수 있습니다).",
-    modelDownloadDismissBtn: "다시 알리지 않기",
+    dismissNoticeBtn: "다시 알리지 않기",
     extensionDisabled: '확장 프로그램이 꺼져 있습니다',
     suggestInstructions: '메모 제안',
     suggestInstructionsHint: '선택한 페이지를 분석해 스토리 메모(등장인물, 관계, 어조)를 작성합니다',
@@ -1231,8 +1231,14 @@ const AUTO_RETRY_MAX = 3;
 // A provider outage or an exhausted shared quota hits every in-flight image
 // at once — without this, that single event would otherwise fire one system
 // notification per image.
-const RETRY_EXHAUSTED_NOTIFY_COOLDOWN_MS = 60_000;
-let lastRetryExhaustedNotifyAt = 0;
+// Only once per auto-translate session (reset in startAutoTranslate), not
+// repeatedly — a persistent misconfiguration (dead/exhausted API key) would
+// otherwise fire this OS-level notification every single minute for as long
+// as the reader keeps the page open, the most intrusive thing this
+// extension can do. One notification is enough to alert them; the on-page
+// retry badges (addRetryNeededBadge) stay visible as a standing, non-
+// intrusive reminder after that.
+let retryExhaustedNotifiedThisSession = false;
 
 // Per-image bubble/request context from the most recent successful translate
 // in this session — powers the "click a bubble to fix its translation"
@@ -1289,8 +1295,8 @@ function markAutoTranslateFailure(img: HTMLImageElement, url: string, retries: n
   AUTO_RETRY_MAP.set(url, nextRetries);
   if (nextRetries >= AUTO_RETRY_MAX) {
     addRetryNeededBadge(img, url);
-    if (Date.now() - lastRetryExhaustedNotifyAt >= RETRY_EXHAUSTED_NOTIFY_COOLDOWN_MS) {
-      lastRetryExhaustedNotifyAt = Date.now();
+    if (!retryExhaustedNotifiedThisSession) {
+      retryExhaustedNotifiedThisSession = true;
       notifySystem(tr('notifyRetryExhaustedBody'));
     }
   }
@@ -1310,6 +1316,7 @@ async function startAutoTranslate(): Promise<void> {
     throw new Error(tr('extensionDisabled'));
   }
   void checkStoryDomainMismatchOnPage(settings);
+  retryExhaustedNotifiedThisSession = false;
 
   autoTranslateActive = true;
   if (autoTranslateRemoveUiTimer !== undefined) {
@@ -4346,19 +4353,50 @@ function updateAutoTranslateCounter(): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const shownWarningAt = new Map<string, number>();
+const BACKEND_WARNING_DISMISSED_KEY = 'mtBackendWarningDismissed';
 
 // Backend warnings (e.g. the Flux remote worker being down) are non-fatal —
-// the page still translates — so surface them as a toast, at most once a
-// minute per code, instead of once per page.
-function notifyBackendWarnings(warnings: string[] | undefined): void {
-  for (const code of warnings ?? []) {
-    const key = code === 'flux_remote_unreachable' ? 'fluxRemoteUnreachable'
-      : code === 'flux_remote_unauthorized' ? 'fluxRemoteUnauthorized' : null;
-    if (!key) continue;
+// the page still translates — so surface them as a banner, at most once a
+// minute per code, instead of once per page. A persistent cause (an expired
+// remote-worker token, a tunnel the reader stopped on purpose) would
+// otherwise nag every minute for as long as translation continues, with no
+// way to turn it off short of disabling the whole feature — the dismiss
+// button lets the reader silence a specific code they already know about,
+// per code rather than globally so an unrelated warning later still shows.
+async function notifyBackendWarnings(warnings: string[] | undefined): Promise<void> {
+  const codes = (warnings ?? []).filter(
+    (code) => code === 'flux_remote_unreachable' || code === 'flux_remote_unauthorized',
+  );
+  if (codes.length === 0) return;
+
+  let dismissed: string[] = [];
+  try {
+    const raw = await chrome.storage.local.get(BACKEND_WARNING_DISMISSED_KEY);
+    dismissed = (raw[BACKEND_WARNING_DISMISSED_KEY] as string[] | undefined) ?? [];
+  } catch {
+    // storage unavailable — fall through and show it rather than silently drop it
+  }
+
+  for (const code of codes) {
+    if (dismissed.includes(code)) continue;
     const last = shownWarningAt.get(code) ?? 0;
     if (Date.now() - last < 60_000) continue;
     shownWarningAt.set(code, Date.now());
-    toast(tr(key), true);
+    const key = code === 'flux_remote_unreachable' ? 'fluxRemoteUnreachable' : 'fluxRemoteUnauthorized';
+    showActionBanner(`mt-backend-warning-${code}`, tr(key), [
+      { label: tr('dismissNoticeBtn'), onClick: () => void dismissBackendWarning(code) },
+    ]);
+  }
+}
+
+async function dismissBackendWarning(code: string): Promise<void> {
+  try {
+    const raw = await chrome.storage.local.get(BACKEND_WARNING_DISMISSED_KEY);
+    const dismissed = new Set((raw[BACKEND_WARNING_DISMISSED_KEY] as string[] | undefined) ?? []);
+    dismissed.add(code);
+    await chrome.storage.local.set({ [BACKEND_WARNING_DISMISSED_KEY]: Array.from(dismissed) });
+  } catch {
+    // best-effort — worst case it just asks again next time
   }
 }
 
@@ -4391,7 +4429,7 @@ async function notifyModelDownloads(downloads: { name: string; approx_mb: number
   showActionBanner(
     'mt-model-download-banner',
     tr('modelDownloading', { name: names.join(', '), size }),
-    [{ label: tr('modelDownloadDismissBtn'), onClick: () => void dismissModelDownloadNotice(names) }],
+    [{ label: tr('dismissNoticeBtn'), onClick: () => void dismissModelDownloadNotice(names) }],
   );
 }
 
@@ -4417,7 +4455,7 @@ function bgTranslateImageWithBody(imageUrl: string, pageUrl: string, body: Trans
         return;
       }
       const typed = (resp as { translated_image?: string; bubbles?: unknown[]; processing_time_seconds?: number; ocr_texts?: string[]; memory_note?: string; warnings?: string[]; error?: string }) ?? { error: 'no response' };
-      notifyBackendWarnings(typed.warnings);
+      void notifyBackendWarnings(typed.warnings);
       resolve(typed);
     });
   });

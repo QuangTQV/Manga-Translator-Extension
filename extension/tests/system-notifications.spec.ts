@@ -123,9 +123,56 @@ test.describe('system (OS-level) notifications', () => {
 
     await expect(mangaPage.locator('.mt-retry-badge').first()).toBeVisible({ timeout: 20_000 });
     // The other 3 test-site pages hit the same retry cap around the same
-    // time — the 60s cooldown must collapse all of that into one notice.
+    // time — this fires at most once per auto-translate session, which must
+    // collapse all of that into one notice.
     await mangaPage.waitForTimeout(1000);
     expect((await getNotifications(worker)).length).toBe(1);
+  });
+
+  // The previous version of this throttle was purely time-based (60s) — a
+  // persistent misconfiguration would then re-fire this OS-level
+  // notification every minute for as long as the reader kept reading. It
+  // now fires at most once per auto-translate *session* (reset in
+  // startAutoTranslate) — each content-script instance is its own session,
+  // so turning to a new page while the same misconfiguration persists still
+  // gets its own notification, rather than staying silent forever after the
+  // very first one.
+  test('a second page with the same persistent failure still gets its own notification', async ({ context, extensionId }) => {
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+    await captureNotifications(worker);
+
+    await context.route('**/translate', async (route) => {
+      await route.fulfill({
+        status: 502, contentType: 'application/json',
+        body: JSON.stringify({ detail: 'All API keys are currently rate limited, please try again shortly' }),
+      });
+    });
+
+    // A fresh popup page per toggle — matching real usage (the popup is
+    // recreated each time it's opened) and avoiding its own `#btn-auto`
+    // active/inactive class being reused across tabs, which would make a
+    // second click send STOP instead of START.
+    const mangaPage1 = await context.newPage();
+    await mangaPage1.goto(TEST_SITE_URL);
+    await mangaPage1.bringToFront();
+    const popup1 = await context.newPage();
+    await popup1.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await mangaPage1.bringToFront();
+    await popup1.locator('#btn-auto').click();
+    await expect(mangaPage1.locator('.mt-retry-badge').first()).toBeVisible({ timeout: 20_000 });
+    expect((await getNotifications(worker)).length).toBe(1);
+
+    const mangaPage2 = await context.newPage();
+    await mangaPage2.goto(TEST_SITE_URL);
+    await mangaPage2.bringToFront();
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await mangaPage2.bringToFront();
+    await popup2.locator('#btn-auto').click();
+    await expect(mangaPage2.locator('.mt-retry-badge').first()).toBeVisible({ timeout: 20_000 });
+    expect((await getNotifications(worker)).length).toBe(2);
   });
 
   // The backend fetches ML weights lazily (up to ~2GB); while a request
