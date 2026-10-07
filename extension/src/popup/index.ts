@@ -412,10 +412,35 @@ function activateTab(tabName: string): void {
   const previousPane = panes.find((pane) => pane.classList.contains('active'));
   const nextPane = panes.find((pane) => pane.id === `tab-${tabName}`);
   if (!nextPane) return;
-  if (nextPane !== previousPane) {
+  const isRealSwitch = nextPane !== previousPane;
+  if (isRealSwitch) {
     const previousIndex = previousPane ? panes.indexOf(previousPane) : panes.indexOf(nextPane);
     const nextIndex = panes.indexOf(nextPane);
     nextPane.style.setProperty('--tab-enter-x', `${nextIndex > previousIndex ? 4 : -4}px`);
+  }
+
+  // Tabs vary a lot in natural height (Config/Account are short, Translate/
+  // Story DB/LLM Config are much taller) — with no saved custom size, the
+  // popup window auto-fits to the active tab's content, so switching tabs
+  // used to snap the whole window to a new height instantly (reported as
+  // feeling jarring, unlike macOS/iOS panel transitions). Animate it instead,
+  // same measure-then-transition idiom as .hint-clamped.hint-animating
+  // (popup/index.ts:animateHintTo). Skipped when: not a real tab change;
+  // the standalone window (height:100%, not content-sized — index.html's
+  // html.standalone-window rule); the user has their own saved/dragged size
+  // (respect it, don't fight it with a per-tab height); or reduced motion
+  // is requested — in all of those cases we simply never touch
+  // body.style.height here, so the existing native/pinned sizing behavior
+  // continues exactly as before.
+  const shouldAnimateHeight = isRealSwitch
+    && !document.documentElement.classList.contains('standalone-window')
+    && !userHasCustomPopupSize
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const startHeight = shouldAnimateHeight ? document.body.getBoundingClientRect().height : 0;
+  if (shouldAnimateHeight) {
+    // Pin the current rendered height before the class swap below so the
+    // display:none/flex change can't itself trigger an instant native resize.
+    document.body.style.height = `${startHeight}px`;
   }
 
   buttons.forEach((button) => {
@@ -425,6 +450,38 @@ function activateTab(tabName: string): void {
     pane.classList.toggle('active', pane.id === `tab-${tabName}`);
   });
   if (nextPane) refreshCollapsibleHints(nextPane);
+
+  if (shouldAnimateHeight) {
+    // Measure the new pane's natural auto-fit height by momentarily
+    // releasing the pin. scrollHeight can't be used instead: it can never
+    // report less than the box's own current (pinned) height, which breaks
+    // shrinking toward a shorter tab (e.g. Translate -> Config) — the
+    // release/re-pin below both happen before the next paint, so nothing
+    // is visibly shown at the natural size in between.
+    document.body.style.height = '';
+    void document.body.offsetHeight;
+    const targetHeight = Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, document.body.getBoundingClientRect().height));
+    if (targetHeight === startHeight) {
+      document.body.style.height = ''; // nothing to animate — stay released
+      return;
+    }
+    document.body.style.height = `${startHeight}px`;
+    void document.body.offsetHeight; // commit the re-pinned start height before changing the target
+    document.body.classList.add('popup-height-animating');
+    document.body.style.height = `${targetHeight}px`;
+    // transitionend bubbles, and plenty of other elements inside body (tab
+    // buttons' own color/border transitions, etc.) fire their own — `once`
+    // would let the first one of THOSE consume this listener before body's
+    // real `height` transitionend ever arrives, leaving the pin stuck
+    // forever. Filter on both target and propertyName instead, and only
+    // remove the listener once that specific event actually shows up.
+    document.body.addEventListener('transitionend', function onEnd(e) {
+      if (e.target !== document.body || e.propertyName !== 'height') return;
+      document.body.removeEventListener('transitionend', onEnd);
+      document.body.classList.remove('popup-height-animating');
+      document.body.style.height = ''; // back to auto-fit for later in-tab content changes
+    });
+  }
 }
 
 function initSettingsSearch(): void {
@@ -623,6 +680,11 @@ const POPUP_MAX_WIDTH = 720;
 const POPUP_MIN_HEIGHT = 460;
 const POPUP_MAX_HEIGHT = 900;
 let popupSizeSaveTimer: number | undefined;
+// Set once the user has an explicit size of their own (a restored saved
+// size, or a live drag/keyboard resize) — activateTab's height-switch
+// animation checks this and backs off entirely rather than fighting a size
+// the user deliberately chose.
+let userHasCustomPopupSize = false;
 
 async function restorePopupSize(): Promise<void> {
   try {
@@ -630,6 +692,7 @@ async function restorePopupSize(): Promise<void> {
     const saved = raw[POPUP_SIZE_KEY] as { w?: number; h?: number } | undefined;
     if (saved?.w) document.body.style.width = `${Math.max(POPUP_MIN_WIDTH, Math.min(POPUP_MAX_WIDTH, saved.w))}px`;
     if (saved?.h) document.body.style.height = `${Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, saved.h))}px`;
+    if (saved?.h) userHasCustomPopupSize = true;
   } catch {
     // chrome.storage unavailable (shouldn't happen in the real extension) — keep the CSS default size.
   }
@@ -667,6 +730,7 @@ function initPopupResize(): void {
       if (!pendingSize) return;
       document.body.style.width = `${Math.round(pendingSize.width)}px`;
       document.body.style.height = `${Math.round(pendingSize.height)}px`;
+      userHasCustomPopupSize = true;
     };
     target.addEventListener('pointermove', (event) => {
       if (!dragStart) return;
@@ -695,6 +759,7 @@ function initPopupResize(): void {
     const heightDelta = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0;
       document.body.style.width = `${Math.max(POPUP_MIN_WIDTH, Math.min(POPUP_MAX_WIDTH, rect.width + widthDelta))}px`;
       document.body.style.height = `${Math.max(POPUP_MIN_HEIGHT, Math.min(POPUP_MAX_HEIGHT, rect.height + heightDelta))}px`;
+      userHasCustomPopupSize = true;
     });
   };
   attachResize(handle, false);

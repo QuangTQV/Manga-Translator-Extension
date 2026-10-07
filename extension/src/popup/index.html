@@ -483,6 +483,15 @@
       from { opacity: 0; transform: translate3d(var(--tab-enter-x, 0px), 4px, 0) scale(.985); }
       to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
     }
+    /* Switching tabs with no saved custom size (popup/index.ts:activateTab)
+       used to snap the whole popup window to the new tab's natural height
+       instantly — display:none/flex can't be transitioned, and the browser's
+       own auto-fit-to-content resize isn't animatable by itself. Pinning an
+       explicit start/end px height (same measure-then-transition idiom as
+       .hint-clamped.hint-animating above) and transitioning it here, same
+       curve/duration as popup-tab-enter, makes the window morph read as one
+       coordinated motion with the content fade instead of two competing ones. */
+    body.popup-height-animating { transition: height 220ms cubic-bezier(.16,1,.3,1); }
     .config-section {
       padding: 15px; gap: 14px;
       background: linear-gradient(155deg, rgba(17,28,51,0.96), rgba(12,19,36,0.96));
