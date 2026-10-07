@@ -37,6 +37,58 @@ def test_evidence_priority_rule_absent_for_non_vietnamese_output():
     assert "xưng hô" not in prompt.lower()
 
 
+def test_established_pair_evidence_priority_present_for_vietnamese():
+    # Failure mode #5: a page's own tone/register could flip an already-
+    # established pair even though nothing in the story actually changed
+    # (e.g. friends read as "anh/em" on one page, "tớ/cậu" on the next).
+    # Fixed by ranking an established pair above same-page tone, split into
+    # two tiers: a Story DB address note (user-authored, near-ground-truth)
+    # is hard to override; a prior page's own guessed pair is a correctable
+    # default, not a permanent lock (an earlier wrong guess must still be
+    # fixable once clearer evidence shows up on a later page). Tier 1 (Story
+    # DB) applies regardless of Context Memory; tier 2 (a prior page's own
+    # guess) only exists when Context Memory is on, since that's the only
+    # mechanism carrying a prior page's XƯNG HÔ forward at all.
+    prompt = _build_system_prompt_translation(
+        output_language="Vietnamese", mode="one-step", reading_direction="rtl"
+    )
+    assert "an established pair (see the next rule)" in prompt
+    assert "Story DB address note is the default, hard to override" in prompt
+    assert "A prior page's decided pair is the default, but correctable" not in prompt
+
+    with_memory = _build_system_prompt_translation(
+        output_language="Vietnamese", mode="one-step", reading_direction="rtl",
+        context_memory_enabled=True,
+    )
+    assert "an established pair (see the next two rules)" in with_memory
+    assert "A prior page's decided pair is the default, but correctable" in with_memory
+
+
+def test_established_pair_rule_requires_clearer_evidence_not_just_tone():
+    # Tier 1 (Story DB) wording — always present for Vietnamese output.
+    prompt = _build_system_prompt_translation(
+        output_language="Vietnamese", mode="one-step", reading_direction="rtl"
+    )
+    assert "never reason enough on its own" in prompt
+
+    # Tier 2 (a prior page's own guess) wording — only when Context Memory
+    # is on, and explicitly requires clearer evidence, not just a vibe.
+    with_memory = _build_system_prompt_translation(
+        output_language="Vietnamese", mode="one-step", reading_direction="rtl",
+        context_memory_enabled=True,
+    )
+    assert "not because the tone merely feels different" in with_memory
+
+
+def test_established_pair_rules_absent_for_non_vietnamese():
+    prompt = _build_system_prompt_translation(
+        output_language="English", mode="one-step", reading_direction="rtl",
+        context_memory_enabled=True,
+    )
+    assert "Story DB address note is the default" not in prompt
+    assert "A prior page's decided pair is the default" not in prompt
+
+
 def test_unclear_relationship_defaults_to_casual_pair_not_toi_ban():
     prompt = _build_system_prompt_translation(
         output_language="Vietnamese", mode="one-step", reading_direction="rtl"

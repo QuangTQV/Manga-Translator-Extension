@@ -236,8 +236,20 @@ def _build_system_prompt_translation(
 
     vietnamese_pronoun_rule = ""
     if _is_vietnamese_output(output_language):
-        vietnamese_pronoun_rule = """
-  - **Vietnamese Pronouns (xưng hô):** choose one pair per speaker → listener direction. **Evidence priority:** dialogue address terms/honorifics (especially family terms) > source-language register (pronouns, particles, politeness) > story/context > appearance. manga art is unreliable for age/relationship; use it only when stronger evidence is absent.
+        established_pair_priority = (
+            " an established pair (see the next two rules) >"
+            if context_memory_enabled
+            else " an established pair (see the next rule) >"
+        )
+        prior_page_pair_rule = (
+            """
+  - **A prior page's decided pair is the default, but correctable:** when no Story DB note covers this pair, keep reusing whatever pair an earlier page already settled on via `XƯNG HÔ:`/`PRONOUN MAP:`. Switch only when THIS page's dialogue has clearer, more decisive address-term evidence than whatever produced the earlier pair — not because the tone merely feels different — then keep using the corrected pair for the rest of the batch/story."""
+            if context_memory_enabled
+            else ""
+        )
+        vietnamese_pronoun_rule = f"""
+  - **Vietnamese Pronouns (xưng hô):** choose one pair per speaker → listener direction. **Evidence priority:**{established_pair_priority} dialogue address terms/honorifics (especially family terms) > source-language register (pronouns, particles, politeness) > story/context > appearance. manga art is unreliable for age/relationship; use it only when stronger evidence is absent.
+  - **Story DB address note is the default, hard to override:** if Story DB Relationships gives an address note for this pair, use it as-is. Deviate only when the dialogue itself marks a real relationship change (confession, falling-out, a new title) — a page simply reading more formal or more casual than another is never reason enough on its own.{prior_page_pair_rule}
   - **Family terms override visual guesses:** a family address term in the line (e.g. *onii-chan*, *onee-san*, *aniki*, *otouto*, *imouto*, bro/sis) establishes a sibling relationship for that pair; translate it with the appropriate Vietnamese kinship term.
   - **Choose by relationship and register:** casual peers/close friends → "tớ-cậu" or "mình-cậu"; rough/intimate speech → "tao-mày"; older/younger, partners, or siblings → the appropriate "anh/chị-em" or family terms. If unclear, default to "cậu"/"tớ", NOT "tôi"/"bạn"; reserve "tôi/bạn" for genuine strangers or clearly formal/business speech, and prefer casual over formal when guessing.
   - **Apply grammatically:** the speaker's term maps to "I/me", the listener's to "you"; use only roles present in the source line.
@@ -2242,7 +2254,7 @@ def _format_story_context(config: TranslationConfig) -> str:
             b = names_by_id.get(r.character_b_id, r.character_b_id)
             line = f"- {a} <-> {b}: {r.surface_relation}"
             if r.address_notes:
-                line += f" ({r.address_notes})"
+                line += f" — address as: {r.address_notes}"
             rel_lines.append(line)
         blocks.append("### Relationships\n" + "\n".join(rel_lines))
 

@@ -48,7 +48,7 @@ def test_relationships_section_resolves_character_ids_to_names():
     )
     prompt = _format_story_context(config)
     assert "### Relationships" in prompt
-    assert "- Aoi <-> Ren: rivals (by surname)" in prompt
+    assert "- Aoi <-> Ren: rivals — address as: by surname" in prompt
 
 
 def test_relationship_with_unknown_character_id_falls_back_to_the_raw_id():
