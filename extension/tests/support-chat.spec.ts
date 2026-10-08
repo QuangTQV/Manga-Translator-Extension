@@ -155,6 +155,41 @@ test.describe('popup — Help chat', () => {
     expect(await popup.evaluate(() => document.body.dataset.pwned)).toBeUndefined();
   });
 
+  test('a numbered list stays one continuous list across blank lines between items (real reply shape, repo owner\'s screenshot)', async ({ context, extensionId }) => {
+    // Each top-level numbered step followed by nested sub-bullets, then a
+    // blank line before the next numbered step — a common "loose list"
+    // shape in real LLM replies. Previously each blank line reset the
+    // renderer's list-tracking state entirely, so the next "1." started a
+    // brand new <ol> (restarting at 1) instead of continuing as "2.".
+    let [worker] = context.serviceWorkers();
+    if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 15_000 });
+    await seedSettings(worker, baseSeed(), firstKeyMatches('seed-key'));
+
+    const reply = [
+      '1. **Giảm dịch máy móc**',
+      '   - Trong **LLM Config**, có thể giảm **Reasoning Effort**.',
+      '',
+      '1. **Nếu đọc text từ ảnh local**',
+      '   - Với model text-only, chọn **Text reading**.',
+    ].join('\n');
+    await context.route('**/support-chat', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ reply }) });
+    });
+
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/index.html`);
+    await popup.locator('#btn-help-chat').click();
+    await popup.locator('#support-chat-input').fill('làm sao để bản dịch hay hơn');
+    await popup.locator('#btn-send-support-chat').click();
+
+    const answer = popup.locator('.support-chat-msg.assistant').last();
+    await expect(answer.locator('ol')).toHaveCount(1); // one continuous list, not two separate ones
+    const topLevelItems = answer.locator('ol > li');
+    await expect(topLevelItems).toHaveCount(2);
+    await expect(topLevelItems.first()).toContainText('Giảm dịch máy móc');
+    await expect(topLevelItems.last()).toContainText('Nếu đọc text từ ảnh local');
+  });
+
   test('the input textarea takes up most of the row, not squeezed by the Send button', async ({ context, extensionId }) => {
     // Regression check: #btn-send-support-chat reuses .btn-add-fallback
     // (defaults to width:100%) — an earlier version only set flex:0 0 auto

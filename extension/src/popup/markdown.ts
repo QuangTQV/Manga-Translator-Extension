@@ -87,7 +87,15 @@ export function renderMarkdown(source: string): DocumentFragment {
 
     if (!line.trim()) {
       flushParagraph();
-      lists = [];
+      // Don't drop list state here: a blank line between list items is a
+      // common "loose list" shape (especially from an LLM reply, each item
+      // followed by a blank line before the next), not necessarily the end
+      // of the list. If the next line turns out to be an unrelated list or
+      // a plain paragraph, the list-item/paragraph branches below already
+      // clear `lists` themselves when the indent/marker-type doesn't match
+      // or there's no list item at all — this only avoids starting a BRAND
+      // NEW <ol>/<ul> (which restarts numbering at 1) for what's really a
+      // continuation of the same list.
       continue;
     }
 
