@@ -778,6 +778,33 @@ function initPopupResize(): void {
   observer.observe(document.body);
 }
 
+// A soft highlight that follows the pointer across the tab bar/config cards
+// (see the matching .tabs::before/.config-section::after rules), like light
+// catching a curved glass surface where you're touching it. One listener per
+// surface rather than delegation — there are only ~8 of these (1 tabs bar +
+// a handful of config-section cards), so direct listeners stay simple
+// without meaningfully adding up. Coalesces same-frame moves into one write,
+// same reasoning as the resize handle's pointermove above.
+function initGlassSpotlight(): void {
+  document.querySelectorAll<HTMLElement>('.tabs, .config-section').forEach((surface) => {
+    let pending: { x: number; y: number } | null = null;
+    let frameQueued = false;
+    const apply = (): void => {
+      frameQueued = false;
+      if (!pending) return;
+      surface.style.setProperty('--spot-x', `${pending.x}px`);
+      surface.style.setProperty('--spot-y', `${pending.y}px`);
+    };
+    surface.addEventListener('pointermove', (event) => {
+      const rect = surface.getBoundingClientRect();
+      pending = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      if (frameQueued) return;
+      frameQueued = true;
+      requestAnimationFrame(apply);
+    });
+  });
+}
+
 // Let wheel/trackpad scrolling over small, nested scroll areas move the popup
 // itself while there is still page content to reveal. Otherwise a long
 // textarea or settings-results list can consume the first gesture, making the
@@ -874,6 +901,7 @@ async function init(): Promise<void> {
   initSettingsSearch();
   initSliders();
   initCollapsibleHints();
+  initGlassSpotlight();
   if (isStandaloneWindow) {
     initStandaloneWindow();
   } else {

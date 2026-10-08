@@ -640,6 +640,31 @@
       18% { opacity: .65; }
       100% { opacity: 0; transform: translateX(470%) skewX(-18deg); }
     }
+    /* Content scrolling under the sticky tab bar used to cut off hard
+       against it; this fades it out just before it gets there instead, like
+       it's dissolving into the glass — one of the more recognizable real
+       liquid-glass touches (iOS nav/tab bars do the same over scrolling
+       content). Anchored to .tabs itself (position: sticky already gives it
+       a positioning context) so it travels with the bar as it sticks. */
+    .tabs::after {
+      content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 22px;
+      background: linear-gradient(to bottom, rgba(9,13,24,0.85), transparent);
+      pointer-events: none;
+    }
+    /* A soft highlight that follows the pointer across the tab bar/config
+       cards (popup/index.ts:initGlassSpotlight sets --spot-x/--spot-y),
+       like light catching a curved glass surface where you're touching it.
+       Opacity-gated to :hover so touch/keyboard users never see a highlight
+       stuck mid-surface. */
+    .tabs::before, .config-section::after {
+      content: ''; position: absolute; inset: 0; border-radius: inherit;
+      background: radial-gradient(90px circle at var(--spot-x, 50%) var(--spot-y, 50%), rgba(255,255,255,0.09), transparent 70%);
+      filter: blur(16px);
+      opacity: 0; transition: opacity 260ms ease; pointer-events: none;
+    }
+    .tabs:hover::before, .config-section:hover::after {
+      opacity: 1;
+    }
     .config-section {
       position: relative;
       overflow: hidden;
