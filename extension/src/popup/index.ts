@@ -342,6 +342,40 @@ function initCollapsibleHints(): void {
     details.addEventListener('toggle', () => {
       if (details.open) refreshCollapsibleHints(details);
     });
+    initAdvancedSettingsAnimation(details);
+  });
+}
+
+// <details>/<summary> toggles natively with no way to transition the
+// content reveal — the one remaining fully-instant disclosure in this popup
+// (every other show/hide here animates by now). Intercepts the summary
+// click, drives `open` manually, and animates .advanced-settings-content's
+// max-height between 0 and its natural height — same measure-then-
+// transition idiom as animateHintTo() above, just needing `details.open`
+// flipped before measuring (closed content isn't rendered, so scrollHeight
+// would read 0 otherwise) and flipped back to false only once the closing
+// transition actually finishes, not immediately on click.
+function initAdvancedSettingsAnimation(details: HTMLDetailsElement): void {
+  const summary = details.querySelector('summary');
+  const content = details.querySelector<HTMLElement>('.advanced-settings-content');
+  if (!summary || !content) return;
+  summary.addEventListener('click', (event) => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; // let the native instant toggle happen
+    if (content.classList.contains('advanced-settings-animating')) return; // let an in-flight toggle finish untouched
+    event.preventDefault();
+    const opening = !details.open;
+    if (opening) details.open = true;
+    content.style.maxHeight = `${opening ? 0 : content.scrollHeight}px`;
+    content.classList.add('advanced-settings-animating');
+    void content.offsetHeight; // commit the start height before changing the target
+    content.style.maxHeight = opening ? `${content.scrollHeight}px` : '0px';
+    content.addEventListener('transitionend', function onEnd(e) {
+      if (e.target !== content || e.propertyName !== 'max-height') return;
+      content.removeEventListener('transitionend', onEnd);
+      content.classList.remove('advanced-settings-animating');
+      content.style.maxHeight = '';
+      if (!opening) details.open = false;
+    });
   });
 }
 
@@ -581,6 +615,9 @@ function initSettingsSearch(): void {
       if (!activeName || !matchingTabs.has(activeName)) activateTab(matchingTabs.values().next().value ?? 'translate');
       settingsSearchFeedback.textContent = t(uiLanguage, 'statusSettingsSearchCount', { count: totalMatches });
       results.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+      // Only animate the empty -> has-results transition (the dropdown's
+      // first appearance), not every further keystroke's re-render.
+      const wasEmpty = settingsSearchResults.children.length === 0;
       settingsSearchResults.replaceChildren(...results.slice(0, 12).map((result) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -596,6 +633,12 @@ function initSettingsSearch(): void {
         button.addEventListener('click', () => jumpToSetting(result.tabName, result.row));
         return button;
       }));
+      if (wasEmpty && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        settingsSearchResults.classList.add('results-enter');
+        settingsSearchResults.addEventListener('animationend', function onEnd() {
+          settingsSearchResults.classList.remove('results-enter');
+        }, { once: true });
+      }
     } else {
       // Keep navigation available for correction, but avoid leaving an empty
       // hidden-tab row after a query with no hits.
@@ -3476,7 +3519,19 @@ function openSupportChat(): void {
 }
 
 function closeSupportChat(): void {
+  // Open already animates in (support-chat-sheet-enter); close used to be
+  // an instant classList.remove with nothing to mirror it. Play the reverse
+  // keyframe (support-chat-sheet-exit) first, then actually drop `.open`
+  // once it's done — same shape as content-script's closeScanner(instant).
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !supportChatOverlay.classList.contains('open')) {
+    supportChatOverlay.classList.remove('open', 'closing');
+    return;
+  }
   supportChatOverlay.classList.remove('open');
+  supportChatOverlay.classList.add('closing');
+  window.setTimeout(() => {
+    supportChatOverlay.classList.remove('closing');
+  }, 200);
 }
 
 async function handleSupportChatClear(): Promise<void> {
