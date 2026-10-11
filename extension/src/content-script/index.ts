@@ -1400,28 +1400,29 @@ function scheduleAutoTranslateMutationFlush(): void {
 
 // The periodic DOM rescan (fallback for lazy-loaders that swap an existing
 // <img>'s src/data-src attribute in place, which the MutationObserver above
-// — watching childList/subtree, not attributes — doesn't catch) has nothing
-// useful to look at while the tab isn't visible: nothing the reader isn't
-// looking at can lazy-load via scroll, and any already-queued/in-flight
-// translation keeps running regardless (processAutoTranslateQueue is a
-// self-sustaining loop, not gated by this timer). Slow it down instead of
-// fully stopping it, so a site's own background JS inserting/swapping images
-// while hidden still gets picked up within half a minute rather than only on
-// return — and do an immediate scan on return either way to catch up fast.
+// — watching childList/subtree, not attributes — doesn't catch). Any
+// already-queued/in-flight translation keeps running regardless
+// (processAutoTranslateQueue is a self-sustaining loop, not gated by this
+// timer) — this interval only controls how fast a newly swapped-in image
+// gets *noticed*. Used to slow to 25s while the tab was hidden (CPU/battery
+// tradeoff), but that meant a page someone left translating in a background
+// tab could sit undetected for up to 25s after a site lazy-swapped a new
+// image — owner asked to keep the same cadence regardless of visibility.
 const AUTO_PERIODIC_SCAN_INTERVAL_MS = 4000;
-const AUTO_PERIODIC_SCAN_INTERVAL_HIDDEN_MS = 25000;
 
 function restartAutoTranslatePeriodicTimer(): void {
   if (autoTranslatePeriodicTimer !== undefined) {
     window.clearInterval(autoTranslatePeriodicTimer);
   }
-  const interval = document.hidden ? AUTO_PERIODIC_SCAN_INTERVAL_HIDDEN_MS : AUTO_PERIODIC_SCAN_INTERVAL_MS;
-  autoTranslatePeriodicTimer = window.setInterval(scheduleAutoTranslateScan, interval);
+  autoTranslatePeriodicTimer = window.setInterval(scheduleAutoTranslateScan, AUTO_PERIODIC_SCAN_INTERVAL_MS);
 }
 
 function handleAutoTranslateVisibilityChange(): void {
   if (!autoTranslateActive) return;
-  restartAutoTranslatePeriodicTimer();
+  // The interval itself no longer depends on visibility, so this doesn't
+  // need to restart the timer — only do an immediate catch-up scan right
+  // when the tab becomes visible again, rather than waiting for the next
+  // tick.
   if (!document.hidden) scheduleAutoTranslateScan();
 }
 
