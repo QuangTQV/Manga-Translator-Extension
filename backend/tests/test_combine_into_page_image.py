@@ -160,9 +160,22 @@ def test_combined_page_resolution_auto_raises_for_dense_small_text():
     assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 1536
 
 
+def test_combined_page_resolution_auto_uses_a_middle_rung_for_moderately_dense_tiny_text():
+    # smallest_typical_region=30 on a 3000px longest side -> required_side=3000,
+    # which lands between the old 2560 ceiling and the new 4096 one — exercises
+    # an intermediate rung rather than jumping straight to the top.
+    regions = [{"bbox": (i * 35, 100, i * 35 + 35, 130)} for i in range(40)]
+    assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 3072
+
+
 def test_combined_page_resolution_auto_uses_highest_bound_for_tiny_regions():
+    # A real-world shape that reproduced garbled output: dozens of very
+    # small, densely packed regions (an RPG-style status window's label/
+    # value grid) computed required_side well above the old 2560 ceiling
+    # (4500 here) — the ladder used to silently clamp back down to 2560,
+    # well under the formula's own 30px-per-region legibility target.
     regions = [{"bbox": (i * 20, 100, i * 20 + 20, 120)} for i in range(60)]
-    assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 2560
+    assert _resolve_combined_page_image_max_side((2000, 3000), regions, "auto") == 4096
 
 
 def test_combined_page_resolution_auto_falls_back_without_valid_boxes():

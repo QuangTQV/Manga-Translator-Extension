@@ -535,10 +535,17 @@ def _resolve_combined_page_image_max_side(
     required_side = 30 * longest_side / smallest_typical_region
     region_count_floor = 2048 if len(short_sides) >= 60 else 1536 if len(short_sides) >= 35 else 1024
     target = max(required_side, region_count_floor)
-    for preset in (1024, 1536, 2048, 2560):
+    # Ladder used to stop at 2560 ("high"), silently clamping required_side
+    # below the formula's own 30px target for dense pages with many tiny
+    # regions (e.g. an RPG-style status window: dozens of short label/value
+    # cells packed into one page) — reported as garbled/misassigned output
+    # on exactly that page shape. Extended to match "legacy"'s existing
+    # 4096 ceiling above, so Auto never clamps to less resolution than the
+    # manual numeric setting already allows.
+    for preset in (1024, 1536, 2048, 2560, 3072, 3584, 4096):
         if preset >= target:
             return preset
-    return 2560
+    return 4096
 
 
 def _normalize_debug_mask(mask, image_size):
