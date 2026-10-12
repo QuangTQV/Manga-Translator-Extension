@@ -96,3 +96,47 @@ def test_invalid_translation_restores_original_pixels_instead_of_a_blank_hole(mo
     result_crop = np.array(result.crop((x1, y1, x2, y2)))
     # Restored to the real pre-cleaning pixels, not left blank/white.
     assert np.array_equal(original_crop, result_crop)
+
+
+@pytest.mark.skipif(not any(YOLO_DIR.glob("*.pt")), reason="needs the YOLO weights")
+def test_whitespace_only_translation_restores_original_pixels_instead_of_a_blank_bubble(monkeypatch):
+    # A provider occasionally returns a technically-successful but
+    # whitespace-only string (" ", "\n") rather than an empty string or a
+    # recognized error marker — `not text` is False for these (non-empty
+    # string), so this used to slip past is_invalid_translation entirely,
+    # reach rendering, and render_text_skia would collapse it to "" and
+    # silently return the untouched (already-cleaned/blank) image, which
+    # pipeline.py's success flag then treated as a successful render — a
+    # bubble left blank/white with no error and no restore.
+    page_bytes = _two_bubble_page()
+    image_b64 = base64.b64encode(page_bytes).decode()
+
+    def fake_batch_all_ok(config, images_b64, *args, **kwargs):
+        return ["Hello!"] * len(images_b64)
+
+    monkeypatch.setattr(pipeline, "call_translation_api_batch", fake_batch_all_ok)
+    baseline = client.post("/translate", json={**OPTS, "api_key": "k", "image": image_b64})
+    assert baseline.status_code == 200, baseline.text
+    bubbles = baseline.json()["bubbles"]
+    assert len(bubbles) == 2
+    target_bbox = bubbles[0]["bbox"]
+
+    def fake_batch_first_whitespace(config, images_b64, *args, **kwargs):
+        texts = ["Hello!"] * len(images_b64)
+        texts[0] = "  \n  "
+        return texts
+
+    monkeypatch.setattr(pipeline, "call_translation_api_batch", fake_batch_first_whitespace)
+    resp = client.post("/translate", json={**OPTS, "api_key": "k", "image": image_b64})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    assert not any(tuple(b["bbox"]) == tuple(target_bbox) for b in data["bubbles"])
+    assert len(data["bubbles"]) == 1
+
+    original = Image.open(io.BytesIO(page_bytes)).convert("RGB")
+    result = Image.open(io.BytesIO(base64.b64decode(data["translated_image"]))).convert("RGB")
+    x1, y1, x2, y2 = (int(round(v)) for v in target_bbox)
+    original_crop = np.array(original.crop((x1, y1, x2, y2)))
+    result_crop = np.array(result.crop((x1, y1, x2, y2)))
+    assert np.array_equal(original_crop, result_crop)

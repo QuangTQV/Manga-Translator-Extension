@@ -106,7 +106,14 @@ def render_text_skia(
 
     clean_text = " ".join(normalized_text.split())
     if not clean_text:
-        return pil_image
+        # Silently returning the untouched (already-cleaned/inpainted) image
+        # here used to leave a blank bubble with no signal anything went
+        # wrong — pipeline.py's success flag only looks at whether this
+        # function raised, not whether it actually drew anything, so a
+        # whitespace-only string fell through as a "successful" no-op
+        # render. Raising lets the existing RenderingError handling restore
+        # the original pre-cleaning pixels instead.
+        raise RenderingError("Translated text is empty after normalization")
 
     # Prepare text for layout (vertical stacking removes whitespace to stay single-column)
     if vertical_stack:
@@ -194,11 +201,13 @@ def render_text_skia(
         layout_text, str(regular_font_path), verbose=verbose
     )
     if not layout_text.strip():
-        log_message(
-            "All text characters unsupported by font, skipping render",
-            always_print=True,
+        # Same reasoning as the empty-text check above: raise instead of
+        # silently returning the untouched image, so this counts as a real
+        # render failure and restores the original pixels rather than
+        # leaving a blank bubble.
+        raise RenderingError(
+            "All text characters unsupported by the configured font"
         )
-        return pil_image
 
     try:
         _, regular_typeface, regular_hb_face = load_font_resources(

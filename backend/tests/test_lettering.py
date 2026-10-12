@@ -13,6 +13,7 @@ import main
 from core.config import RenderingConfig
 from core.text.text_renderer import render_text_skia
 from pipeline.wrapper import _hex_to_rgb
+from utils.exceptions import RenderingError
 
 client = TestClient(main.app, raise_server_exceptions=False)
 FONT_DIR = "fonts/Roboto"
@@ -117,3 +118,21 @@ def test_invalid_lettering_values_are_rejected(field, value):
         "text": "x", field: value,
     })
     assert resp.status_code == 422
+
+
+# Both used to silently return the input image unchanged on these inputs
+# (pipeline.py's success flag only checks whether render_text_skia raised,
+# not whether it actually drew anything) — a bubble already whited-out by
+# cleaning, handed a result that "succeeded" at drawing nothing, stayed
+# blank with no error and no original-pixel restore. Raising instead lets
+# the pipeline's existing RenderingError handling restore the original
+# crop, same as any other render failure.
+def test_whitespace_only_text_raises_instead_of_silently_rendering_nothing():
+    with pytest.raises(RenderingError):
+        _render("   \n  ")
+
+
+def test_text_entirely_unsupported_by_the_font_raises_instead_of_silently_rendering_nothing():
+    # Roboto (the bundled font here) has no Hiragana glyphs.
+    with pytest.raises(RenderingError):
+        _render("あ")

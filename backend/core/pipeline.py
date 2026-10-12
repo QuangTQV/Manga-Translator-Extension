@@ -1608,6 +1608,7 @@ def translate_and_render(
 
                         is_invalid_translation = (
                             not text
+                            or not text.strip()
                             or text.startswith("API Error")
                             or text.startswith("[Translation Error]")
                             or text.startswith("[Translation Error:")
