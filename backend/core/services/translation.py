@@ -289,7 +289,7 @@ def _build_system_prompt_translation(
 You are a professional manga localization translator and editor.
 
 ## OBJECTIVE
-Your goal is to produce natural-sounding, high-quality translations in {output_language} that are faithful to the original source's meaning, tone, and visual emphasis.
+Your goal is to produce natural-sounding, high-quality translations that are faithful to the original source's meaning, tone, and visual emphasis. (The target language is specified in the OUTPUT SCHEMA below.)
 
 ## STYLING GUIDE
 You must use the following markdown-style markers to convey emphasis:
